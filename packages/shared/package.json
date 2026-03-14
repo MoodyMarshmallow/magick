@@ -1,0 +1,5 @@
+{
+  "name": "@magick/shared",
+  "private": true,
+  "type": "module"
+}

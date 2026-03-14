@@ -1,0 +1,5 @@
+{
+  "name": "@magick/server",
+  "private": true,
+  "type": "module"
+}
