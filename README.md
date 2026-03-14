@@ -1,0 +1,2 @@
+# Magick
+- ChatGPT but better.
