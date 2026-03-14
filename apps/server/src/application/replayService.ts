@@ -1,30 +1,48 @@
-import type { DomainEvent } from "../../../../packages/contracts/src/chat";
-import { MagickError } from "../../../../packages/shared/src/errors";
-import type { EventStore } from "../persistence/eventStore";
-import type { ThreadRepository } from "../persistence/threadRepository";
+import { Context, Effect, Layer } from "effect";
 
-export class ReplayService {
-  readonly #eventStore: EventStore;
-  readonly #threadRepository: ThreadRepository;
+import type {
+  DomainEvent,
+  ThreadViewModel,
+} from "../../../../packages/contracts/src/chat";
+import type { BackendError } from "../effect/errors";
+import { NotFoundError } from "../effect/errors";
+import { EventStore } from "../persistence/eventStore";
+import { ThreadRepository } from "../persistence/threadRepository";
 
-  constructor(eventStore: EventStore, threadRepository: ThreadRepository) {
-    this.#eventStore = eventStore;
-    this.#threadRepository = threadRepository;
-  }
-
-  getThreadState(threadId: string) {
-    const snapshot = this.#threadRepository.getSnapshot(threadId);
-    if (!snapshot) {
-      throw new MagickError(
-        "thread_not_found",
-        `Unknown thread '${threadId}'.`,
-      );
-    }
-
-    return snapshot;
-  }
-
-  replayThread(threadId: string, afterSequence = 0): readonly DomainEvent[] {
-    return this.#eventStore.listThreadEvents(threadId, afterSequence);
-  }
+export interface ReplayServiceApi {
+  readonly getThreadState: (
+    threadId: string,
+  ) => Effect.Effect<ThreadViewModel, BackendError>;
+  readonly replayThread: (
+    threadId: string,
+    afterSequence?: number,
+  ) => Effect.Effect<readonly DomainEvent[], BackendError>;
 }
+
+export const ReplayService = Context.GenericTag<ReplayServiceApi>(
+  "@magick/ReplayService",
+);
+
+export const ReplayServiceLive = Layer.effect(
+  ReplayService,
+  Effect.gen(function* () {
+    const eventStore = yield* EventStore;
+    const threadRepository = yield* ThreadRepository;
+
+    return {
+      getThreadState: (threadId: string) =>
+        Effect.gen(function* () {
+          const snapshot = yield* threadRepository.getSnapshot(threadId);
+          if (!snapshot) {
+            return yield* Effect.fail(
+              new NotFoundError({ entity: "thread", id: threadId }),
+            );
+          }
+
+          return snapshot;
+        }),
+      replayThread: (threadId: string, afterSequence = 0) =>
+        eventStore.listThreadEvents(threadId, afterSequence),
+    } satisfies ReplayServiceApi;
+  }),
+);

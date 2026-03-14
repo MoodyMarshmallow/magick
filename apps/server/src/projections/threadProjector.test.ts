@@ -1,4 +1,4 @@
-import { projectThreadEvents } from "../src/projections/threadProjector";
+import { projectThreadEvents } from "./threadProjector";
 
 describe("projectThreadEvents", () => {
   it("builds a thread view model from sequenced events", () => {

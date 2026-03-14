@@ -1,5 +1,7 @@
 import type { Server } from "node:http";
 
+import { Cause, Effect, Exit, Option } from "effect";
+import type * as ManagedRuntime from "effect/ManagedRuntime";
 import { type WebSocket, WebSocketServer } from "ws";
 
 import type { DomainEvent } from "../../../../packages/contracts/src/chat";
@@ -7,14 +9,17 @@ import type {
   CommandEnvelope,
   CommandResponseEnvelope,
 } from "../../../../packages/contracts/src/ws";
-import {
-  MagickError,
-  toErrorMessage,
-} from "../../../../packages/shared/src/errors";
 import { createId } from "../../../../packages/shared/src/id";
-import type { ReplayService } from "../application/replayService";
-import type { ThreadOrchestrator } from "../application/threadOrchestrator";
-import type { EventPublisher } from "../providers/providerTypes";
+import {
+  ReplayService,
+  type ReplayServiceApi,
+} from "../application/replayService";
+import {
+  ThreadOrchestrator,
+  type ThreadOrchestratorApi,
+} from "../application/threadOrchestrator";
+import type { BackendError } from "../effect/errors";
+import { backendErrorCode, backendErrorMessage } from "../effect/errors";
 import { ConnectionRegistry, type PushConnection } from "./connectionRegistry";
 
 class WsPushConnection implements PushConnection {
@@ -31,20 +36,19 @@ class WsPushConnection implements PushConnection {
   }
 }
 
-export class WebSocketCommandServer implements EventPublisher {
-  readonly #orchestrator: ThreadOrchestrator;
-  readonly #replayService: ReplayService;
+type TransportRuntime = ReplayServiceApi | ThreadOrchestratorApi;
+
+export class WebSocketCommandServer {
   readonly #connections: ConnectionRegistry;
+  readonly #runtime: ManagedRuntime.ManagedRuntime<TransportRuntime, never>;
   readonly #server: WebSocketServer;
 
   constructor(args: {
     httpServer: Server;
-    orchestrator: ThreadOrchestrator;
-    replayService: ReplayService;
+    runtime: ManagedRuntime.ManagedRuntime<TransportRuntime, never>;
     connections?: ConnectionRegistry;
   }) {
-    this.#orchestrator = args.orchestrator;
-    this.#replayService = args.replayService;
+    this.#runtime = args.runtime;
     this.#connections = args.connections ?? new ConnectionRegistry();
     this.#server = new WebSocketServer({ server: args.httpServer });
     this.#server.on("connection", (socket) => {
@@ -72,7 +76,7 @@ export class WebSocketCommandServer implements EventPublisher {
               ok: false,
               error: {
                 code: "invalid_request",
-                message: toErrorMessage(error),
+                message: error instanceof Error ? error.message : String(error),
               },
             },
           };
@@ -102,155 +106,183 @@ export class WebSocketCommandServer implements EventPublisher {
     envelope: CommandEnvelope,
     connectionId: string,
   ): Promise<CommandResponseEnvelope> {
-    try {
-      const result = await (async () => {
-        switch (envelope.command.type) {
-          case "app.bootstrap": {
-            const summaries = this.#orchestrator.listThreads(
-              envelope.command.payload.workspaceId,
-            );
-            const activeThread = envelope.command.payload.threadId
-              ? this.#orchestrator.openThread(envelope.command.payload.threadId)
-              : null;
-            if (envelope.command.payload.threadId) {
-              this.#connections.subscribeThread(
-                connectionId,
-                envelope.command.payload.threadId,
-              );
-            }
+    const connections = this.#connections;
+    const program = Effect.gen(function* () {
+      const orchestrator = yield* ThreadOrchestrator;
+      const replayService = yield* ReplayService;
 
-            return {
+      switch (envelope.command.type) {
+        case "app.bootstrap": {
+          const threadSummaries = yield* orchestrator.listThreads(
+            envelope.command.payload.workspaceId,
+          );
+          const activeThread = envelope.command.payload.threadId
+            ? yield* orchestrator.openThread(envelope.command.payload.threadId)
+            : null;
+
+          if (envelope.command.payload.threadId) {
+            connections.subscribeThread(
+              connectionId,
+              envelope.command.payload.threadId,
+            );
+          }
+
+          return {
+            requestId: envelope.requestId,
+            result: {
               ok: true as const,
               data: {
                 kind: "bootstrap" as const,
-                threadSummaries: summaries,
+                threadSummaries,
                 activeThread,
                 capabilities: null,
               },
-            };
-          }
-          case "thread.list":
-            return {
+            },
+          } satisfies CommandResponseEnvelope;
+        }
+        case "thread.list":
+          return {
+            requestId: envelope.requestId,
+            result: {
               ok: true as const,
               data: {
                 kind: "threadList" as const,
-                threadSummaries: this.#orchestrator.listThreads(
+                threadSummaries: yield* orchestrator.listThreads(
                   envelope.command.payload.workspaceId,
                 ),
               },
-            };
-          case "thread.create": {
-            const thread = await this.#orchestrator.createThread(
-              envelope.command.payload,
-            );
-            this.#connections.subscribeThread(connectionId, thread.threadId);
-            return {
+            },
+          } satisfies CommandResponseEnvelope;
+        case "thread.create": {
+          const thread = yield* orchestrator.createThread(
+            envelope.command.payload,
+          );
+          connections.subscribeThread(connectionId, thread.threadId);
+          return {
+            requestId: envelope.requestId,
+            result: {
               ok: true as const,
               data: {
                 kind: "threadState" as const,
                 thread,
               },
-            };
-          }
-          case "thread.open": {
-            const thread = this.#orchestrator.openThread(
-              envelope.command.payload.threadId,
-            );
-            this.#connections.subscribeThread(connectionId, thread.threadId);
-            return {
+            },
+          } satisfies CommandResponseEnvelope;
+        }
+        case "thread.open": {
+          const thread = yield* orchestrator.openThread(
+            envelope.command.payload.threadId,
+          );
+          connections.subscribeThread(connectionId, thread.threadId);
+          return {
+            requestId: envelope.requestId,
+            result: {
               ok: true as const,
               data: {
                 kind: "threadState" as const,
                 thread,
               },
-            };
-          }
-          case "thread.sendMessage": {
-            this.#connections.subscribeThread(
-              connectionId,
-              envelope.command.payload.threadId,
-            );
-            await this.#orchestrator.sendMessage(
-              envelope.command.payload.threadId,
-              envelope.command.payload.content,
-            );
-            return {
+            },
+          } satisfies CommandResponseEnvelope;
+        }
+        case "thread.sendMessage":
+          connections.subscribeThread(
+            connectionId,
+            envelope.command.payload.threadId,
+          );
+          yield* orchestrator.sendMessage(
+            envelope.command.payload.threadId,
+            envelope.command.payload.content,
+          );
+          return {
+            requestId: envelope.requestId,
+            result: {
               ok: true as const,
               data: {
                 kind: "accepted" as const,
                 threadId: envelope.command.payload.threadId,
               },
-            };
-          }
-          case "thread.stopTurn": {
-            const thread = await this.#orchestrator.stopTurn(
-              envelope.command.payload.threadId,
-            );
-            return {
+            },
+          } satisfies CommandResponseEnvelope;
+        case "thread.stopTurn": {
+          const thread = yield* orchestrator.stopTurn(
+            envelope.command.payload.threadId,
+          );
+          return {
+            requestId: envelope.requestId,
+            result: {
               ok: true as const,
               data: {
                 kind: "threadState" as const,
                 thread,
               },
-            };
-          }
-          case "thread.retryTurn": {
-            await this.#orchestrator.retryTurn(
-              envelope.command.payload.threadId,
-            );
-            return {
+            },
+          } satisfies CommandResponseEnvelope;
+        }
+        case "thread.retryTurn":
+          yield* orchestrator.retryTurn(envelope.command.payload.threadId);
+          return {
+            requestId: envelope.requestId,
+            result: {
               ok: true as const,
               data: {
                 kind: "accepted" as const,
                 threadId: envelope.command.payload.threadId,
               },
-            };
-          }
-          case "thread.resume": {
-            this.#connections.subscribeThread(
-              connectionId,
-              envelope.command.payload.threadId,
-            );
-            const thread = await this.#orchestrator.ensureSession(
-              envelope.command.payload.threadId,
-            );
-            const replayedEvents = await this.#replayService.replayThread(
-              envelope.command.payload.threadId,
-              envelope.command.payload.afterSequence ?? 0,
-            );
+            },
+          } satisfies CommandResponseEnvelope;
+        case "thread.resume": {
+          connections.subscribeThread(
+            connectionId,
+            envelope.command.payload.threadId,
+          );
+          const thread = yield* orchestrator.ensureSession(
+            envelope.command.payload.threadId,
+          );
+          const replayedEvents = yield* replayService.replayThread(
+            envelope.command.payload.threadId,
+            envelope.command.payload.afterSequence ?? 0,
+          );
 
-            return {
+          return {
+            requestId: envelope.requestId,
+            result: {
               ok: true as const,
               data: {
                 kind: "threadState" as const,
                 thread,
                 replayedEvents,
               },
-            };
-          }
+            },
+          } satisfies CommandResponseEnvelope;
         }
-      })();
+      }
+    });
 
-      return {
-        requestId: envelope.requestId,
-        result,
-      };
-    } catch (error) {
-      const magickError =
-        error instanceof MagickError
-          ? error
-          : new MagickError("internal_error", toErrorMessage(error));
+    return this.#runtime.runPromiseExit(program).then((exit) => {
+      if (Exit.isSuccess(exit)) {
+        return exit.value;
+      }
+
+      const failure = Cause.failureOption(exit.cause);
+      const backendError = Option.isSome(failure)
+        ? (failure.value as BackendError)
+        : ({
+            _tag: "ReplayError",
+            threadId: "unknown",
+            detail: "Unhandled runtime failure",
+          } as BackendError);
 
       return {
         requestId: envelope.requestId,
         result: {
           ok: false,
           error: {
-            code: magickError.code,
-            message: magickError.message,
+            code: backendErrorCode(backendError),
+            message: backendErrorMessage(backendError),
           },
         },
-      };
-    }
+      } satisfies CommandResponseEnvelope;
+    });
   }
 }

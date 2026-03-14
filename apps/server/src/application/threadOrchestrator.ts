@@ -1,3 +1,5 @@
+import { Context, Effect, Layer, Stream } from "effect";
+
 import type {
   DomainEvent,
   ThreadRecord,
@@ -6,25 +8,30 @@ import type {
 } from "../../../../packages/contracts/src/chat";
 import type { ProviderSessionRecord } from "../../../../packages/contracts/src/provider";
 import {
-  MagickError,
-  toErrorMessage,
-} from "../../../../packages/shared/src/errors";
-import { createId } from "../../../../packages/shared/src/id";
-import { nowIso } from "../../../../packages/shared/src/time";
-import type { EventStore } from "../persistence/eventStore";
-import type { ProviderSessionRepository } from "../persistence/providerSessionRepository";
-import type { ThreadRepository } from "../persistence/threadRepository";
+  type BackendError,
+  InvalidStateError,
+  NotFoundError,
+  backendErrorMessage,
+} from "../effect/errors";
+import {
+  Clock,
+  EventPublisher,
+  IdGenerator,
+  RuntimeState,
+} from "../effect/runtime";
+import { EventStore } from "../persistence/eventStore";
+import { ProviderSessionRepository } from "../persistence/providerSessionRepository";
+import { ThreadRepository } from "../persistence/threadRepository";
 import {
   projectThreadEvents,
   toThreadSummary,
 } from "../projections/threadProjector";
-import type {
-  ConversationContextMessage,
-  EventPublisher,
-  ProviderEvent,
-  ProviderSessionRuntime,
+import {
+  type ConversationContextMessage,
+  type ProviderEvent,
+  ProviderRegistry,
+  type ProviderSessionRuntime,
 } from "../providers/providerTypes";
-import type { ProviderRegistry } from "./providerRegistry";
 
 export interface CreateThreadInput {
   readonly workspaceId: string;
@@ -32,450 +39,462 @@ export interface CreateThreadInput {
   readonly title?: string;
 }
 
-export class ThreadOrchestrator {
-  readonly #providerRegistry: ProviderRegistry;
-  readonly #eventStore: EventStore;
-  readonly #threadRepository: ThreadRepository;
-  readonly #providerSessionRepository: ProviderSessionRepository;
-  readonly #publisher: EventPublisher;
-  readonly #sessionRuntimeCache = new Map<string, ProviderSessionRuntime>();
-  readonly #activeTurns = new Map<
-    string,
-    {
-      turnId: string;
-      sessionId: string;
-    }
-  >();
-
-  constructor(args: {
-    providerRegistry: ProviderRegistry;
-    eventStore: EventStore;
-    threadRepository: ThreadRepository;
-    providerSessionRepository: ProviderSessionRepository;
-    publisher: EventPublisher;
-  }) {
-    this.#providerRegistry = args.providerRegistry;
-    this.#eventStore = args.eventStore;
-    this.#threadRepository = args.threadRepository;
-    this.#providerSessionRepository = args.providerSessionRepository;
-    this.#publisher = args.publisher;
-  }
-
-  async createThread(input: CreateThreadInput): Promise<ThreadViewModel> {
-    const adapter = this.#providerRegistry.get(input.providerKey);
-    const now = nowIso();
-    const providerSessionId = createId("session");
-    const threadId = createId("thread");
-
-    const sessionRecord: ProviderSessionRecord = {
-      id: providerSessionId,
-      providerKey: input.providerKey,
-      workspaceId: input.workspaceId,
-      status: "active",
-      providerSessionRef: null,
-      providerThreadRef: null,
-      capabilities: adapter.listCapabilities(),
-      createdAt: now,
-      updatedAt: now,
-    };
-    this.#providerSessionRepository.create(sessionRecord);
-
-    const threadRecord: ThreadRecord = {
-      id: threadId,
-      workspaceId: input.workspaceId,
-      providerKey: input.providerKey,
-      providerSessionId,
-      title: input.title ?? "New chat",
-      createdAt: now,
-      updatedAt: now,
-    };
-    this.#threadRepository.create(threadRecord);
-
-    const events = this.#persistAndProject(threadId, [
-      {
-        eventId: createId("event"),
-        threadId,
-        providerSessionId,
-        occurredAt: now,
-        type: "thread.created",
-        payload: {
-          workspaceId: input.workspaceId,
-          providerKey: input.providerKey,
-          title: threadRecord.title,
-        },
-      },
-      {
-        eventId: createId("event"),
-        threadId,
-        providerSessionId,
-        occurredAt: now,
-        type: "provider.session.started",
-        payload: {
-          providerKey: input.providerKey,
-          resumeStrategy: adapter.getResumeStrategy(),
-        },
-      },
-    ]);
-
-    return events.thread;
-  }
-
-  listThreads(workspaceId: string): readonly ThreadSummary[] {
-    return this.#threadRepository.listByWorkspace(workspaceId);
-  }
-
-  openThread(threadId: string): ThreadViewModel {
-    const snapshot = this.#threadRepository.getSnapshot(threadId);
-    if (!snapshot) {
-      throw new MagickError(
-        "thread_not_found",
-        `Unknown thread '${threadId}'.`,
-      );
-    }
-
-    return snapshot;
-  }
-
-  async sendMessage(
+export interface ThreadOrchestratorApi {
+  readonly createThread: (
+    input: CreateThreadInput,
+  ) => Effect.Effect<ThreadViewModel, BackendError>;
+  readonly listThreads: (
+    workspaceId: string,
+  ) => Effect.Effect<readonly ThreadSummary[], BackendError>;
+  readonly openThread: (
+    threadId: string,
+  ) => Effect.Effect<ThreadViewModel, BackendError>;
+  readonly sendMessage: (
     threadId: string,
     content: string,
-  ): Promise<ThreadViewModel> {
-    const thread = this.#requireThread(threadId);
-    const snapshot = this.#threadRepository.getSnapshot(threadId);
-    if (!snapshot) {
-      throw new MagickError(
-        "thread_state_missing",
-        `Thread '${threadId}' has no snapshot.`,
-      );
-    }
+  ) => Effect.Effect<ThreadViewModel, BackendError>;
+  readonly stopTurn: (
+    threadId: string,
+  ) => Effect.Effect<ThreadViewModel, BackendError>;
+  readonly retryTurn: (
+    threadId: string,
+  ) => Effect.Effect<ThreadViewModel, BackendError>;
+  readonly ensureSession: (
+    threadId: string,
+  ) => Effect.Effect<ThreadViewModel, BackendError>;
+}
 
-    if (snapshot.activeTurnId || this.#activeTurns.has(threadId)) {
-      throw new MagickError(
-        "turn_already_running",
-        `Thread '${threadId}' already has an active turn.`,
-      );
-    }
+export const ThreadOrchestrator = Context.GenericTag<ThreadOrchestratorApi>(
+  "@magick/ThreadOrchestrator",
+);
 
-    const runtime = await this.#getOrCreateSessionRuntime(thread);
-    const userEventId = createId("event");
-    const turnId = createId("turn");
-    const assistantMessageId = createId("message");
-    const now = nowIso();
+export const ThreadOrchestratorLive = Layer.effect(
+  ThreadOrchestrator,
+  Effect.gen(function* () {
+    const providerRegistry = yield* ProviderRegistry;
+    const eventStore = yield* EventStore;
+    const threadRepository = yield* ThreadRepository;
+    const providerSessionRepository = yield* ProviderSessionRepository;
+    const publisher = yield* EventPublisher;
+    const runtimeState = yield* RuntimeState;
+    const clock = yield* Clock;
+    const idGenerator = yield* IdGenerator;
 
-    const prelude = this.#persistAndProject(threadId, [
-      {
-        eventId: userEventId,
-        threadId,
-        providerSessionId: thread.providerSessionId,
-        occurredAt: now,
-        type: "message.user.created",
-        payload: {
-          messageId: createId("message"),
-          content,
-        },
-      },
-      {
-        eventId: createId("event"),
-        threadId,
-        providerSessionId: thread.providerSessionId,
-        occurredAt: now,
-        type: "turn.started",
-        payload: {
-          turnId,
-          parentTurnId: snapshot.activeTurnId,
-        },
-      },
-    ]);
+    const requireThread = (threadId: string) =>
+      Effect.gen(function* () {
+        const thread = yield* threadRepository.get(threadId);
+        if (!thread) {
+          return yield* Effect.fail(
+            new NotFoundError({ entity: "thread", id: threadId }),
+          );
+        }
 
-    this.#activeTurns.set(threadId, {
-      turnId,
-      sessionId: runtime.recordId,
-    });
-
-    try {
-      const turnHandle = await runtime.session.startTurn({
-        threadId,
-        turnId,
-        messageId: assistantMessageId,
-        userMessage: content,
-        contextMessages: this.#buildContextMessages(prelude.thread),
+        return thread;
       });
 
-      for await (const providerEvent of turnHandle.events()) {
-        const projection = this.#applyProviderEvent(
-          threadId,
-          thread.providerSessionId,
-          providerEvent,
+    const openThread = (threadId: string) =>
+      Effect.gen(function* () {
+        const snapshot = yield* threadRepository.getSnapshot(threadId);
+        if (!snapshot) {
+          return yield* Effect.fail(
+            new NotFoundError({ entity: "thread", id: threadId }),
+          );
+        }
+
+        return snapshot;
+      });
+
+    const buildContextMessages = (
+      thread: ThreadViewModel,
+    ): readonly ConversationContextMessage[] => {
+      return thread.messages.map((message) => ({
+        role: message.role,
+        content: message.content,
+      }));
+    };
+
+    const persistAndProject = (
+      threadId: string,
+      events: readonly Omit<DomainEvent, "sequence">[],
+    ) =>
+      Effect.gen(function* () {
+        const persistedEvents = yield* eventStore.append(threadId, events);
+        const projectedThread = projectThreadEvents(
+          yield* threadRepository.getSnapshot(threadId),
+          persistedEvents,
         );
 
-        if (projection.thread.status !== "running") {
-          this.#activeTurns.delete(threadId);
-        }
-      }
-    } catch (error) {
-      const providerError = runtime.adapter.normalizeError(error);
-      this.#persistAndProject(threadId, [
-        {
-          eventId: createId("event"),
+        yield* threadRepository.saveSnapshot(
           threadId,
-          providerSessionId: thread.providerSessionId,
-          occurredAt: nowIso(),
-          type: "turn.failed",
-          payload: {
-            turnId,
-            error: providerError.message,
+          toThreadSummary(projectedThread),
+          projectedThread,
+        );
+
+        yield* publisher
+          .publish(persistedEvents)
+          .pipe(Effect.catchAllCause(() => Effect.void));
+
+        return {
+          events: persistedEvents,
+          thread: projectedThread,
+        } as const;
+      });
+
+    const applyProviderEvent = (
+      threadId: string,
+      providerSessionId: string,
+      providerEvent: ProviderEvent,
+    ) => {
+      switch (providerEvent.type) {
+        case "output.delta":
+          return persistAndProject(threadId, [
+            {
+              eventId: idGenerator.next("event"),
+              threadId,
+              providerSessionId,
+              occurredAt: clock.now(),
+              type: "turn.delta",
+              payload: {
+                turnId: providerEvent.turnId,
+                messageId: providerEvent.messageId,
+                delta: providerEvent.delta,
+              },
+            },
+          ]);
+        case "output.completed":
+          return persistAndProject(threadId, [
+            {
+              eventId: idGenerator.next("event"),
+              threadId,
+              providerSessionId,
+              occurredAt: clock.now(),
+              type: "turn.completed",
+              payload: {
+                turnId: providerEvent.turnId,
+                messageId: providerEvent.messageId,
+              },
+            },
+          ]);
+        case "turn.failed":
+          return persistAndProject(threadId, [
+            {
+              eventId: idGenerator.next("event"),
+              threadId,
+              providerSessionId,
+              occurredAt: clock.now(),
+              type: "turn.failed",
+              payload: {
+                turnId: providerEvent.turnId,
+                error: providerEvent.error,
+              },
+            },
+          ]);
+        case "session.disconnected":
+          return providerSessionRepository
+            .updateStatus(providerSessionId, "disconnected", clock.now())
+            .pipe(
+              Effect.flatMap(() =>
+                persistAndProject(threadId, [
+                  {
+                    eventId: idGenerator.next("event"),
+                    threadId,
+                    providerSessionId,
+                    occurredAt: clock.now(),
+                    type: "provider.session.disconnected",
+                    payload: {
+                      reason: providerEvent.reason,
+                    },
+                  },
+                ]),
+              ),
+            );
+        case "session.recovered":
+          return providerSessionRepository
+            .updateStatus(providerSessionId, "active", clock.now())
+            .pipe(
+              Effect.flatMap(() =>
+                persistAndProject(threadId, [
+                  {
+                    eventId: idGenerator.next("event"),
+                    threadId,
+                    providerSessionId,
+                    occurredAt: clock.now(),
+                    type: "provider.session.recovered",
+                    payload: {
+                      reason: providerEvent.reason,
+                    },
+                  },
+                ]),
+              ),
+            );
+      }
+    };
+
+    const getOrCreateSessionRuntime = (thread: ThreadRecord) =>
+      Effect.gen(function* () {
+        const cached = yield* runtimeState.getSessionRuntime(
+          thread.providerSessionId,
+        );
+        if (cached) {
+          return cached;
+        }
+
+        const adapter = yield* providerRegistry.get(thread.providerKey);
+        const sessionRecord = yield* providerSessionRepository.get(
+          thread.providerSessionId,
+        );
+        if (!sessionRecord) {
+          return yield* Effect.fail(
+            new NotFoundError({
+              entity: "provider_session",
+              id: thread.providerSessionId,
+            }),
+          );
+        }
+
+        const session = sessionRecord.providerSessionRef
+          ? yield* adapter.resumeSession({
+              workspaceId: thread.workspaceId,
+              sessionId: sessionRecord.id,
+              providerSessionRef: sessionRecord.providerSessionRef,
+              providerThreadRef: sessionRecord.providerThreadRef,
+            })
+          : yield* adapter.createSession({
+              workspaceId: thread.workspaceId,
+              sessionId: sessionRecord.id,
+            });
+
+        const runtime: ProviderSessionRuntime = {
+          recordId: sessionRecord.id,
+          session,
+          adapter,
+        };
+
+        yield* runtimeState.setSessionRuntime(sessionRecord.id, runtime);
+        return runtime;
+      });
+
+    const createThread = (input: CreateThreadInput) =>
+      Effect.gen(function* () {
+        const adapter = yield* providerRegistry.get(input.providerKey);
+        const now = clock.now();
+        const providerSessionId = idGenerator.next("session");
+        const threadId = idGenerator.next("thread");
+
+        const sessionRecord: ProviderSessionRecord = {
+          id: providerSessionId,
+          providerKey: input.providerKey,
+          workspaceId: input.workspaceId,
+          status: "active",
+          providerSessionRef: null,
+          providerThreadRef: null,
+          capabilities: adapter.listCapabilities(),
+          createdAt: now,
+          updatedAt: now,
+        };
+        yield* providerSessionRepository.create(sessionRecord);
+
+        const threadRecord: ThreadRecord = {
+          id: threadId,
+          workspaceId: input.workspaceId,
+          providerKey: input.providerKey,
+          providerSessionId,
+          title: input.title ?? "New chat",
+          createdAt: now,
+          updatedAt: now,
+        };
+        yield* threadRepository.create(threadRecord);
+
+        const created = yield* persistAndProject(threadId, [
+          {
+            eventId: idGenerator.next("event"),
+            threadId,
+            providerSessionId,
+            occurredAt: now,
+            type: "thread.created",
+            payload: {
+              workspaceId: input.workspaceId,
+              providerKey: input.providerKey,
+              title: threadRecord.title,
+            },
           },
-        },
-      ]);
-      this.#activeTurns.delete(threadId);
-    }
+          {
+            eventId: idGenerator.next("event"),
+            threadId,
+            providerSessionId,
+            occurredAt: now,
+            type: "provider.session.started",
+            payload: {
+              providerKey: input.providerKey,
+              resumeStrategy: adapter.getResumeStrategy(),
+            },
+          },
+        ]);
 
-    return this.openThread(threadId);
-  }
+        return created.thread;
+      });
 
-  async stopTurn(threadId: string): Promise<ThreadViewModel> {
-    const activeTurn = this.#activeTurns.get(threadId);
-    if (!activeTurn) {
-      return this.openThread(threadId);
-    }
+    const sendMessage = (threadId: string, content: string) =>
+      Effect.gen(function* () {
+        const thread = yield* requireThread(threadId);
+        const snapshot = yield* openThread(threadId);
 
-    const runtime = this.#sessionRuntimeCache.get(activeTurn.sessionId);
-    if (!runtime) {
-      throw new MagickError(
-        "provider_session_missing",
-        `No runtime found for session '${activeTurn.sessionId}'.`,
-      );
-    }
+        const activeTurn = yield* runtimeState.getActiveTurn(threadId);
+        if (snapshot.activeTurnId || activeTurn) {
+          return yield* Effect.fail(
+            new InvalidStateError({
+              code: "turn_already_running",
+              detail: `Thread '${threadId}' already has an active turn.`,
+            }),
+          );
+        }
 
-    await runtime.session.interruptTurn({
-      turnId: activeTurn.turnId,
-      reason: "Interrupted by user",
-    });
+        const runtime = yield* getOrCreateSessionRuntime(thread);
+        const turnId = idGenerator.next("turn");
+        const assistantMessageId = idGenerator.next("message");
+        const now = clock.now();
 
-    this.#persistAndProject(threadId, [
-      {
-        eventId: createId("event"),
-        threadId,
-        providerSessionId: runtime.recordId,
-        occurredAt: nowIso(),
-        type: "turn.interrupted",
-        payload: {
-          turnId: activeTurn.turnId,
-          reason: "Interrupted by user",
-        },
-      },
-    ]);
-    this.#activeTurns.delete(threadId);
+        const prelude = yield* persistAndProject(threadId, [
+          {
+            eventId: idGenerator.next("event"),
+            threadId,
+            providerSessionId: thread.providerSessionId,
+            occurredAt: now,
+            type: "message.user.created",
+            payload: {
+              messageId: idGenerator.next("message"),
+              content,
+            },
+          },
+          {
+            eventId: idGenerator.next("event"),
+            threadId,
+            providerSessionId: thread.providerSessionId,
+            occurredAt: now,
+            type: "turn.started",
+            payload: {
+              turnId,
+              parentTurnId: snapshot.activeTurnId,
+            },
+          },
+        ]);
 
-    return this.openThread(threadId);
-  }
-
-  async retryTurn(threadId: string): Promise<ThreadViewModel> {
-    const thread = this.openThread(threadId);
-    const lastUserMessage = [...thread.messages]
-      .reverse()
-      .find((message) => message.role === "user");
-
-    if (!lastUserMessage) {
-      throw new MagickError(
-        "retry_not_possible",
-        `Thread '${threadId}' has no user message to retry.`,
-      );
-    }
-
-    return this.sendMessage(threadId, lastUserMessage.content);
-  }
-
-  async ensureSession(threadId: string): Promise<ThreadViewModel> {
-    const thread = this.#requireThread(threadId);
-    await this.#getOrCreateSessionRuntime(thread);
-    return this.openThread(threadId);
-  }
-
-  async replayThread(
-    threadId: string,
-    afterSequence = 0,
-  ): Promise<readonly DomainEvent[]> {
-    return this.#eventStore.listThreadEvents(threadId, afterSequence);
-  }
-
-  async #getOrCreateSessionRuntime(
-    thread: ThreadRecord,
-  ): Promise<ProviderSessionRuntime> {
-    const cached = this.#sessionRuntimeCache.get(thread.providerSessionId);
-    if (cached) {
-      return cached;
-    }
-
-    const adapter = this.#providerRegistry.get(thread.providerKey);
-    const sessionRecord = this.#providerSessionRepository.get(
-      thread.providerSessionId,
-    );
-    if (!sessionRecord) {
-      throw new MagickError(
-        "provider_session_missing",
-        `Unknown provider session '${thread.providerSessionId}'.`,
-      );
-    }
-
-    const session = sessionRecord.providerSessionRef
-      ? await adapter.resumeSession({
-          workspaceId: thread.workspaceId,
-          sessionId: sessionRecord.id,
-          providerSessionRef: sessionRecord.providerSessionRef,
-          providerThreadRef: sessionRecord.providerThreadRef,
-        })
-      : await adapter.createSession({
-          workspaceId: thread.workspaceId,
-          sessionId: sessionRecord.id,
+        yield* runtimeState.setActiveTurn(threadId, {
+          turnId,
+          sessionId: runtime.recordId,
         });
 
-    const runtime = {
-      recordId: sessionRecord.id,
-      session,
-      adapter,
-    };
-    this.#sessionRuntimeCache.set(sessionRecord.id, runtime);
-    return runtime;
-  }
+        const stream = yield* runtime.session.startTurn({
+          threadId,
+          turnId,
+          messageId: assistantMessageId,
+          userMessage: content,
+          contextMessages: buildContextMessages(prelude.thread),
+        });
 
-  #buildContextMessages(
-    thread: ThreadViewModel,
-  ): readonly ConversationContextMessage[] {
-    return thread.messages.map((message) => ({
-      role: message.role,
-      content: message.content,
-    }));
-  }
-
-  #applyProviderEvent(
-    threadId: string,
-    providerSessionId: string,
-    providerEvent: ProviderEvent,
-  ) {
-    switch (providerEvent.type) {
-      case "output.delta":
-        return this.#persistAndProject(threadId, [
-          {
-            eventId: createId("event"),
+        yield* Stream.runForEach(stream, (providerEvent) =>
+          applyProviderEvent(
             threadId,
-            providerSessionId,
-            occurredAt: nowIso(),
-            type: "turn.delta",
-            payload: {
-              turnId: providerEvent.turnId,
-              messageId: providerEvent.messageId,
-              delta: providerEvent.delta,
-            },
-          },
-        ]);
-      case "output.completed":
-        return this.#persistAndProject(threadId, [
-          {
-            eventId: createId("event"),
-            threadId,
-            providerSessionId,
-            occurredAt: nowIso(),
-            type: "turn.completed",
-            payload: {
-              turnId: providerEvent.turnId,
-              messageId: providerEvent.messageId,
-            },
-          },
-        ]);
-      case "turn.failed":
-        return this.#persistAndProject(threadId, [
-          {
-            eventId: createId("event"),
-            threadId,
-            providerSessionId,
-            occurredAt: nowIso(),
-            type: "turn.failed",
-            payload: {
-              turnId: providerEvent.turnId,
-              error: providerEvent.error,
-            },
-          },
-        ]);
-      case "session.disconnected":
-        this.#providerSessionRepository.updateStatus(
-          providerSessionId,
-          "disconnected",
-          nowIso(),
+            thread.providerSessionId,
+            providerEvent,
+          ).pipe(Effect.asVoid),
+        ).pipe(
+          Effect.catchAll((error) =>
+            persistAndProject(threadId, [
+              {
+                eventId: idGenerator.next("event"),
+                threadId,
+                providerSessionId: thread.providerSessionId,
+                occurredAt: clock.now(),
+                type: "turn.failed",
+                payload: {
+                  turnId,
+                  error: backendErrorMessage(error),
+                },
+              },
+            ]).pipe(Effect.asVoid),
+          ),
+          Effect.ensuring(runtimeState.clearActiveTurn(threadId)),
         );
-        return this.#persistAndProject(threadId, [
-          {
-            eventId: createId("event"),
-            threadId,
-            providerSessionId,
-            occurredAt: nowIso(),
-            type: "provider.session.disconnected",
-            payload: {
-              reason: providerEvent.reason,
-            },
-          },
-        ]);
-      case "session.recovered":
-        this.#providerSessionRepository.updateStatus(
-          providerSessionId,
-          "active",
-          nowIso(),
-        );
-        return this.#persistAndProject(threadId, [
-          {
-            eventId: createId("event"),
-            threadId,
-            providerSessionId,
-            occurredAt: nowIso(),
-            type: "provider.session.recovered",
-            payload: {
-              reason: providerEvent.reason,
-            },
-          },
-        ]);
-    }
-  }
 
-  #persistAndProject(
-    threadId: string,
-    events: readonly Omit<DomainEvent, "sequence">[],
-  ): {
-    readonly events: readonly DomainEvent[];
-    readonly thread: ThreadViewModel;
-  } {
-    const persistedEvents = this.#eventStore.append(threadId, events);
-    const projectedThread = projectThreadEvents(
-      this.#threadRepository.getSnapshot(threadId),
-      persistedEvents,
-    );
-    this.#threadRepository.saveSnapshot(
-      threadId,
-      toThreadSummary(projectedThread),
-      projectedThread,
-    );
-
-    void this.#publisher.publish(persistedEvents).catch((error) => {
-      console.error("event_publish_failed", {
-        threadId,
-        error: toErrorMessage(error),
+        return yield* openThread(threadId);
       });
-    });
+
+    const stopTurn = (threadId: string) =>
+      Effect.gen(function* () {
+        const activeTurn = yield* runtimeState.getActiveTurn(threadId);
+        if (!activeTurn) {
+          return yield* openThread(threadId);
+        }
+
+        const runtime = yield* runtimeState.getSessionRuntime(
+          activeTurn.sessionId,
+        );
+        if (!runtime) {
+          return yield* Effect.fail(
+            new NotFoundError({
+              entity: "provider_session_runtime",
+              id: activeTurn.sessionId,
+            }),
+          );
+        }
+
+        yield* runtime.session.interruptTurn({
+          turnId: activeTurn.turnId,
+          reason: "Interrupted by user",
+        });
+        yield* persistAndProject(threadId, [
+          {
+            eventId: idGenerator.next("event"),
+            threadId,
+            providerSessionId: runtime.recordId,
+            occurredAt: clock.now(),
+            type: "turn.interrupted",
+            payload: {
+              turnId: activeTurn.turnId,
+              reason: "Interrupted by user",
+            },
+          },
+        ]);
+        yield* runtimeState.clearActiveTurn(threadId);
+        return yield* openThread(threadId);
+      });
+
+    const retryTurn = (threadId: string) =>
+      Effect.gen(function* () {
+        const thread = yield* openThread(threadId);
+        const lastUserMessage = [...thread.messages]
+          .reverse()
+          .find((message) => message.role === "user");
+
+        if (!lastUserMessage) {
+          return yield* Effect.fail(
+            new InvalidStateError({
+              code: "retry_not_possible",
+              detail: `Thread '${threadId}' has no user message to retry.`,
+            }),
+          );
+        }
+
+        return yield* sendMessage(threadId, lastUserMessage.content);
+      });
+
+    const ensureSession = (threadId: string) =>
+      Effect.gen(function* () {
+        const thread = yield* requireThread(threadId);
+        yield* getOrCreateSessionRuntime(thread);
+        return yield* openThread(threadId);
+      });
 
     return {
-      events: persistedEvents,
-      thread: projectedThread,
-    };
-  }
-
-  #requireThread(threadId: string): ThreadRecord {
-    const thread = this.#threadRepository.get(threadId);
-    if (!thread) {
-      throw new MagickError(
-        "thread_not_found",
-        `Unknown thread '${threadId}'.`,
-      );
-    }
-
-    return thread;
-  }
-}
+      createThread,
+      listThreads: (workspaceId: string) =>
+        threadRepository.listByWorkspace(workspaceId),
+      openThread,
+      sendMessage,
+      stopTurn,
+      retryTurn,
+      ensureSession,
+    } satisfies ThreadOrchestratorApi;
+  }),
+);

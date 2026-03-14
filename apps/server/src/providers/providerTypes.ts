@@ -1,15 +1,14 @@
-import type { DomainEvent } from "../../../../packages/contracts/src/chat";
+import { Context, type Effect, type Stream } from "effect";
+
 import type {
   ProviderCapabilities,
   ProviderKey,
   ResumeStrategy,
 } from "../../../../packages/contracts/src/provider";
-
-export interface ProviderError {
-  readonly code: string;
-  readonly message: string;
-  readonly retryable: boolean;
-}
+import type {
+  ProviderFailureError,
+  ProviderUnavailableError,
+} from "../effect/errors";
 
 export interface ConversationContextMessage {
   readonly role: "user" | "assistant";
@@ -65,31 +64,32 @@ export type ProviderEvent =
       readonly reason: string;
     };
 
-export interface ProviderTurnHandle {
-  readonly turnId: string;
-  events(): AsyncIterable<ProviderEvent>;
-}
-
 export interface ProviderSessionHandle {
   readonly sessionId: string;
   readonly providerSessionRef: string | null;
   readonly providerThreadRef: string | null;
-  startTurn(input: StartTurnInput): Promise<ProviderTurnHandle>;
-  interruptTurn(input: InterruptTurnInput): Promise<void>;
-  dispose(): Promise<void>;
+  readonly startTurn: (
+    input: StartTurnInput,
+  ) => Effect.Effect<
+    Stream.Stream<ProviderEvent, ProviderFailureError>,
+    ProviderFailureError
+  >;
+  readonly interruptTurn: (
+    input: InterruptTurnInput,
+  ) => Effect.Effect<void, ProviderFailureError>;
+  readonly dispose: () => Effect.Effect<void>;
 }
 
 export interface ProviderAdapter {
   readonly key: ProviderKey;
-  createSession(
+  readonly createSession: (
     input: CreateProviderSessionInput,
-  ): Promise<ProviderSessionHandle>;
-  resumeSession(
+  ) => Effect.Effect<ProviderSessionHandle, ProviderFailureError>;
+  readonly resumeSession: (
     input: ResumeProviderSessionInput,
-  ): Promise<ProviderSessionHandle>;
-  listCapabilities(): ProviderCapabilities;
-  getResumeStrategy(): ResumeStrategy;
-  normalizeError(error: unknown): ProviderError;
+  ) => Effect.Effect<ProviderSessionHandle, ProviderFailureError>;
+  readonly listCapabilities: () => ProviderCapabilities;
+  readonly getResumeStrategy: () => ResumeStrategy;
 }
 
 export interface ProviderSessionRuntime {
@@ -98,6 +98,12 @@ export interface ProviderSessionRuntime {
   readonly adapter: ProviderAdapter;
 }
 
-export interface EventPublisher {
-  publish(events: readonly DomainEvent[]): Promise<void>;
+export interface ProviderRegistryService {
+  readonly get: (
+    providerKey: ProviderKey,
+  ) => Effect.Effect<ProviderAdapter, ProviderUnavailableError>;
 }
+
+export const ProviderRegistry = Context.GenericTag<ProviderRegistryService>(
+  "@magick/ProviderRegistry",
+);

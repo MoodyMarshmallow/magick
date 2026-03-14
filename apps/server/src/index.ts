@@ -1,47 +1,68 @@
 import type { Server } from "node:http";
 
-import { ProviderRegistry } from "./application/providerRegistry";
-import { ReplayService } from "./application/replayService";
-import { ThreadOrchestrator } from "./application/threadOrchestrator";
+import { Effect, Layer } from "effect";
+import * as ManagedRuntime from "effect/ManagedRuntime";
+
+import { makeProviderRegistryLayer } from "./application/providerRegistry";
+import {
+  ReplayService,
+  type ReplayServiceApi,
+  ReplayServiceLive,
+} from "./application/replayService";
+import {
+  ThreadOrchestrator,
+  type ThreadOrchestratorApi,
+  ThreadOrchestratorLive,
+} from "./application/threadOrchestrator";
+import {
+  Clock,
+  ClockLive,
+  EventPublisher,
+  IdGenerator,
+  IdGeneratorLive,
+  RuntimeState,
+  RuntimeStateLive,
+} from "./effect/runtime";
 import { createDatabase } from "./persistence/database";
-import { EventStore } from "./persistence/eventStore";
-import { ProviderSessionRepository } from "./persistence/providerSessionRepository";
-import { ThreadRepository } from "./persistence/threadRepository";
+import {
+  EventStore,
+  type EventStoreService,
+  makeEventStoreLayer,
+} from "./persistence/eventStore";
+import {
+  ProviderSessionRepository,
+  type ProviderSessionRepositoryService,
+  makeProviderSessionRepositoryLayer,
+} from "./persistence/providerSessionRepository";
+import {
+  ThreadRepository,
+  type ThreadRepositoryService,
+  makeThreadRepositoryLayer,
+} from "./persistence/threadRepository";
 import { FakeProviderAdapter } from "./providers/fake/fakeProviderAdapter";
+import {
+  ProviderRegistry,
+  type ProviderRegistryService,
+} from "./providers/providerTypes";
 import { ConnectionRegistry } from "./transport/connectionRegistry";
 import { WebSocketCommandServer } from "./transport/wsServer";
 
+type BackendRuntime = ReplayServiceApi | ThreadOrchestratorApi;
+
 export interface BackendServices {
   readonly database: ReturnType<typeof createDatabase>;
-  readonly eventStore: EventStore;
-  readonly threadRepository: ThreadRepository;
-  readonly providerSessionRepository: ProviderSessionRepository;
-  readonly providerRegistry: ProviderRegistry;
-  readonly replayService: ReplayService;
-  readonly orchestrator: ThreadOrchestrator;
   readonly connections: ConnectionRegistry;
+  readonly runtime: ManagedRuntime.ManagedRuntime<BackendRuntime, never>;
 }
 
 export const createBackendServices = (): BackendServices => {
   const database = createDatabase();
-  const eventStore = new EventStore(database);
-  const threadRepository = new ThreadRepository(database);
-  const providerSessionRepository = new ProviderSessionRepository(database);
-  const providerRegistry = new ProviderRegistry();
-  providerRegistry.register(new FakeProviderAdapter({ mode: "stateful" }));
-  providerRegistry.register(
-    new FakeProviderAdapter({ key: "fake-stateless", mode: "stateless" }),
-  );
   const connections = new ConnectionRegistry();
-  const replayService = new ReplayService(eventStore, threadRepository);
-  const orchestrator = new ThreadOrchestrator({
-    providerRegistry,
-    eventStore,
-    threadRepository,
-    providerSessionRepository,
-    publisher: {
-      publish: async (events) => {
-        await Promise.all(
+
+  const publisherLayer = Layer.succeed(EventPublisher, {
+    publish: (events) =>
+      Effect.promise(() =>
+        Promise.all(
           events.map((event) =>
             connections.publishToThread(event.threadId, {
               channel: "orchestration.domainEvent",
@@ -49,20 +70,37 @@ export const createBackendServices = (): BackendServices => {
               event,
             }),
           ),
-        );
-      },
-    },
+        ).then(() => undefined),
+      ),
   });
+
+  const baseLayer = Layer.mergeAll(
+    ClockLive,
+    IdGeneratorLive,
+    RuntimeStateLive,
+    makeEventStoreLayer(database),
+    makeThreadRepositoryLayer(database),
+    makeProviderSessionRepositoryLayer(database),
+    makeProviderRegistryLayer([
+      new FakeProviderAdapter({ mode: "stateful" }),
+      new FakeProviderAdapter({ key: "fake-stateless", mode: "stateless" }),
+    ]),
+    publisherLayer,
+  );
+
+  const appLayer = Layer.mergeAll(
+    ReplayServiceLive,
+    ThreadOrchestratorLive,
+  ).pipe(Layer.provide(baseLayer));
+
+  const layer = Layer.mergeAll(baseLayer, appLayer);
+
+  const runtime = ManagedRuntime.make(layer);
 
   return {
     database,
-    eventStore,
-    threadRepository,
-    providerSessionRepository,
-    providerRegistry,
-    replayService,
-    orchestrator,
     connections,
+    runtime,
   };
 };
 
@@ -72,8 +110,20 @@ export const attachWebSocketServer = (
 ): WebSocketCommandServer => {
   return new WebSocketCommandServer({
     httpServer,
-    orchestrator: services.orchestrator,
-    replayService: services.replayService,
+    runtime: services.runtime,
     connections: services.connections,
   });
+};
+
+export {
+  Clock,
+  EventPublisher,
+  EventStore,
+  IdGenerator,
+  ProviderRegistry,
+  ProviderSessionRepository,
+  ReplayService,
+  RuntimeState,
+  ThreadOrchestrator,
+  ThreadRepository,
 };

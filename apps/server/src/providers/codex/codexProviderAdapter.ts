@@ -1,19 +1,20 @@
+import type { Effect } from "effect";
 import type { ProviderCapabilities } from "../../../../../packages/contracts/src/provider";
+import type { ProviderFailureError } from "../../effect/errors";
 import type {
   CreateProviderSessionInput,
   ProviderAdapter,
-  ProviderError,
   ProviderSessionHandle,
   ResumeProviderSessionInput,
 } from "../providerTypes";
 
 export interface CodexRuntimeFactory {
-  createSession(
+  readonly createSession: (
     input: CreateProviderSessionInput,
-  ): Promise<ProviderSessionHandle>;
-  resumeSession(
+  ) => Effect.Effect<ProviderSessionHandle, ProviderFailureError>;
+  readonly resumeSession: (
     input: ResumeProviderSessionInput,
-  ): Promise<ProviderSessionHandle>;
+  ) => Effect.Effect<ProviderSessionHandle, ProviderFailureError>;
 }
 
 export class CodexProviderAdapter implements ProviderAdapter {
@@ -24,38 +25,20 @@ export class CodexProviderAdapter implements ProviderAdapter {
     this.#runtimeFactory = runtimeFactory;
   }
 
-  listCapabilities(): ProviderCapabilities {
-    return {
-      supportsNativeResume: true,
-      supportsInterrupt: true,
-      supportsAttachments: false,
-      supportsToolCalls: true,
-      supportsApprovals: true,
-      supportsServerSideSessions: true,
-    };
-  }
+  readonly listCapabilities = (): ProviderCapabilities => ({
+    supportsNativeResume: true,
+    supportsInterrupt: true,
+    supportsAttachments: false,
+    supportsToolCalls: true,
+    supportsApprovals: true,
+    supportsServerSideSessions: true,
+  });
 
-  getResumeStrategy() {
-    return "native" as const;
-  }
+  readonly getResumeStrategy = () => "native" as const;
 
-  async createSession(
-    input: CreateProviderSessionInput,
-  ): Promise<ProviderSessionHandle> {
-    return this.#runtimeFactory.createSession(input);
-  }
+  readonly createSession = (input: CreateProviderSessionInput) =>
+    this.#runtimeFactory.createSession(input);
 
-  async resumeSession(
-    input: ResumeProviderSessionInput,
-  ): Promise<ProviderSessionHandle> {
-    return this.#runtimeFactory.resumeSession(input);
-  }
-
-  normalizeError(error: unknown): ProviderError {
-    return {
-      code: "codex_provider_error",
-      message: error instanceof Error ? error.message : String(error),
-      retryable: true,
-    };
-  }
+  readonly resumeSession = (input: ResumeProviderSessionInput) =>
+    this.#runtimeFactory.resumeSession(input);
 }

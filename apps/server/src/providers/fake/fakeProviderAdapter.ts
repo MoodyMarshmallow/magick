@@ -1,14 +1,13 @@
-import { setTimeout as delay } from "node:timers/promises";
+import { Effect, Option, Stream } from "effect";
 
 import type { ProviderCapabilities } from "../../../../../packages/contracts/src/provider";
+import type { ProviderFailureError } from "../../effect/errors";
 import type {
   CreateProviderSessionInput,
   InterruptTurnInput,
   ProviderAdapter,
-  ProviderError,
   ProviderEvent,
   ProviderSessionHandle,
-  ProviderTurnHandle,
   ResumeProviderSessionInput,
   StartTurnInput,
 } from "../providerTypes";
@@ -20,59 +19,6 @@ export interface FakeProviderAdapterOptions {
   readonly mode: FakeProviderMode;
   readonly chunkDelayMs?: number;
   readonly responder?: (input: StartTurnInput) => string;
-}
-
-class FakeProviderTurn implements ProviderTurnHandle {
-  readonly turnId: string;
-  readonly #input: StartTurnInput;
-  readonly #chunkDelayMs: number;
-  readonly #responder: (input: StartTurnInput) => string;
-  readonly #interruptedTurns: Set<string>;
-
-  constructor(
-    input: StartTurnInput,
-    interruptedTurns: Set<string>,
-    chunkDelayMs: number,
-    responder: (input: StartTurnInput) => string,
-  ) {
-    this.turnId = input.turnId;
-    this.#input = input;
-    this.#interruptedTurns = interruptedTurns;
-    this.#chunkDelayMs = chunkDelayMs;
-    this.#responder = responder;
-  }
-
-  async *events(): AsyncIterable<ProviderEvent> {
-    const content = this.#responder(this.#input);
-    const chunks = content.match(/.{1,8}/g) ?? [content];
-
-    for (const chunk of chunks) {
-      if (this.#interruptedTurns.has(this.turnId)) {
-        return;
-      }
-
-      if (this.#chunkDelayMs > 0) {
-        await delay(this.#chunkDelayMs);
-      }
-
-      yield {
-        type: "output.delta",
-        turnId: this.turnId,
-        messageId: this.#input.messageId,
-        delta: chunk,
-      };
-    }
-
-    if (this.#interruptedTurns.has(this.turnId)) {
-      return;
-    }
-
-    yield {
-      type: "output.completed",
-      turnId: this.turnId,
-      messageId: this.#input.messageId,
-    };
-  }
 }
 
 class FakeProviderSession implements ProviderSessionHandle {
@@ -98,21 +44,66 @@ class FakeProviderSession implements ProviderSessionHandle {
     this.#responder = responder;
   }
 
-  async startTurn(input: StartTurnInput): Promise<ProviderTurnHandle> {
-    this.observedInputs.push(input);
-    return new FakeProviderTurn(
-      input,
-      this.#interruptedTurns,
-      this.#chunkDelayMs,
-      this.#responder,
-    );
-  }
+  readonly startTurn = (
+    input: StartTurnInput,
+  ): Effect.Effect<
+    Stream.Stream<ProviderEvent, ProviderFailureError>,
+    ProviderFailureError
+  > =>
+    Effect.sync(() => {
+      this.observedInputs.push(input);
+      const content = this.#responder(input);
+      const chunks = content.match(/.{1,8}/g) ?? [content];
 
-  async interruptTurn(input: InterruptTurnInput): Promise<void> {
-    this.#interruptedTurns.add(input.turnId);
-  }
+      const deltas = Stream.fromIterable(chunks).pipe(
+        Stream.mapEffect((chunk) =>
+          Effect.sleep(`${this.#chunkDelayMs} millis`).pipe(
+            Effect.zipRight(
+              Effect.sync(() => {
+                if (this.#interruptedTurns.has(input.turnId)) {
+                  return null;
+                }
 
-  async dispose(): Promise<void> {}
+                return {
+                  type: "output.delta" as const,
+                  turnId: input.turnId,
+                  messageId: input.messageId,
+                  delta: chunk,
+                } satisfies ProviderEvent;
+              }),
+            ),
+          ),
+        ),
+        Stream.filterMap((event) =>
+          event === null ? Option.none() : Option.some(event),
+        ),
+      );
+
+      const completed = Stream.unwrap(
+        Effect.sync(() => {
+          if (this.#interruptedTurns.has(input.turnId)) {
+            return Stream.empty;
+          }
+
+          return Stream.succeed({
+            type: "output.completed" as const,
+            turnId: input.turnId,
+            messageId: input.messageId,
+          } satisfies ProviderEvent);
+        }),
+      );
+
+      return Stream.concat(deltas, completed);
+    });
+
+  readonly interruptTurn = (
+    input: InterruptTurnInput,
+  ): Effect.Effect<void, ProviderFailureError> =>
+    Effect.sync(() => {
+      this.#interruptedTurns.add(input.turnId);
+    });
+
+  readonly dispose = (): Effect.Effect<void> => Effect.void;
 }
 
 export class FakeProviderAdapter implements ProviderAdapter {
@@ -132,59 +123,46 @@ export class FakeProviderAdapter implements ProviderAdapter {
         `${this.#mode}:${input.contextMessages.map((message) => message.content).join(" | ")} => ${input.userMessage}`);
   }
 
-  listCapabilities(): ProviderCapabilities {
-    return {
-      supportsNativeResume: this.#mode === "stateful",
-      supportsInterrupt: true,
-      supportsAttachments: false,
-      supportsToolCalls: false,
-      supportsApprovals: false,
-      supportsServerSideSessions: this.#mode === "stateful",
-    };
-  }
+  readonly listCapabilities = (): ProviderCapabilities => ({
+    supportsNativeResume: this.#mode === "stateful",
+    supportsInterrupt: true,
+    supportsAttachments: false,
+    supportsToolCalls: false,
+    supportsApprovals: false,
+    supportsServerSideSessions: this.#mode === "stateful",
+  });
 
-  getResumeStrategy() {
-    return this.#mode === "stateful" ? "native" : "rebuild";
-  }
+  readonly getResumeStrategy = () =>
+    (this.#mode === "stateful" ? "native" : "rebuild") as "native" | "rebuild";
 
-  async createSession(
-    input: CreateProviderSessionInput,
-  ): Promise<ProviderSessionHandle> {
-    const session = new FakeProviderSession(
-      input.sessionId,
-      this.#mode === "stateful" ? `${input.sessionId}:provider` : null,
-      this.#mode === "stateful" ? `${input.workspaceId}:thread` : null,
-      this.#chunkDelayMs,
-      this.#responder,
-    );
-    this.sessions.set(input.sessionId, session);
-    return session;
-  }
+  readonly createSession = (input: CreateProviderSessionInput) =>
+    Effect.sync(() => {
+      const session = new FakeProviderSession(
+        input.sessionId,
+        this.#mode === "stateful" ? `${input.sessionId}:provider` : null,
+        this.#mode === "stateful" ? `${input.workspaceId}:thread` : null,
+        this.#chunkDelayMs,
+        this.#responder,
+      );
+      this.sessions.set(input.sessionId, session);
+      return session;
+    });
 
-  async resumeSession(
-    input: ResumeProviderSessionInput,
-  ): Promise<ProviderSessionHandle> {
-    const existing = this.sessions.get(input.sessionId);
-    if (existing) {
-      return existing;
-    }
+  readonly resumeSession = (input: ResumeProviderSessionInput) =>
+    Effect.sync(() => {
+      const existing = this.sessions.get(input.sessionId);
+      if (existing) {
+        return existing;
+      }
 
-    const session = new FakeProviderSession(
-      input.sessionId,
-      input.providerSessionRef,
-      input.providerThreadRef,
-      this.#chunkDelayMs,
-      this.#responder,
-    );
-    this.sessions.set(input.sessionId, session);
-    return session;
-  }
-
-  normalizeError(error: unknown): ProviderError {
-    return {
-      code: "fake_provider_error",
-      message: error instanceof Error ? error.message : String(error),
-      retryable: true,
-    };
-  }
+      const session = new FakeProviderSession(
+        input.sessionId,
+        input.providerSessionRef,
+        input.providerThreadRef,
+        this.#chunkDelayMs,
+        this.#responder,
+      );
+      this.sessions.set(input.sessionId, session);
+      return session;
+    });
 }
