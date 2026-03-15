@@ -11,6 +11,10 @@ import type {
 } from "../../../../packages/contracts/src/ws";
 import { createId } from "../../../../packages/shared/src/id";
 import {
+  ProviderAuthService,
+  type ProviderAuthServiceApi,
+} from "../application/providerAuthService";
+import {
   ReplayService,
   type ReplayServiceApi,
 } from "../application/replayService";
@@ -36,7 +40,10 @@ class WsPushConnection implements PushConnection {
   }
 }
 
-type TransportRuntime = ReplayServiceApi | ThreadOrchestratorApi;
+type TransportRuntime =
+  | ProviderAuthServiceApi
+  | ReplayServiceApi
+  | ThreadOrchestratorApi;
 
 export class WebSocketCommandServer {
   readonly #connections: ConnectionRegistry;
@@ -109,6 +116,7 @@ export class WebSocketCommandServer {
     const connections = this.#connections;
     const program = Effect.gen(function* () {
       const orchestrator = yield* ThreadOrchestrator;
+      const providerAuth = yield* ProviderAuthService;
       const replayService = yield* ReplayService;
 
       switch (envelope.command.type) {
@@ -252,6 +260,70 @@ export class WebSocketCommandServer {
                 kind: "threadState" as const,
                 thread,
                 replayedEvents,
+              },
+            },
+          } satisfies CommandResponseEnvelope;
+        }
+        case "provider.auth.read": {
+          const auth = yield* providerAuth.read(
+            envelope.command.payload.providerKey,
+            envelope.command.payload.refreshToken ?? false,
+          );
+          return {
+            requestId: envelope.requestId,
+            result: {
+              ok: true as const,
+              data: {
+                kind: "providerAuthState" as const,
+                auth,
+              },
+            },
+          } satisfies CommandResponseEnvelope;
+        }
+        case "provider.auth.login.start": {
+          const auth = yield* providerAuth.startChatGptLogin(
+            envelope.command.payload.providerKey,
+          );
+          return {
+            requestId: envelope.requestId,
+            result: {
+              ok: true as const,
+              data: {
+                kind: "providerAuthLoginStart" as const,
+                auth,
+              },
+            },
+          } satisfies CommandResponseEnvelope;
+        }
+        case "provider.auth.login.cancel": {
+          yield* providerAuth.cancelLogin(
+            envelope.command.payload.providerKey,
+            envelope.command.payload.loginId,
+          );
+          return {
+            requestId: envelope.requestId,
+            result: {
+              ok: true as const,
+              data: {
+                kind: "providerAuthState" as const,
+                auth: yield* providerAuth.read(
+                  envelope.command.payload.providerKey,
+                ),
+              },
+            },
+          } satisfies CommandResponseEnvelope;
+        }
+        case "provider.auth.logout": {
+          yield* providerAuth.logout(envelope.command.payload.providerKey);
+          return {
+            requestId: envelope.requestId,
+            result: {
+              ok: true as const,
+              data: {
+                kind: "providerAuthState" as const,
+                auth: yield* providerAuth.read(
+                  envelope.command.payload.providerKey,
+                ),
               },
             },
           } satisfies CommandResponseEnvelope;

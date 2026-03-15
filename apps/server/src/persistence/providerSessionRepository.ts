@@ -16,6 +16,14 @@ export interface ProviderSessionRepositoryService {
     status: ProviderSessionRecord["status"],
     updatedAt: string,
   ) => Effect.Effect<void, PersistenceError>;
+  readonly updateRefs: (
+    sessionId: string,
+    refs: {
+      readonly providerSessionRef: string | null;
+      readonly providerThreadRef: string | null;
+      readonly updatedAt: string;
+    },
+  ) => Effect.Effect<void, PersistenceError>;
 }
 
 export const ProviderSessionRepository =
@@ -120,6 +128,30 @@ export const makeProviderSessionRepositoryLayer = (database: DatabaseClient) =>
         catch: (error) =>
           new PersistenceError({
             operation: "provider_session_repository.updateStatus",
+            detail: error instanceof Error ? error.message : String(error),
+          }),
+      }),
+    updateRefs: (sessionId, refs) =>
+      Effect.try({
+        try: () => {
+          database
+            .prepare(
+              `
+                UPDATE provider_sessions
+                SET provider_session_ref = ?, provider_thread_ref = ?, updated_at = ?
+                WHERE id = ?
+              `,
+            )
+            .run(
+              refs.providerSessionRef,
+              refs.providerThreadRef,
+              refs.updatedAt,
+              sessionId,
+            );
+        },
+        catch: (error) =>
+          new PersistenceError({
+            operation: "provider_session_repository.updateRefs",
             detail: error instanceof Error ? error.message : String(error),
           }),
       }),

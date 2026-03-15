@@ -270,6 +270,17 @@ export const ThreadOrchestratorLive = Layer.effect(
           adapter,
         };
 
+        if (
+          session.providerSessionRef !== sessionRecord.providerSessionRef ||
+          session.providerThreadRef !== sessionRecord.providerThreadRef
+        ) {
+          yield* providerSessionRepository.updateRefs(sessionRecord.id, {
+            providerSessionRef: session.providerSessionRef,
+            providerThreadRef: session.providerThreadRef,
+            updatedAt: clock.now(),
+          });
+        }
+
         yield* runtimeState.setSessionRuntime(sessionRecord.id, runtime);
         return runtime;
       });

@@ -3,6 +3,11 @@ import type { Server } from "node:http";
 import { Effect, Layer } from "effect";
 import * as ManagedRuntime from "effect/ManagedRuntime";
 
+import {
+  ProviderAuthService,
+  type ProviderAuthServiceApi,
+  ProviderAuthServiceLive,
+} from "./application/providerAuthService";
 import { makeProviderRegistryLayer } from "./application/providerRegistry";
 import {
   ReplayService,
@@ -39,6 +44,10 @@ import {
   type ThreadRepositoryService,
   makeThreadRepositoryLayer,
 } from "./persistence/threadRepository";
+import {
+  CodexProviderAdapter,
+  createCodexRuntimeFactory,
+} from "./providers/codex/codexProviderAdapter";
 import { FakeProviderAdapter } from "./providers/fake/fakeProviderAdapter";
 import {
   ProviderRegistry,
@@ -47,7 +56,10 @@ import {
 import { ConnectionRegistry } from "./transport/connectionRegistry";
 import { WebSocketCommandServer } from "./transport/wsServer";
 
-type BackendRuntime = ReplayServiceApi | ThreadOrchestratorApi;
+type BackendRuntime =
+  | ProviderAuthServiceApi
+  | ReplayServiceApi
+  | ThreadOrchestratorApi;
 
 export interface BackendServices {
   readonly database: ReturnType<typeof createDatabase>;
@@ -82,6 +94,7 @@ export const createBackendServices = (): BackendServices => {
     makeThreadRepositoryLayer(database),
     makeProviderSessionRepositoryLayer(database),
     makeProviderRegistryLayer([
+      new CodexProviderAdapter(createCodexRuntimeFactory()),
       new FakeProviderAdapter({ mode: "stateful" }),
       new FakeProviderAdapter({ key: "fake-stateless", mode: "stateless" }),
     ]),
@@ -93,7 +106,9 @@ export const createBackendServices = (): BackendServices => {
     ThreadOrchestratorLive,
   ).pipe(Layer.provide(baseLayer));
 
-  const layer = Layer.mergeAll(baseLayer, appLayer);
+  const authLayer = ProviderAuthServiceLive();
+
+  const layer = Layer.mergeAll(baseLayer, appLayer, authLayer);
 
   const runtime = ManagedRuntime.make(layer);
 
@@ -120,6 +135,7 @@ export {
   EventPublisher,
   EventStore,
   IdGenerator,
+  ProviderAuthService,
   ProviderRegistry,
   ProviderSessionRepository,
   ReplayService,

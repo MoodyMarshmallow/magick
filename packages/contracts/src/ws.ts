@@ -4,7 +4,11 @@ import type {
   ThreadSummary,
   ThreadViewModel,
 } from "./chat";
-import type { ProviderCapabilities } from "./provider";
+import type {
+  ProviderAuthLoginStartResult,
+  ProviderAuthState,
+  ProviderCapabilities,
+} from "./provider";
 
 export interface CommandEnvelope {
   readonly requestId: string;
@@ -33,6 +37,14 @@ export type CommandResult =
         | {
             readonly kind: "accepted";
             readonly threadId: string;
+          }
+        | {
+            readonly kind: "providerAuthState";
+            readonly auth: ProviderAuthState;
+          }
+        | {
+            readonly kind: "providerAuthLoginStart";
+            readonly auth: ProviderAuthLoginStartResult;
           };
     }
   | {

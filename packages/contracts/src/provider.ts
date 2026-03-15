@@ -22,3 +22,26 @@ export interface ProviderSessionRecord {
   readonly createdAt: string;
   readonly updatedAt: string;
 }
+
+export type ProviderAuthAccount =
+  | {
+      readonly type: "apiKey";
+    }
+  | {
+      readonly type: "chatgpt";
+      readonly email: string | null;
+      readonly planType: string | null;
+    };
+
+export interface ProviderAuthState {
+  readonly providerKey: ProviderKey;
+  readonly requiresOpenaiAuth: boolean;
+  readonly account: ProviderAuthAccount | null;
+  readonly activeLoginId: string | null;
+}
+
+export interface ProviderAuthLoginStartResult {
+  readonly providerKey: ProviderKey;
+  readonly loginId: string;
+  readonly authUrl: string;
+}

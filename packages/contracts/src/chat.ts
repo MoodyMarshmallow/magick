@@ -115,4 +115,20 @@ export type ClientCommand =
   | {
       readonly type: "thread.resume";
       readonly payload: { threadId: string; afterSequence?: number };
+    }
+  | {
+      readonly type: "provider.auth.read";
+      readonly payload: { providerKey: ProviderKey; refreshToken?: boolean };
+    }
+  | {
+      readonly type: "provider.auth.login.start";
+      readonly payload: { providerKey: ProviderKey; mode: "chatgpt" };
+    }
+  | {
+      readonly type: "provider.auth.login.cancel";
+      readonly payload: { providerKey: ProviderKey; loginId: string };
+    }
+  | {
+      readonly type: "provider.auth.logout";
+      readonly payload: { providerKey: ProviderKey };
     };

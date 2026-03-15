@@ -3,6 +3,10 @@ import { createServer } from "node:http";
 import { Effect, Layer } from "effect";
 import * as ManagedRuntime from "effect/ManagedRuntime";
 
+import {
+  ProviderAuthService,
+  type ProviderAuthServiceApi,
+} from "../application/providerAuthService";
 import { makeProviderRegistryLayer } from "../application/providerRegistry";
 import {
   ReplayService,
@@ -38,7 +42,10 @@ import type { ProviderRegistryService } from "../providers/providerTypes";
 import { ConnectionRegistry } from "./connectionRegistry";
 import { WebSocketCommandServer } from "./wsServer";
 
-type TestRuntime = ReplayServiceApi | ThreadOrchestratorApi;
+type TestRuntime =
+  | ProviderAuthServiceApi
+  | ReplayServiceApi
+  | ThreadOrchestratorApi;
 
 const makeRuntime = () => {
   const database = createDatabase();
@@ -62,7 +69,28 @@ const makeRuntime = () => {
     ThreadOrchestratorLive,
   ).pipe(Layer.provide(baseLayer));
 
-  return { runtime: ManagedRuntime.make(appLayer), adapter };
+  const authLayer = Layer.succeed(ProviderAuthService, {
+    read: (providerKey: string) =>
+      Effect.succeed({
+        providerKey,
+        requiresOpenaiAuth: providerKey === "codex",
+        account: null,
+        activeLoginId: null,
+      }),
+    startChatGptLogin: (providerKey: string) =>
+      Effect.succeed({
+        providerKey,
+        loginId: "login_1",
+        authUrl: "https://chatgpt.com/login",
+      }),
+    cancelLogin: () => Effect.void,
+    logout: () => Effect.void,
+  });
+
+  return {
+    runtime: ManagedRuntime.make(Layer.mergeAll(appLayer, authLayer)),
+    adapter,
+  };
 };
 
 const listen = (server: ReturnType<typeof createServer>) =>
@@ -153,6 +181,46 @@ describe("WebSocketCommandServer", () => {
         data: {
           kind: "accepted",
           threadId: thread.threadId,
+        },
+      },
+    });
+
+    await closeServer(server);
+  });
+
+  it("returns codex auth status from the provider auth service", async () => {
+    const { runtime } = makeRuntime();
+    const server = createServer();
+    await listen(server);
+    const wsServer = new WebSocketCommandServer({
+      httpServer: server,
+      runtime: runtime as ManagedRuntime.ManagedRuntime<TestRuntime, never>,
+      connections: new ConnectionRegistry(),
+    });
+
+    const response = await wsServer.handleCommand(
+      {
+        requestId: "req_auth_1",
+        command: {
+          type: "provider.auth.read",
+          payload: { providerKey: "codex" },
+        },
+      },
+      "conn_auth_1",
+    );
+
+    expect(response).toMatchObject({
+      requestId: "req_auth_1",
+      result: {
+        ok: true,
+        data: {
+          kind: "providerAuthState",
+          auth: {
+            providerKey: "codex",
+            requiresOpenaiAuth: true,
+            account: null,
+            activeLoginId: null,
+          },
         },
       },
     });
