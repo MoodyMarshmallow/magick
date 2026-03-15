@@ -1,3 +1,5 @@
+// Exposes replay-oriented reads for thread snapshots and event streams.
+
 import { Context, Effect, Layer } from "effect";
 
 import type {

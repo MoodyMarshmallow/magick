@@ -1,3 +1,5 @@
+// Defines shared chat records, command payloads, and domain event contracts.
+
 import type { ProviderKey, ResumeStrategy } from "./provider";
 
 export type ThreadStatus = "idle" | "running" | "interrupted" | "failed";

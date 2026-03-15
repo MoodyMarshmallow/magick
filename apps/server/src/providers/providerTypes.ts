@@ -1,3 +1,5 @@
+// Defines the provider runtime interfaces shared by orchestration and provider adapters.
+
 import { Context, type Effect, type Stream } from "effect";
 
 import type {

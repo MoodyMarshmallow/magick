@@ -1,3 +1,5 @@
+// Verifies provider registry lookup succeeds for registered adapters and fails for missing ones.
+
 import { Cause, Effect, Exit, Option } from "effect";
 
 import { FakeProviderAdapter } from "../providers/fake/fakeProviderAdapter";

@@ -1,3 +1,5 @@
+// Composes the backend runtime and exposes the server attachment entrypoints.
+
 import type { Server } from "node:http";
 
 import { Effect, Layer } from "effect";
@@ -35,6 +37,12 @@ import {
   makeEventStoreLayer,
 } from "./persistence/eventStore";
 import {
+  ProviderAuthRepository,
+  ProviderAuthRepositoryClient,
+  type ProviderAuthRepositoryService,
+  makeProviderAuthRepositoryLayer,
+} from "./persistence/providerAuthRepository";
+import {
   ProviderSessionRepository,
   type ProviderSessionRepositoryService,
   makeProviderSessionRepositoryLayer,
@@ -71,6 +79,8 @@ export const createBackendServices = (): BackendServices => {
   const database = createDatabase();
   const connections = new ConnectionRegistry();
 
+  const providerAuthRepository = new ProviderAuthRepositoryClient(database);
+
   const publisherLayer = Layer.succeed(EventPublisher, {
     publish: (events) =>
       Effect.promise(() =>
@@ -91,10 +101,15 @@ export const createBackendServices = (): BackendServices => {
     IdGeneratorLive,
     RuntimeStateLive,
     makeEventStoreLayer(database),
+    makeProviderAuthRepositoryLayer(database),
     makeThreadRepositoryLayer(database),
     makeProviderSessionRepositoryLayer(database),
     makeProviderRegistryLayer([
-      new CodexProviderAdapter(createCodexRuntimeFactory()),
+      new CodexProviderAdapter(
+        createCodexRuntimeFactory({
+          authRepository: providerAuthRepository,
+        }),
+      ),
       new FakeProviderAdapter({ mode: "stateful" }),
       new FakeProviderAdapter({ key: "fake-stateless", mode: "stateless" }),
     ]),
@@ -106,7 +121,9 @@ export const createBackendServices = (): BackendServices => {
     ThreadOrchestratorLive,
   ).pipe(Layer.provide(baseLayer));
 
-  const authLayer = ProviderAuthServiceLive();
+  const authLayer = ProviderAuthServiceLive({
+    authRepository: providerAuthRepository,
+  });
 
   const layer = Layer.mergeAll(baseLayer, appLayer, authLayer);
 
@@ -136,6 +153,7 @@ export {
   EventStore,
   IdGenerator,
   ProviderAuthService,
+  ProviderAuthRepository,
   ProviderRegistry,
   ProviderSessionRepository,
   ReplayService,

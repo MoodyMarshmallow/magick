@@ -1,3 +1,5 @@
+// Initializes the SQLite schema used by backend persistence services.
+
 import Database from "better-sqlite3";
 
 export type DatabaseClient = InstanceType<typeof Database>;
@@ -21,6 +23,19 @@ export const createDatabase = (filename = ":memory:"): DatabaseClient => {
       provider_session_ref TEXT,
       provider_thread_ref TEXT,
       capabilities_json TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS provider_auth_records (
+      provider_key TEXT PRIMARY KEY,
+      auth_mode TEXT NOT NULL,
+      access_token TEXT NOT NULL,
+      refresh_token TEXT NOT NULL,
+      expires_at INTEGER NOT NULL,
+      account_id TEXT,
+      email TEXT,
+      plan_type TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );

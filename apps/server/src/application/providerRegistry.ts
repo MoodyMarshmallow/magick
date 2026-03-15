@@ -1,3 +1,5 @@
+// Builds the provider registry service that resolves provider adapters by key.
+
 import { Effect, Layer } from "effect";
 
 import { ProviderUnavailableError } from "../effect/errors";

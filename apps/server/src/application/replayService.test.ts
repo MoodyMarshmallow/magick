@@ -1,3 +1,5 @@
+// Verifies replay service behavior for missing threads and replay queries.
+
 import { Cause, Exit, Layer, Option } from "effect";
 import * as ManagedRuntime from "effect/ManagedRuntime";
 

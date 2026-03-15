@@ -1,20 +1,31 @@
+// Owns provider auth state, browser login flow tracking, refresh checks, and logout behavior.
+
 import { Context, Effect, Layer, Ref } from "effect";
 
 import type {
   ProviderAuthLoginStartResult,
+  ProviderAuthRecord,
   ProviderAuthState,
   ProviderKey,
 } from "../../../../packages/contracts/src/provider";
+import { nowIso } from "../../../../packages/shared/src/time";
 import {
   type BackendError,
   InvalidStateError,
   ProviderUnavailableError,
 } from "../effect/errors";
+import type { ProviderAuthRepositoryClient } from "../persistence/providerAuthRepository";
 import {
-  type CodexAppServerClient,
-  type CodexClientFactoryOptions,
-  createCodexAppServerClient,
-} from "../providers/codex/codexAppServerClient";
+  CodexAuthClient,
+  type CodexAuthClientOptions,
+} from "../providers/codex/codexAuthClient";
+import {
+  CodexOAuthHarness,
+  type CodexOAuthHarnessOptions,
+  type CodexOAuthLogin,
+} from "../providers/codex/codexOAuth";
+
+const REFRESH_SAFETY_MARGIN_MS = 60_000;
 
 export interface ProviderAuthServiceApi {
   readonly read: (
@@ -37,12 +48,24 @@ export const ProviderAuthService = Context.GenericTag<ProviderAuthServiceApi>(
   "@magick/ProviderAuthService",
 );
 
-export interface ProviderAuthServiceOptions extends CodexClientFactoryOptions {}
+export interface ProviderAuthServiceOptions {
+  readonly authRepository: ProviderAuthRepositoryClient;
+  readonly authClient?: CodexAuthClient;
+  readonly authClientOptions?: CodexAuthClientOptions;
+  readonly oauthHarness?: CodexOAuthHarness;
+  readonly oauthHarnessOptions?: CodexOAuthHarnessOptions;
+}
 
 export const ProviderAuthServiceLive = (
-  options: ProviderAuthServiceOptions = {},
-) =>
-  Layer.effect(
+  options: ProviderAuthServiceOptions,
+) => {
+  const authRepository = options.authRepository;
+  const authClient =
+    options.authClient ?? new CodexAuthClient(options.authClientOptions);
+  const oauthHarness =
+    options.oauthHarness ?? new CodexOAuthHarness(options.oauthHarnessOptions);
+
+  return Layer.effect(
     ProviderAuthService,
     Effect.gen(function* () {
       const activeLogins = yield* Ref.make(
@@ -50,8 +73,7 @@ export const ProviderAuthServiceLive = (
           string,
           {
             readonly providerKey: ProviderKey;
-            readonly client: CodexAppServerClient;
-            readonly dispose: () => Effect.Effect<void>;
+            readonly login: CodexOAuthLogin;
           }
         >(),
       );
@@ -69,6 +91,16 @@ export const ProviderAuthServiceLive = (
           }),
         );
 
+      const unauthenticatedState = (
+        providerKey: ProviderKey,
+        activeLoginId: string | null,
+      ): ProviderAuthState => ({
+        providerKey,
+        requiresOpenaiAuth: providerKey === "codex",
+        account: null,
+        activeLoginId,
+      });
+
       const assertCodexProvider = (providerKey: ProviderKey) => {
         if (providerKey !== "codex") {
           return Effect.fail(
@@ -79,22 +111,95 @@ export const ProviderAuthServiceLive = (
         return Effect.void;
       };
 
-      const createClient = () => createCodexAppServerClient(options);
+      const persistTokens = (tokens: {
+        readonly accessToken: string;
+        readonly refreshToken: string;
+        readonly expiresAt: number;
+        readonly accountId: string | null;
+        readonly email: string | null;
+        readonly planType?: string | null;
+      }) => {
+        const timestamp = nowIso();
+        const record: ProviderAuthRecord = {
+          providerKey: "codex",
+          authMode: "chatgpt",
+          accessToken: tokens.accessToken,
+          refreshToken: tokens.refreshToken,
+          expiresAt: tokens.expiresAt,
+          accountId: tokens.accountId,
+          email: tokens.email,
+          planType: tokens.planType ?? null,
+          createdAt: timestamp,
+          updatedAt: timestamp,
+        };
+
+        return authRepository.upsert(record).pipe(Effect.as(record));
+      };
+
+      const refreshIfNeeded = (
+        record: ProviderAuthRecord,
+        forceRefresh: boolean,
+      ) => {
+        if (
+          !forceRefresh &&
+          record.expiresAt > Date.now() + REFRESH_SAFETY_MARGIN_MS
+        ) {
+          return Effect.succeed(record);
+        }
+
+        return authClient.refreshAccessToken(record.refreshToken).pipe(
+          Effect.flatMap((tokens) =>
+            authRepository
+              .upsert({
+                ...record,
+                accessToken: tokens.accessToken,
+                refreshToken: tokens.refreshToken,
+                expiresAt: tokens.expiresAt,
+                accountId: tokens.accountId,
+                email: tokens.email,
+                updatedAt: nowIso(),
+              })
+              .pipe(
+                Effect.as({
+                  ...record,
+                  accessToken: tokens.accessToken,
+                  refreshToken: tokens.refreshToken,
+                  expiresAt: tokens.expiresAt,
+                  accountId: tokens.accountId,
+                  email: tokens.email,
+                  updatedAt: nowIso(),
+                }),
+              ),
+          ),
+          Effect.catchAll(() =>
+            authRepository.delete("codex").pipe(Effect.as(null)),
+          ),
+        );
+      };
 
       return {
         read: (providerKey: ProviderKey, refreshToken = false) =>
           Effect.gen(function* () {
             yield* assertCodexProvider(providerKey);
-            const client = yield* createClient();
-            const account = yield* client
-              .readAccount(refreshToken)
-              .pipe(Effect.ensuring(client.dispose()));
             const activeLoginId = yield* activeLoginIdForProvider(providerKey);
+            const record = yield* authRepository.get(providerKey);
+            if (!record) {
+              return unauthenticatedState(providerKey, activeLoginId);
+            }
+
+            const refreshed = yield* refreshIfNeeded(record, refreshToken);
+            if (!refreshed) {
+              return unauthenticatedState(providerKey, activeLoginId);
+            }
 
             return {
               providerKey,
-              requiresOpenaiAuth: account.requiresOpenaiAuth,
-              account: account.account,
+              requiresOpenaiAuth: true,
+              account: {
+                type: "chatgpt",
+                email: refreshed.email,
+                planType: refreshed.planType,
+              },
               activeLoginId,
             } satisfies ProviderAuthState;
           }),
@@ -111,23 +216,32 @@ export const ProviderAuthServiceLive = (
               );
             }
 
-            const client = yield* createClient();
-            const login = yield* client.startChatGptLogin();
-
+            const login = yield* oauthHarness.startLogin();
             yield* Ref.update(activeLogins, (logins) => {
               const next = new Map(logins);
-              next.set(login.loginId, {
-                providerKey,
-                client,
-                dispose: () => client.dispose(),
-              });
+              next.set(login.loginId, { providerKey, login });
               return next;
             });
 
             void Effect.runFork(
-              client.waitForLoginCompletion(login.loginId).pipe(
+              Effect.tryPromise({
+                try: () => login.waitForCode(),
+                catch: (error) =>
+                  new InvalidStateError({
+                    code: "provider_login_failed",
+                    detail:
+                      error instanceof Error ? error.message : String(error),
+                  }),
+              }).pipe(
+                Effect.flatMap((code) =>
+                  authClient.exchangeAuthorizationCode(
+                    code,
+                    login.redirectUri,
+                    login.codeVerifier,
+                  ),
+                ),
+                Effect.flatMap((tokens) => persistTokens(tokens)),
                 Effect.catchAll(() => Effect.void),
-                Effect.flatMap(() => client.dispose()),
                 Effect.ensuring(
                   Ref.update(activeLogins, (logins) => {
                     const next = new Map(logins);
@@ -138,7 +252,11 @@ export const ProviderAuthServiceLive = (
               ),
             );
 
-            return login;
+            return {
+              providerKey,
+              loginId: login.loginId,
+              authUrl: login.authUrl,
+            } satisfies ProviderAuthLoginStartResult;
           }),
         cancelLogin: (providerKey: ProviderKey, loginId: string) =>
           Effect.gen(function* () {
@@ -155,8 +273,15 @@ export const ProviderAuthServiceLive = (
               );
             }
 
-            yield* login.client.cancelLogin(loginId);
-            yield* login.dispose();
+            yield* Effect.tryPromise({
+              try: () => login.login.cancel(),
+              catch: (error) =>
+                new InvalidStateError({
+                  code: "provider_login_cancel_failed",
+                  detail:
+                    error instanceof Error ? error.message : String(error),
+                }),
+            });
             yield* Ref.update(activeLogins, (logins) => {
               const next = new Map(logins);
               next.delete(loginId);
@@ -166,9 +291,20 @@ export const ProviderAuthServiceLive = (
         logout: (providerKey: ProviderKey) =>
           Effect.gen(function* () {
             yield* assertCodexProvider(providerKey);
-            const client = yield* createClient();
-            yield* client.logout().pipe(Effect.ensuring(client.dispose()));
+            const activeLoginId = yield* activeLoginIdForProvider(providerKey);
+            if (activeLoginId) {
+              const login = yield* Ref.get(activeLogins).pipe(
+                Effect.map((logins) => logins.get(activeLoginId)),
+              );
+              if (login) {
+                yield* Effect.promise(() => login.login.cancel()).pipe(
+                  Effect.catchAll(() => Effect.void),
+                );
+              }
+            }
+            yield* authRepository.delete(providerKey);
           }),
       } satisfies ProviderAuthServiceApi;
     }),
   );
+};

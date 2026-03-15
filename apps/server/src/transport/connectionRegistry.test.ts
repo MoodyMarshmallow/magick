@@ -1,3 +1,5 @@
+// Verifies connection subscription and unsubscribe behavior for websocket push delivery.
+
 import { ConnectionRegistry } from "./connectionRegistry";
 
 describe("ConnectionRegistry", () => {
@@ -53,5 +55,33 @@ describe("ConnectionRegistry", () => {
     });
 
     expect(received).toHaveLength(0);
+  });
+
+  it("broadcasts connection messages to all registered connections", async () => {
+    const registry = new ConnectionRegistry();
+    const receivedA: unknown[] = [];
+    const receivedB: unknown[] = [];
+
+    registry.register({
+      id: "conn_a",
+      send: async (message) => {
+        receivedA.push(message);
+      },
+    });
+    registry.register({
+      id: "conn_b",
+      send: async (message) => {
+        receivedB.push(message);
+      },
+    });
+
+    await registry.broadcast({
+      channel: "transport.connectionState",
+      state: "connected",
+      detail: "all good",
+    });
+
+    expect(receivedA).toHaveLength(1);
+    expect(receivedB).toHaveLength(1);
   });
 });

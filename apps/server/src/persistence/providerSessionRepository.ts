@@ -1,3 +1,5 @@
+// Stores provider session metadata and native session references.
+
 import { Context, Effect, Layer } from "effect";
 
 import type { ProviderSessionRecord } from "../../../../packages/contracts/src/provider";

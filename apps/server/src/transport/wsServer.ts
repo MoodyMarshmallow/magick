@@ -1,3 +1,5 @@
+// Handles websocket commands and bridges transport requests into backend Effect services.
+
 import type { Server } from "node:http";
 
 import { Cause, Effect, Exit, Option } from "effect";

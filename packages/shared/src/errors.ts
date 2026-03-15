@@ -1,3 +1,5 @@
+// Provides shared runtime error helpers used across the codebase.
+
 export class MagickError extends Error {
   readonly code: string;
 

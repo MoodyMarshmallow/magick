@@ -1,3 +1,5 @@
+// Defines shared provider capability, auth, and session contract types.
+
 export type ProviderKey = "codex" | string;
 
 export type ResumeStrategy = "native" | "rebuild";
@@ -44,4 +46,17 @@ export interface ProviderAuthLoginStartResult {
   readonly providerKey: ProviderKey;
   readonly loginId: string;
   readonly authUrl: string;
+}
+
+export interface ProviderAuthRecord {
+  readonly providerKey: ProviderKey;
+  readonly authMode: "chatgpt";
+  readonly accessToken: string;
+  readonly refreshToken: string;
+  readonly expiresAt: number;
+  readonly accountId: string | null;
+  readonly email: string | null;
+  readonly planType: string | null;
+  readonly createdAt: string;
+  readonly updatedAt: string;
 }

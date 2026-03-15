@@ -1,3 +1,5 @@
+// Persists and replays append-only thread domain events.
+
 import { Context, Effect, Layer } from "effect";
 
 import type { DomainEvent } from "../../../../packages/contracts/src/chat";

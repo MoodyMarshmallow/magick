@@ -1,3 +1,5 @@
+// Provides a deterministic in-memory provider used for orchestration and transport tests.
+
 import { Effect, Option, Stream } from "effect";
 
 import type { ProviderCapabilities } from "../../../../../packages/contracts/src/provider";

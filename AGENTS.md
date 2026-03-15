@@ -25,30 +25,31 @@ Long term maintainability is a core priority. If you add new functionality, firs
 
 ## Package Roles
 
-- `apps/server`: Node.js WebSocket server. Wraps Codex app-server (JSON-RPC over stdio), serves the React web app, and manages provider sessions.
+- `apps/server`: Node.js WebSocket server. Owns provider orchestration, auth integration, persistence, and WebSocket delivery for the React app.
 - `apps/web`: React/Vite UI. Owns session UX, conversation/event rendering, and client-side state. Connects to the server via WebSocket.
 - `packages/contracts`: Shared effect/Schema schemas and TypeScript contracts for provider events, WebSocket protocol, and model/session types. Keep this package schema-only — no runtime logic.
 - `packages/shared`: Shared runtime utilities consumed by both server and web. Uses explicit subpath exports (e.g. `@magick/shared`) — no barrel index.
 
-## Codex App Server (Important)
+## Codex Integration (Important)
 
-Magick is currently Codex-first. The server starts `codex app-server` (JSON-RPC over stdio) per provider session, then streams structured events to the browser through WebSocket push messages.
+Magick is Codex-first and now owns Codex auth and transport directly inside Magick rather than relying on `codex app-server` as the integration surface.
 
 How we use it in this codebase:
 
-- Session startup/resume and turn lifecycle are brokered in `apps/server/src/codexAppServerManager.ts`.
-- Provider dispatch and thread event logging are coordinated in `apps/server/src/providerManager.ts`.
-- WebSocket server routes NativeApi methods in `apps/server/src/wsServer.ts`.
-- Web app consumes orchestration domain events via WebSocket push on channel `orchestration.domainEvent` (provider runtime activity is projected into orchestration events server-side).
+- Provider dispatch, auth handling, and thread orchestration are coordinated under `apps/server/src/application/` and `apps/server/src/providers/`.
+- The current Codex runtime lives under `apps/server/src/providers/codex/`.
+- Web app consumers should continue to rely on orchestration domain events and typed WebSocket commands rather than provider-specific transport details.
+- If implementing new Codex work, keep the direct OAuth, token refresh, and Codex HTTP transport path as the source of truth.
 
 Docs:
 
-- Codex App Server docs: https://developers.openai.com/codex/sdk/#app-server
+- Codex auth/docs overview: https://developers.openai.com/codex/auth
 
 ## Reference Repos
 
 - Open-source Codex repo: https://github.com/openai/codex
 - Codex-Monitor (Tauri, feature-complete, strong reference implementation): https://github.com/Dimillian/CodexMonitor
+- OpenCode (direct OAuth and Codex transport reference): https://github.com/anomalyco/opencode
 - T3 code: https://github.com/pingdotgg/t3code
 
 Use these as implementation references when designing protocol handling, UX flows, and operational safeguards.

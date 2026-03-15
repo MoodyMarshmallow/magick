@@ -1,7 +1,10 @@
-import { Effect, type Stream } from "effect";
+// Bridges Magick provider interfaces to the direct Codex auth and HTTP runtime.
+
+import { Effect, Stream } from "effect";
 
 import type { ProviderCapabilities } from "../../../../../packages/contracts/src/provider";
-import { ProviderFailureError } from "../../effect/errors";
+import type { ProviderFailureError } from "../../effect/errors";
+import type { ProviderAuthRepositoryClient } from "../../persistence/providerAuthRepository";
 import type {
   CreateProviderSessionInput,
   InterruptTurnInput,
@@ -12,10 +15,13 @@ import type {
   StartTurnInput,
 } from "../providerTypes";
 import {
-  type CodexAppServerClient,
-  type CodexClientFactoryOptions,
-  createCodexAppServerClient,
-} from "./codexAppServerClient";
+  CodexAuthClient,
+  type CodexAuthClientOptions,
+} from "./codexAuthClient";
+import {
+  CodexResponsesClient,
+  type CodexResponsesClientOptions,
+} from "./codexResponsesClient";
 
 export interface CodexRuntimeFactory {
   readonly createSession: (
@@ -26,45 +32,27 @@ export interface CodexRuntimeFactory {
   ) => Effect.Effect<ProviderSessionHandle, ProviderFailureError>;
 }
 
-export interface CodexProviderOptions extends CodexClientFactoryOptions {
-  readonly resolveWorkspaceCwd?: (workspaceId: string) => string;
-  readonly defaultModel?: string;
-  readonly defaultApprovalPolicy?: string;
-  readonly defaultSandboxPolicy?:
-    | string
-    | {
-        readonly type: string;
-        readonly writableRoots?: readonly string[];
-        readonly networkAccess?: boolean;
-      };
-  readonly defaultPersonality?: "friendly" | "pragmatic" | "none";
+export interface CodexProviderOptions
+  extends Omit<CodexResponsesClientOptions, "authClient" | "authRepository">,
+    CodexAuthClientOptions {
+  readonly authRepository: ProviderAuthRepositoryClient;
+  readonly authClient?: CodexAuthClient;
 }
-
-const toProviderFailure = (code: string, detail: string, retryable = true) =>
-  new ProviderFailureError({
-    providerKey: "codex",
-    code,
-    detail,
-    retryable,
-  });
 
 class CodexSessionHandle implements ProviderSessionHandle {
   readonly sessionId: string;
-  readonly providerSessionRef: string | null;
-  readonly providerThreadRef: string | null;
-  readonly #threadId: string;
-  readonly #client: CodexAppServerClient;
+  readonly providerSessionRef: string | null = null;
+  readonly providerThreadRef: string | null = null;
+  readonly #responsesClient: CodexResponsesClient;
+  #activeAbortController: AbortController | null = null;
+  #activeTurnId: string | null = null;
 
   constructor(args: {
     sessionId: string;
-    threadId: string;
-    client: CodexAppServerClient;
+    responsesClient: CodexResponsesClient;
   }) {
     this.sessionId = args.sessionId;
-    this.providerSessionRef = args.threadId;
-    this.providerThreadRef = args.threadId;
-    this.#threadId = args.threadId;
-    this.#client = args.client;
+    this.#responsesClient = args.responsesClient;
   }
 
   readonly startTurn = (
@@ -73,107 +61,101 @@ class CodexSessionHandle implements ProviderSessionHandle {
     Stream.Stream<ProviderEvent, ProviderFailureError>,
     ProviderFailureError
   > =>
-    this.#client
-      .startTurn(this.#threadId, [
-        {
-          type: "text",
-          text: input.userMessage,
-        },
-      ])
-      .pipe(
-        Effect.map(({ turnId }) =>
-          this.#client.streamTurn(turnId, input.messageId),
-        ),
-      );
+    Effect.sync(() => {
+      this.#activeAbortController = new AbortController();
+      this.#activeTurnId = input.turnId;
+
+      return this.#responsesClient
+        .streamResponse({
+          messages: [
+            ...input.contextMessages.map((message) => ({
+              role: message.role,
+              content: message.content,
+            })),
+            {
+              role: "user",
+              content: input.userMessage,
+            },
+          ],
+          signal: this.#activeAbortController.signal,
+        })
+        .pipe(
+          Stream.map((event) => {
+            switch (event.type) {
+              case "output.delta":
+                return {
+                  type: "output.delta" as const,
+                  turnId: input.turnId,
+                  messageId: input.messageId,
+                  delta: event.delta,
+                };
+              case "output.completed":
+                return {
+                  type: "output.completed" as const,
+                  turnId: input.turnId,
+                  messageId: input.messageId,
+                };
+              case "turn.failed":
+                return {
+                  type: "turn.failed" as const,
+                  turnId: input.turnId,
+                  error: event.error,
+                };
+            }
+          }),
+          Stream.ensuring(
+            Effect.sync(() => {
+              this.#activeAbortController = null;
+              this.#activeTurnId = null;
+            }),
+          ),
+        );
+    });
 
   readonly interruptTurn = (
     input: InterruptTurnInput,
   ): Effect.Effect<void, ProviderFailureError> =>
-    this.#client.interruptTurn(this.#threadId, input.turnId);
+    Effect.sync(() => {
+      if (this.#activeTurnId === input.turnId && this.#activeAbortController) {
+        this.#activeAbortController.abort();
+        this.#activeAbortController = null;
+        this.#activeTurnId = null;
+      }
+    });
 
-  readonly dispose = (): Effect.Effect<void> => this.#client.dispose();
+  readonly dispose = (): Effect.Effect<void> =>
+    Effect.sync(() => {
+      this.#activeAbortController?.abort();
+      this.#activeAbortController = null;
+      this.#activeTurnId = null;
+    });
 }
 
 export const createCodexRuntimeFactory = (
-  options: CodexProviderOptions = {},
+  options: CodexProviderOptions,
 ): CodexRuntimeFactory => {
-  const resolveWorkspaceCwd =
-    options.resolveWorkspaceCwd ?? ((workspaceId) => workspaceId);
-
-  const buildThreadParams = (workspaceId: string) => {
-    const cwd = resolveWorkspaceCwd(workspaceId);
-    return {
-      cwd,
-      ...(options.defaultModel ? { model: options.defaultModel } : {}),
-      ...(options.defaultApprovalPolicy
-        ? { approvalPolicy: options.defaultApprovalPolicy }
-        : {}),
-      ...(options.defaultSandboxPolicy
-        ? { sandboxPolicy: options.defaultSandboxPolicy }
-        : {}),
-      ...(options.defaultPersonality
-        ? { personality: options.defaultPersonality }
-        : {}),
-    } satisfies Record<string, unknown>;
-  };
-
-  const createClient = (workspaceId: string) =>
-    createCodexAppServerClient({
-      ...options,
-      cwd: resolveWorkspaceCwd(workspaceId),
-    });
+  const authClient = options.authClient ?? new CodexAuthClient(options);
+  const responsesClient = new CodexResponsesClient({
+    ...options,
+    authRepository: options.authRepository,
+    authClient,
+  });
 
   return {
     createSession: (input) =>
-      createClient(input.workspaceId).pipe(
-        Effect.flatMap((client) =>
-          client.startThread(buildThreadParams(input.workspaceId)).pipe(
-            Effect.map(
-              (threadId) =>
-                new CodexSessionHandle({
-                  sessionId: input.sessionId,
-                  threadId,
-                  client,
-                }),
-            ),
-            Effect.catchAll((error) =>
-              client.dispose().pipe(Effect.zipRight(Effect.fail(error))),
-            ),
-          ),
-        ),
+      Effect.succeed(
+        new CodexSessionHandle({
+          sessionId: input.sessionId,
+          responsesClient,
+        }),
       ),
-    resumeSession: (input) => {
-      const threadId = input.providerThreadRef ?? input.providerSessionRef;
-      if (!threadId) {
-        return Effect.fail(
-          toProviderFailure(
-            "resume_missing_thread_ref",
-            "Cannot resume Codex session without a thread reference.",
-            false,
-          ),
-        );
-      }
-
-      return createClient(input.workspaceId).pipe(
-        Effect.flatMap((client) =>
-          client
-            .resumeThread(threadId, buildThreadParams(input.workspaceId))
-            .pipe(
-              Effect.map(
-                (resumedThreadId) =>
-                  new CodexSessionHandle({
-                    sessionId: input.sessionId,
-                    threadId: resumedThreadId,
-                    client,
-                  }),
-              ),
-              Effect.catchAll((error) =>
-                client.dispose().pipe(Effect.zipRight(Effect.fail(error))),
-              ),
-            ),
-        ),
-      );
-    },
+    resumeSession: (input) =>
+      Effect.succeed(
+        new CodexSessionHandle({
+          sessionId: input.sessionId,
+          responsesClient,
+        }),
+      ),
   };
 };
 
@@ -186,15 +168,15 @@ export class CodexProviderAdapter implements ProviderAdapter {
   }
 
   readonly listCapabilities = (): ProviderCapabilities => ({
-    supportsNativeResume: true,
+    supportsNativeResume: false,
     supportsInterrupt: true,
     supportsAttachments: false,
     supportsToolCalls: true,
-    supportsApprovals: true,
-    supportsServerSideSessions: true,
+    supportsApprovals: false,
+    supportsServerSideSessions: false,
   });
 
-  readonly getResumeStrategy = () => "native" as const;
+  readonly getResumeStrategy = () => "rebuild" as const;
 
   readonly createSession = (input: CreateProviderSessionInput) =>
     this.#runtimeFactory.createSession(input);

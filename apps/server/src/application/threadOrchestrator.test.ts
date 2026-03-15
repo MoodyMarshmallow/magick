@@ -1,4 +1,6 @@
-import { Effect, Layer } from "effect";
+// Exercises the orchestrator across create, send, replay, retry, and interrupt flows.
+
+import { Cause, Effect, Exit, Layer, Option, Stream } from "effect";
 import * as ManagedRuntime from "effect/ManagedRuntime";
 
 import {
@@ -22,7 +24,11 @@ import {
   makeThreadRepositoryLayer,
 } from "../persistence/threadRepository";
 import { FakeProviderAdapter } from "../providers/fake/fakeProviderAdapter";
-import type { ProviderRegistryService } from "../providers/providerTypes";
+import type {
+  ProviderAdapter,
+  ProviderRegistryService,
+  ProviderSessionHandle,
+} from "../providers/providerTypes";
 import { makeProviderRegistryLayer } from "./providerRegistry";
 import {
   ReplayService,
@@ -71,6 +77,32 @@ const createTestContext = (adapter: FakeProviderAdapter) => {
   return {
     runtime: ManagedRuntime.make(Layer.mergeAll(baseLayer, appLayer)),
     publishedEvents,
+  };
+};
+
+const createProviderContext = (adapter: ProviderAdapter) => {
+  const database = createDatabase();
+
+  const baseLayer = Layer.mergeAll(
+    ClockLive,
+    IdGeneratorLive,
+    RuntimeStateLive,
+    makeEventStoreLayer(database),
+    makeThreadRepositoryLayer(database),
+    makeProviderSessionRepositoryLayer(database),
+    makeProviderRegistryLayer([adapter]),
+    Layer.succeed(EventPublisher, {
+      publish: () => Effect.void,
+    }),
+  );
+
+  const appLayer = Layer.mergeAll(
+    ReplayServiceLive,
+    ThreadOrchestratorLive,
+  ).pipe(Layer.provide(baseLayer));
+
+  return {
+    runtime: ManagedRuntime.make(Layer.mergeAll(baseLayer, appLayer)),
   };
 };
 
@@ -210,5 +242,168 @@ describe("ThreadOrchestrator", () => {
     );
     expect(replayedEvents.length).toBeGreaterThan(0);
     expect(replayedEvents[0]?.sequence).toBeGreaterThan(2);
+  });
+
+  it("retries the last user message and fails when retry is impossible", async () => {
+    const adapter = new FakeProviderAdapter({ mode: "stateful" });
+    const { runtime } = createTestContext(adapter);
+    const orchestrator = await runtime.runPromise(ThreadOrchestrator);
+
+    const thread = await runWithRuntime(
+      runtime,
+      orchestrator.createThread({
+        workspaceId: "workspace_1",
+        providerKey: adapter.key,
+      }),
+    );
+
+    const exit = await runtime.runPromiseExit(
+      orchestrator.retryTurn(thread.threadId),
+    );
+    expect(Exit.isFailure(exit)).toBe(true);
+    if (Exit.isFailure(exit)) {
+      const failure = Cause.failureOption(exit.cause);
+      expect(Option.isSome(failure) ? failure.value : null).toMatchObject({
+        code: "retry_not_possible",
+      });
+    }
+
+    await runWithRuntime(
+      runtime,
+      orchestrator.sendMessage(thread.threadId, "Retry me"),
+    );
+    const retried = await runWithRuntime(
+      runtime,
+      orchestrator.retryTurn(thread.threadId),
+    );
+
+    expect(
+      retried.messages.filter((message) => message.role === "user"),
+    ).toHaveLength(2);
+  });
+
+  it("lists, opens, and ensures sessions for created threads", async () => {
+    const adapter = new FakeProviderAdapter({ mode: "stateful" });
+    const { runtime } = createTestContext(adapter);
+    const orchestrator = await runtime.runPromise(ThreadOrchestrator);
+
+    const thread = await runWithRuntime(
+      runtime,
+      orchestrator.createThread({
+        workspaceId: "workspace_1",
+        providerKey: adapter.key,
+        title: "Opened chat",
+      }),
+    );
+
+    const summaries = await runWithRuntime(
+      runtime,
+      orchestrator.listThreads("workspace_1"),
+    );
+    expect(summaries).toHaveLength(1);
+    expect(summaries[0]?.threadId).toBe(thread.threadId);
+
+    const opened = await runWithRuntime(
+      runtime,
+      orchestrator.openThread(thread.threadId),
+    );
+    expect(opened.title).toBe("Opened chat");
+
+    const ensured = await runWithRuntime(
+      runtime,
+      orchestrator.ensureSession(thread.threadId),
+    );
+    expect(ensured.threadId).toBe(thread.threadId);
+  });
+
+  it("returns the current thread when stopTurn is called without an active turn", async () => {
+    const adapter = new FakeProviderAdapter({ mode: "stateful" });
+    const { runtime } = createTestContext(adapter);
+    const orchestrator = await runtime.runPromise(ThreadOrchestrator);
+
+    const thread = await runWithRuntime(
+      runtime,
+      orchestrator.createThread({
+        workspaceId: "workspace_1",
+        providerKey: adapter.key,
+      }),
+    );
+
+    const stopped = await runWithRuntime(
+      runtime,
+      orchestrator.stopTurn(thread.threadId),
+    );
+    expect(stopped.threadId).toBe(thread.threadId);
+    expect(stopped.status).toBe("idle");
+  });
+
+  it("handles provider failure and session state events from a custom provider", async () => {
+    const adapter: ProviderAdapter = {
+      key: "custom",
+      listCapabilities: () => ({
+        supportsNativeResume: false,
+        supportsInterrupt: true,
+        supportsAttachments: false,
+        supportsToolCalls: false,
+        supportsApprovals: false,
+        supportsServerSideSessions: false,
+      }),
+      getResumeStrategy: () => "rebuild",
+      createSession: ({ sessionId }) =>
+        Effect.succeed({
+          sessionId,
+          providerSessionRef: null,
+          providerThreadRef: null,
+          startTurn: ({
+            turnId,
+          }: { readonly turnId: string; readonly messageId: string }) =>
+            Effect.succeed(
+              Stream.fromIterable([
+                {
+                  type: "session.disconnected" as const,
+                  reason: "offline",
+                },
+                {
+                  type: "session.recovered" as const,
+                  reason: "back",
+                },
+                {
+                  type: "turn.failed" as const,
+                  turnId,
+                  error: "boom",
+                },
+              ]),
+            ),
+          interruptTurn: () => Effect.void,
+          dispose: () => Effect.void,
+        } as unknown as ProviderSessionHandle),
+      resumeSession: ({ sessionId }) =>
+        Effect.succeed({
+          sessionId,
+          providerSessionRef: null,
+          providerThreadRef: null,
+          startTurn: () => Effect.die("unused"),
+          interruptTurn: () => Effect.void,
+          dispose: () => Effect.void,
+        } as unknown as ProviderSessionHandle),
+    };
+
+    const { runtime } = createProviderContext(adapter);
+    const orchestrator = await runtime.runPromise(ThreadOrchestrator);
+    const thread = await runWithRuntime(
+      runtime,
+      orchestrator.createThread({
+        workspaceId: "workspace_1",
+        providerKey: adapter.key,
+      }),
+    );
+
+    const result = await runWithRuntime(
+      runtime,
+      orchestrator.sendMessage(thread.threadId, "Hello"),
+    );
+
+    expect(result.status).toBe("failed");
+    expect(result.lastError).toBe("boom");
   });
 });

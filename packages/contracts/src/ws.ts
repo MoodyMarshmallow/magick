@@ -1,3 +1,5 @@
+// Defines the websocket request, response, and push message contracts.
+
 import type {
   ClientCommand,
   DomainEvent,

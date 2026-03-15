@@ -1,3 +1,5 @@
+// Verifies thread records and snapshots round-trip through persistence.
+
 import * as ManagedRuntime from "effect/ManagedRuntime";
 
 import { createDatabase } from "./database";
@@ -66,5 +68,218 @@ describe("ThreadRepository", () => {
     ).toMatchObject({
       threadId: "thread_1",
     });
+  });
+
+  it("returns null or empty collections for missing thread data", async () => {
+    const runtime = ManagedRuntime.make(
+      makeThreadRepositoryLayer(createDatabase()),
+    );
+    const repository = await runtime.runPromise(ThreadRepository);
+
+    expect(await runtime.runPromise(repository.get("missing"))).toBeNull();
+    expect(
+      await runtime.runPromise(repository.getSnapshot("missing")),
+    ).toBeNull();
+    expect(
+      await runtime.runPromise(repository.listByWorkspace("workspace_1")),
+    ).toEqual([]);
+  });
+
+  it("overwrites an existing snapshot when saving again", async () => {
+    const runtime = ManagedRuntime.make(
+      makeThreadRepositoryLayer(createDatabase()),
+    );
+    const repository = await runtime.runPromise(ThreadRepository);
+
+    await runtime.runPromise(
+      repository.create({
+        id: "thread_1",
+        workspaceId: "workspace_1",
+        providerKey: "fake",
+        providerSessionId: "session_1",
+        title: "Chat",
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      }),
+    );
+
+    await runtime.runPromise(
+      repository.saveSnapshot(
+        "thread_1",
+        {
+          threadId: "thread_1",
+          workspaceId: "workspace_1",
+          providerKey: "fake",
+          title: "Chat",
+          status: "idle",
+          latestSequence: 1,
+          updatedAt: "2026-01-01T00:00:01.000Z",
+        },
+        {
+          threadId: "thread_1",
+          workspaceId: "workspace_1",
+          providerKey: "fake",
+          providerSessionId: "session_1",
+          title: "Chat",
+          status: "idle",
+          messages: [],
+          activeTurnId: null,
+          latestSequence: 1,
+          lastError: null,
+          lastUserMessageAt: null,
+          lastAssistantMessageAt: null,
+          updatedAt: "2026-01-01T00:00:01.000Z",
+        },
+      ),
+    );
+
+    await runtime.runPromise(
+      repository.saveSnapshot(
+        "thread_1",
+        {
+          threadId: "thread_1",
+          workspaceId: "workspace_1",
+          providerKey: "fake",
+          title: "Updated",
+          status: "failed",
+          latestSequence: 2,
+          updatedAt: "2026-01-01T00:00:02.000Z",
+        },
+        {
+          threadId: "thread_1",
+          workspaceId: "workspace_1",
+          providerKey: "fake",
+          providerSessionId: "session_1",
+          title: "Updated",
+          status: "failed",
+          messages: [],
+          activeTurnId: null,
+          latestSequence: 2,
+          lastError: "boom",
+          lastUserMessageAt: null,
+          lastAssistantMessageAt: null,
+          updatedAt: "2026-01-01T00:00:02.000Z",
+        },
+      ),
+    );
+
+    expect(
+      await runtime.runPromise(repository.getSnapshot("thread_1")),
+    ).toMatchObject({
+      title: "Updated",
+      status: "failed",
+    });
+  });
+
+  it("returns workspace summaries ordered by latest snapshot update", async () => {
+    const runtime = ManagedRuntime.make(
+      makeThreadRepositoryLayer(createDatabase()),
+    );
+    const repository = await runtime.runPromise(ThreadRepository);
+
+    for (const threadId of ["thread_1", "thread_2"]) {
+      await runtime.runPromise(
+        repository.create({
+          id: threadId,
+          workspaceId: "workspace_1",
+          providerKey: "fake",
+          providerSessionId: `${threadId}_session`,
+          title: threadId,
+          createdAt: "2026-01-01T00:00:00.000Z",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+        }),
+      );
+    }
+
+    await runtime.runPromise(
+      repository.saveSnapshot(
+        "thread_1",
+        {
+          threadId: "thread_1",
+          workspaceId: "workspace_1",
+          providerKey: "fake",
+          title: "thread_1",
+          status: "idle",
+          latestSequence: 1,
+          updatedAt: "2026-01-01T00:00:01.000Z",
+        },
+        {
+          threadId: "thread_1",
+          workspaceId: "workspace_1",
+          providerKey: "fake",
+          providerSessionId: "thread_1_session",
+          title: "thread_1",
+          status: "idle",
+          messages: [],
+          activeTurnId: null,
+          latestSequence: 1,
+          lastError: null,
+          lastUserMessageAt: null,
+          lastAssistantMessageAt: null,
+          updatedAt: "2026-01-01T00:00:01.000Z",
+        },
+      ),
+    );
+    await runtime.runPromise(
+      repository.saveSnapshot(
+        "thread_2",
+        {
+          threadId: "thread_2",
+          workspaceId: "workspace_1",
+          providerKey: "fake",
+          title: "thread_2",
+          status: "idle",
+          latestSequence: 2,
+          updatedAt: "2026-01-01T00:00:02.000Z",
+        },
+        {
+          threadId: "thread_2",
+          workspaceId: "workspace_1",
+          providerKey: "fake",
+          providerSessionId: "thread_2_session",
+          title: "thread_2",
+          status: "idle",
+          messages: [],
+          activeTurnId: null,
+          latestSequence: 2,
+          lastError: null,
+          lastUserMessageAt: null,
+          lastAssistantMessageAt: null,
+          updatedAt: "2026-01-01T00:00:02.000Z",
+        },
+      ),
+    );
+
+    const summaries = await runtime.runPromise(
+      repository.listByWorkspace("workspace_1"),
+    );
+    expect(summaries.map((summary) => summary.threadId)).toEqual([
+      "thread_2",
+      "thread_1",
+    ]);
+  });
+
+  it("surfaces persistence errors when stored snapshots are invalid", async () => {
+    const database = createDatabase();
+    database
+      .prepare(
+        `
+          INSERT INTO thread_snapshots (thread_id, summary_json, thread_json, updated_at)
+          VALUES (?, ?, ?, ?)
+        `,
+      )
+      .run(
+        "thread_1",
+        JSON.stringify({ threadId: "thread_1" }),
+        "{bad json",
+        "2026-01-01T00:00:00.000Z",
+      );
+
+    const runtime = ManagedRuntime.make(makeThreadRepositoryLayer(database));
+    const repository = await runtime.runPromise(ThreadRepository);
+
+    await expect(
+      runtime.runPromise(repository.getSnapshot("thread_1")),
+    ).rejects.toBeTruthy();
   });
 });

@@ -1,3 +1,5 @@
+// Verifies websocket command handling and transport-level error mapping.
+
 import { createServer } from "node:http";
 
 import { Effect, Layer } from "effect";
@@ -223,6 +225,271 @@ describe("WebSocketCommandServer", () => {
           },
         },
       },
+    });
+
+    await closeServer(server);
+  });
+
+  it("handles bootstrap, list, create, stop, retry, resume, and auth commands", async () => {
+    const { runtime, adapter } = makeRuntime();
+    const server = createServer();
+    await listen(server);
+    const wsServer = new WebSocketCommandServer({
+      httpServer: server,
+      runtime: runtime as ManagedRuntime.ManagedRuntime<TestRuntime, never>,
+      connections: new ConnectionRegistry(),
+    });
+
+    const bootstrap = await wsServer.handleCommand(
+      {
+        requestId: "req_bootstrap",
+        command: {
+          type: "app.bootstrap",
+          payload: { workspaceId: "workspace_1" },
+        },
+      },
+      "conn_bootstrap",
+    );
+    expect(bootstrap.result.ok).toBe(true);
+
+    const create = await wsServer.handleCommand(
+      {
+        requestId: "req_create",
+        command: {
+          type: "thread.create",
+          payload: { workspaceId: "workspace_1", providerKey: adapter.key },
+        },
+      },
+      "conn_create",
+    );
+    expect(create).toMatchObject({
+      result: { ok: true, data: { kind: "threadState" } },
+    });
+    const threadId =
+      create.result.ok && create.result.data.kind === "threadState"
+        ? create.result.data.thread.threadId
+        : "";
+
+    const list = await wsServer.handleCommand(
+      {
+        requestId: "req_list",
+        command: {
+          type: "thread.list",
+          payload: { workspaceId: "workspace_1" },
+        },
+      },
+      "conn_list",
+    );
+    expect(list).toMatchObject({
+      result: { ok: true, data: { kind: "threadList" } },
+    });
+
+    const open = await wsServer.handleCommand(
+      {
+        requestId: "req_open",
+        command: {
+          type: "thread.open",
+          payload: { threadId },
+        },
+      },
+      "conn_open",
+    );
+    expect(open).toMatchObject({
+      result: { ok: true, data: { kind: "threadState" } },
+    });
+
+    await wsServer.handleCommand(
+      {
+        requestId: "req_send",
+        command: {
+          type: "thread.sendMessage",
+          payload: { threadId, content: "Hello" },
+        },
+      },
+      "conn_send",
+    );
+
+    const stop = await wsServer.handleCommand(
+      {
+        requestId: "req_stop",
+        command: {
+          type: "thread.stopTurn",
+          payload: { threadId },
+        },
+      },
+      "conn_stop",
+    );
+    expect(stop).toMatchObject({
+      result: { ok: true, data: { kind: "threadState" } },
+    });
+
+    const retry = await wsServer.handleCommand(
+      {
+        requestId: "req_retry",
+        command: {
+          type: "thread.retryTurn",
+          payload: { threadId },
+        },
+      },
+      "conn_retry",
+    );
+    expect(retry).toMatchObject({
+      result: { ok: true, data: { kind: "accepted", threadId } },
+    });
+
+    const resume = await wsServer.handleCommand(
+      {
+        requestId: "req_resume",
+        command: {
+          type: "thread.resume",
+          payload: { threadId, afterSequence: 0 },
+        },
+      },
+      "conn_resume",
+    );
+    expect(resume).toMatchObject({
+      result: { ok: true, data: { kind: "threadState" } },
+    });
+
+    const loginStart = await wsServer.handleCommand(
+      {
+        requestId: "req_auth_start",
+        command: {
+          type: "provider.auth.login.start",
+          payload: { providerKey: "codex", mode: "chatgpt" },
+        },
+      },
+      "conn_auth_start",
+    );
+    expect(loginStart).toMatchObject({
+      result: { ok: true, data: { kind: "providerAuthLoginStart" } },
+    });
+
+    const cancel = await wsServer.handleCommand(
+      {
+        requestId: "req_auth_cancel",
+        command: {
+          type: "provider.auth.login.cancel",
+          payload: { providerKey: "codex", loginId: "login_1" },
+        },
+      },
+      "conn_auth_cancel",
+    );
+    expect(cancel).toMatchObject({
+      result: { ok: true, data: { kind: "providerAuthState" } },
+    });
+
+    const logout = await wsServer.handleCommand(
+      {
+        requestId: "req_auth_logout",
+        command: {
+          type: "provider.auth.logout",
+          payload: { providerKey: "codex" },
+        },
+      },
+      "conn_auth_logout",
+    );
+    expect(logout).toMatchObject({
+      result: { ok: true, data: { kind: "providerAuthState" } },
+    });
+
+    await closeServer(server);
+  });
+
+  it("publishes pushed domain events to subscribed connections", async () => {
+    const { runtime, adapter } = makeRuntime();
+    const server = createServer();
+    await listen(server);
+    const connections = new ConnectionRegistry();
+    const pushed: unknown[] = [];
+    connections.register({
+      id: "conn_push",
+      send: async (message) => {
+        pushed.push(message);
+      },
+    });
+
+    const wsServer = new WebSocketCommandServer({
+      httpServer: server,
+      runtime: runtime as ManagedRuntime.ManagedRuntime<TestRuntime, never>,
+      connections,
+    });
+
+    const orchestrator = await runtime.runPromise(ThreadOrchestrator);
+    const thread = await runtime.runPromise(
+      orchestrator.createThread({
+        workspaceId: "workspace_1",
+        providerKey: adapter.key,
+      }),
+    );
+    connections.subscribeThread("conn_push", thread.threadId);
+
+    await wsServer.publish([
+      {
+        eventId: "event_1",
+        threadId: thread.threadId,
+        providerSessionId: thread.providerSessionId,
+        sequence: 1,
+        occurredAt: new Date().toISOString(),
+        type: "thread.created",
+        payload: {
+          workspaceId: "workspace_1",
+          providerKey: adapter.key,
+          title: "Chat",
+        },
+      },
+    ]);
+
+    expect(pushed).toHaveLength(1);
+    await closeServer(server);
+  });
+
+  it("maps unexpected runtime failures to internal_error responses", async () => {
+    const server = createServer();
+    await listen(server);
+    const runtime = ManagedRuntime.make(
+      Layer.mergeAll(
+        Layer.succeed(ThreadOrchestrator, {
+          createThread: () => Effect.die(new Error("boom")),
+          listThreads: () => Effect.die(new Error("boom")),
+          openThread: () => Effect.die(new Error("boom")),
+          sendMessage: () => Effect.die(new Error("boom")),
+          stopTurn: () => Effect.die(new Error("boom")),
+          retryTurn: () => Effect.die(new Error("boom")),
+          ensureSession: () => Effect.die(new Error("boom")),
+        }),
+        Layer.succeed(ReplayService, {
+          getThreadState: () => Effect.die(new Error("boom")),
+          replayThread: () => Effect.die(new Error("boom")),
+        }),
+        Layer.succeed(ProviderAuthService, {
+          read: () => Effect.die(new Error("boom")),
+          startChatGptLogin: () => Effect.die(new Error("boom")),
+          cancelLogin: () => Effect.die(new Error("boom")),
+          logout: () => Effect.die(new Error("boom")),
+        }),
+      ),
+    );
+    const wsServer = new WebSocketCommandServer({
+      httpServer: server,
+      runtime: runtime as ManagedRuntime.ManagedRuntime<TestRuntime, never>,
+      connections: new ConnectionRegistry(),
+    });
+
+    const response = await wsServer.handleCommand(
+      {
+        requestId: "req_internal",
+        command: {
+          type: "thread.list",
+          payload: { workspaceId: "workspace_1" },
+        },
+      },
+      "conn_internal",
+    );
+
+    expect(response).toMatchObject({
+      requestId: "req_internal",
+      result: { ok: false, error: { code: "replay_failure" } },
     });
 
     await closeServer(server);

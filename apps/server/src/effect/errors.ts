@@ -1,3 +1,5 @@
+// Defines the backend error types and helpers used for consistent transport-safe failure handling.
+
 import { Data } from "effect";
 
 export class NotFoundError extends Data.TaggedError("NotFoundError")<{

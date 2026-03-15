@@ -1,3 +1,5 @@
+// Tracks websocket connections and per-thread subscriptions for server push delivery.
+
 import type { ServerPushEnvelope } from "../../../../packages/contracts/src/ws";
 
 export interface PushConnection {

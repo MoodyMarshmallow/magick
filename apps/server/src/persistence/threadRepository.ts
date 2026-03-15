@@ -1,3 +1,5 @@
+// Stores thread metadata and projected thread snapshots.
+
 import { Context, Effect, Layer } from "effect";
 
 import type {

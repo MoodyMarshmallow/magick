@@ -1,4 +1,8 @@
-import { createBackendServices } from "./index";
+// Verifies the backend composition root registers the expected services and providers.
+
+import { createServer } from "node:http";
+
+import { attachWebSocketServer, createBackendServices } from "./index";
 import { ProviderRegistry } from "./providers/providerTypes";
 
 describe("createBackendServices", () => {
@@ -20,5 +24,13 @@ describe("createBackendServices", () => {
     ).resolves.toMatchObject({
       key: "fake",
     });
+  });
+
+  it("attaches the websocket server without throwing", () => {
+    const services = createBackendServices();
+    const server = createServer();
+
+    expect(() => attachWebSocketServer(server, services)).not.toThrow();
+    server.close();
   });
 });

@@ -1,3 +1,5 @@
+// Verifies the SQLite bootstrap creates the expected tables.
+
 import { createDatabase } from "./database";
 
 describe("createDatabase", () => {
@@ -17,6 +19,7 @@ describe("createDatabase", () => {
     expect(tables.map((table) => table.name)).toEqual(
       expect.arrayContaining([
         "connection_checkpoints",
+        "provider_auth_records",
         "provider_sessions",
         "thread_events",
         "thread_snapshots",

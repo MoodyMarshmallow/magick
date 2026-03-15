@@ -1,3 +1,5 @@
+// Reduces thread domain events into UI-ready thread and summary projections.
+
 import type {
   DomainEvent,
   ThreadSummary,

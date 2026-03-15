@@ -1,3 +1,5 @@
+// Verifies the fake provider capabilities and streaming behavior.
+
 import { Effect, Stream } from "effect";
 
 import { FakeProviderAdapter } from "./fakeProviderAdapter";

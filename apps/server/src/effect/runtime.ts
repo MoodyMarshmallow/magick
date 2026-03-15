@@ -1,3 +1,5 @@
+// Provides shared runtime services such as clock, id generation, publishing, and in-memory runtime state.
+
 import { Context, Effect, Layer, Ref } from "effect";
 
 import type { DomainEvent } from "../../../../packages/contracts/src/chat";

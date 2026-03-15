@@ -1,3 +1,5 @@
+// Verifies event append and replay ordering semantics.
+
 import { Layer } from "effect";
 import * as ManagedRuntime from "effect/ManagedRuntime";
 
@@ -43,5 +45,14 @@ describe("EventStore", () => {
     );
     expect(replay).toHaveLength(1);
     expect(replay[0]?.eventId).toBe("event_2");
+  });
+
+  it("returns an empty list for threads with no stored events", async () => {
+    const runtime = ManagedRuntime.make(makeEventStoreLayer(createDatabase()));
+    const eventStore = await runtime.runPromise(EventStore);
+
+    expect(
+      await runtime.runPromise(eventStore.listThreadEvents("missing")),
+    ).toEqual([]);
   });
 });

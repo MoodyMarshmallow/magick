@@ -1,3 +1,5 @@
+// Verifies backend error helpers map errors to stable codes and messages.
+
 import {
   InvalidStateError,
   NotFoundError,

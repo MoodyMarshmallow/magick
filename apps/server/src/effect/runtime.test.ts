@@ -1,3 +1,5 @@
+// Verifies the shared runtime state service stores and clears active turn state correctly.
+
 import { Effect, Layer } from "effect";
 import * as ManagedRuntime from "effect/ManagedRuntime";
 

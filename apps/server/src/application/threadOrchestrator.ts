@@ -1,3 +1,5 @@
+// Coordinates thread lifecycle, provider execution, persistence, and event projection.
+
 import { Context, Effect, Layer, Stream } from "effect";
 
 import type {
