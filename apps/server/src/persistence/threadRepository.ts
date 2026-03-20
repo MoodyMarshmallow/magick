@@ -6,7 +6,7 @@ import type {
   ThreadRecord,
   ThreadSummary,
   ThreadViewModel,
-} from "../../../../packages/contracts/src/chat";
+} from "@magick/contracts/chat";
 import { PersistenceError } from "../effect/errors";
 import type { DatabaseClient } from "./database";
 

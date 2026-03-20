@@ -1,8 +1,7 @@
 // Provides a deterministic in-memory provider used for orchestration and transport tests.
 
+import type { ProviderCapabilities } from "@magick/contracts/provider";
 import { Effect, Option, Stream } from "effect";
-
-import type { ProviderCapabilities } from "../../../../../packages/contracts/src/provider";
 import type { ProviderFailureError } from "../../effect/errors";
 import type {
   CreateProviderSessionInput,

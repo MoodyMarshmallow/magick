@@ -2,7 +2,7 @@
 
 import { Effect, Stream } from "effect";
 
-import type { ProviderCapabilities } from "../../../../../packages/contracts/src/provider";
+import type { ProviderCapabilities } from "@magick/contracts/provider";
 import type { ProviderFailureError } from "../../effect/errors";
 import type { ProviderAuthRepositoryClient } from "../../persistence/providerAuthRepository";
 import type {

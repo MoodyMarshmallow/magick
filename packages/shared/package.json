@@ -1,5 +1,10 @@
 {
   "name": "@magick/shared",
   "private": true,
-  "type": "module"
+  "type": "module",
+  "exports": {
+    "./errors": "./src/errors.ts",
+    "./id": "./src/id.ts",
+    "./time": "./src/time.ts"
+  }
 }

@@ -1,6 +1,6 @@
-// Composes the backend runtime and exposes the server attachment entrypoints.
-
+import { mkdirSync } from "node:fs";
 import type { Server } from "node:http";
+import { dirname, join } from "node:path";
 
 import { Effect, Layer } from "effect";
 import * as ManagedRuntime from "effect/ManagedRuntime";
@@ -71,12 +71,28 @@ type BackendRuntime =
 
 export interface BackendServices {
   readonly database: ReturnType<typeof createDatabase>;
+  readonly databasePath: string;
   readonly connections: ConnectionRegistry;
   readonly runtime: ManagedRuntime.ManagedRuntime<BackendRuntime, never>;
 }
 
-export const createBackendServices = (): BackendServices => {
-  const database = createDatabase();
+export interface BackendServiceOptions {
+  readonly databasePath?: string;
+}
+
+const defaultDatabasePath = (): string => {
+  return (
+    process.env.MAGICK_DB_PATH ?? join(process.cwd(), ".magick", "backend.db")
+  );
+};
+
+export const createBackendServices = (
+  options: BackendServiceOptions = {},
+): BackendServices => {
+  const databasePath = options.databasePath ?? defaultDatabasePath();
+  mkdirSync(dirname(databasePath), { recursive: true });
+
+  const database = createDatabase(databasePath);
   const connections = new ConnectionRegistry();
 
   const providerAuthRepository = new ProviderAuthRepositoryClient(database);
@@ -131,6 +147,7 @@ export const createBackendServices = (): BackendServices => {
 
   return {
     database,
+    databasePath,
     connections,
     runtime,
   };

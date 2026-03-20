@@ -1,6 +1,19 @@
+import { resolve } from "node:path";
 import { defineConfig } from "vitest/config";
 
 export default defineConfig({
+  resolve: {
+    alias: {
+      "@magick/contracts/chat": resolve("packages/contracts/src/chat.ts"),
+      "@magick/contracts/provider": resolve(
+        "packages/contracts/src/provider.ts",
+      ),
+      "@magick/contracts/ws": resolve("packages/contracts/src/ws.ts"),
+      "@magick/shared/errors": resolve("packages/shared/src/errors.ts"),
+      "@magick/shared/id": resolve("packages/shared/src/id.ts"),
+      "@magick/shared/time": resolve("packages/shared/src/time.ts"),
+    },
+  },
   test: {
     environment: "node",
     globals: true,

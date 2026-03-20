@@ -6,12 +6,12 @@ import { Cause, Effect, Exit, Option } from "effect";
 import type * as ManagedRuntime from "effect/ManagedRuntime";
 import { type WebSocket, WebSocketServer } from "ws";
 
-import type { DomainEvent } from "../../../../packages/contracts/src/chat";
+import type { DomainEvent } from "@magick/contracts/chat";
 import type {
   CommandEnvelope,
   CommandResponseEnvelope,
-} from "../../../../packages/contracts/src/ws";
-import { createId } from "../../../../packages/shared/src/id";
+} from "@magick/contracts/ws";
+import { createId } from "@magick/shared/id";
 import {
   ProviderAuthService,
   type ProviderAuthServiceApi,

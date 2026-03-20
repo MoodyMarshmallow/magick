@@ -5,7 +5,7 @@ import { Context, Effect, Layer } from "effect";
 import type {
   ProviderAuthRecord,
   ProviderKey,
-} from "../../../../packages/contracts/src/provider";
+} from "@magick/contracts/provider";
 import { PersistenceError } from "../effect/errors";
 import type { DatabaseClient } from "./database";
 

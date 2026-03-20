@@ -1,6 +1,6 @@
-// Verifies the backend composition root registers the expected services and providers.
-
+import { existsSync, rmSync } from "node:fs";
 import { createServer } from "node:http";
+import { join } from "node:path";
 
 import { attachWebSocketServer, createBackendServices } from "./index";
 import { ProviderRegistry } from "./providers/providerTypes";
@@ -32,5 +32,27 @@ describe("createBackendServices", () => {
 
     expect(() => attachWebSocketServer(server, services)).not.toThrow();
     server.close();
+  });
+
+  it("creates a persistent database path by default and respects overrides", () => {
+    const customPath = join(process.cwd(), ".magick-test", "backend.db");
+    rmSync(join(process.cwd(), ".magick-test"), {
+      recursive: true,
+      force: true,
+    });
+
+    const custom = createBackendServices({ databasePath: customPath });
+    expect(custom.databasePath).toBe(customPath);
+    expect(existsSync(customPath)).toBe(true);
+
+    const defaultServices = createBackendServices();
+    expect(defaultServices.databasePath.endsWith(".magick/backend.db")).toBe(
+      true,
+    );
+
+    rmSync(join(process.cwd(), ".magick-test"), {
+      recursive: true,
+      force: true,
+    });
   });
 });

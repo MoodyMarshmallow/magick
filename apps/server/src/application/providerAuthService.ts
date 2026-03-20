@@ -7,8 +7,8 @@ import type {
   ProviderAuthRecord,
   ProviderAuthState,
   ProviderKey,
-} from "../../../../packages/contracts/src/provider";
-import { nowIso } from "../../../../packages/shared/src/time";
+} from "@magick/contracts/provider";
+import { nowIso } from "@magick/shared/time";
 import {
   type BackendError,
   InvalidStateError,

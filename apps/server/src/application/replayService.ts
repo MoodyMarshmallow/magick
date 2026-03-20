@@ -2,10 +2,7 @@
 
 import { Context, Effect, Layer } from "effect";
 
-import type {
-  DomainEvent,
-  ThreadViewModel,
-} from "../../../../packages/contracts/src/chat";
+import type { DomainEvent, ThreadViewModel } from "@magick/contracts/chat";
 import type { BackendError } from "../effect/errors";
 import { NotFoundError } from "../effect/errors";
 import { EventStore } from "../persistence/eventStore";

@@ -2,7 +2,7 @@
 
 import { Context, Effect, Layer } from "effect";
 
-import type { ProviderSessionRecord } from "../../../../packages/contracts/src/provider";
+import type { ProviderSessionRecord } from "@magick/contracts/provider";
 import { PersistenceError } from "../effect/errors";
 import type { DatabaseClient } from "./database";
 

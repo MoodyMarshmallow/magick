@@ -2,14 +2,16 @@
 
 import { Effect, Stream } from "effect";
 
-import type { ProviderAuthRecord } from "../../../../../packages/contracts/src/provider";
-import { nowIso } from "../../../../../packages/shared/src/time";
+import type { ProviderAuthRecord } from "@magick/contracts/provider";
+import { nowIso } from "@magick/shared/time";
 import { ProviderFailureError } from "../../effect/errors";
 import type { ProviderAuthRepositoryClient } from "../../persistence/providerAuthRepository";
 import type { CodexAuthClient } from "./codexAuthClient";
 
 const CODEX_API_ENDPOINT = "https://chatgpt.com/backend-api/codex/responses";
 const REFRESH_SAFETY_MARGIN_MS = 60_000;
+const CODEX_SYSTEM_PROMPT =
+  "You are Codex, based on GPT-5. You are running as a coding agent in the Codex CLI on a user's computer.";
 
 export interface CodexResponsesClientOptions {
   readonly fetch?: typeof fetch;
@@ -24,6 +26,11 @@ type CodexStreamEvent =
   | { readonly type: "output.completed" }
   | { readonly type: "turn.failed"; readonly error: string };
 
+type SseMessage = {
+  readonly event: string | null;
+  readonly data: string;
+};
+
 const toProviderFailure = (code: string, detail: string, retryable = true) =>
   new ProviderFailureError({
     providerKey: "codex",
@@ -32,9 +39,19 @@ const toProviderFailure = (code: string, detail: string, retryable = true) =>
     retryable,
   });
 
-const parseSseFrames = async function* (
+const DEBUG_STREAM = process.env.MAGICK_CODEX_DEBUG === "1";
+
+const logDebug = (label: string, payload: unknown): void => {
+  if (!DEBUG_STREAM) {
+    return;
+  }
+
+  console.debug(`[codex-stream] ${label}`, payload);
+};
+
+const parseSseMessages = async function* (
   stream: ReadableStream<Uint8Array>,
-): AsyncGenerator<string> {
+): AsyncGenerator<SseMessage> {
   const reader = stream.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
@@ -50,22 +67,60 @@ const parseSseFrames = async function* (
     while (frameEnd !== -1) {
       const frame = buffer.slice(0, frameEnd).trim();
       buffer = buffer.slice(frameEnd + 2);
-      if (frame.startsWith("data:")) {
-        yield frame.slice(5).trim();
+      if (frame.length > 0) {
+        const lines = frame.split("\n");
+        let event: string | null = null;
+        const dataLines: string[] = [];
+
+        for (const line of lines) {
+          if (line.startsWith("event:")) {
+            event = line.slice(6).trim();
+            continue;
+          }
+          if (line.startsWith("data:")) {
+            dataLines.push(line.slice(5).trim());
+          }
+        }
+
+        if (dataLines.length > 0) {
+          yield {
+            event,
+            data: dataLines.join("\n"),
+          };
+        }
       }
       frameEnd = buffer.indexOf("\n\n");
     }
   }
 
   const remainder = buffer.trim();
-  if (remainder.startsWith("data:")) {
-    yield remainder.slice(5).trim();
+  if (remainder.length > 0) {
+    const lines = remainder.split("\n");
+    let event: string | null = null;
+    const dataLines: string[] = [];
+
+    for (const line of lines) {
+      if (line.startsWith("event:")) {
+        event = line.slice(6).trim();
+        continue;
+      }
+      if (line.startsWith("data:")) {
+        dataLines.push(line.slice(5).trim());
+      }
+    }
+
+    if (dataLines.length > 0) {
+      yield {
+        event,
+        data: dataLines.join("\n"),
+      };
+    }
   }
 };
 
-const parseResponseItemText = (value: unknown): string => {
+const parseResponseItemText = (value: unknown): string | null => {
   if (typeof value === "string") {
-    return value;
+    return value.length > 0 ? value : null;
   }
 
   if (
@@ -74,10 +129,91 @@ const parseResponseItemText = (value: unknown): string => {
     "text" in value &&
     typeof value.text === "string"
   ) {
-    return value.text;
+    return value.text.length > 0 ? value.text : null;
   }
 
-  return "";
+  return null;
+};
+
+const extractString = (
+  record: Record<string, unknown>,
+  keys: readonly string[],
+): string | null => {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === "string" && value.length > 0) {
+      return value;
+    }
+  }
+
+  return null;
+};
+
+const extractDelta = (record: Record<string, unknown>): string => {
+  return (
+    extractString(record, ["delta", "text", "output_text"]) ??
+    parseResponseItemText(record.part) ??
+    parseResponseItemText(record.content_part) ??
+    parseResponseItemText(record.item) ??
+    ""
+  );
+};
+
+const extractError = (record: Record<string, unknown>): string => {
+  const directError = record.error;
+  if (typeof directError === "string") {
+    return directError;
+  }
+  if (
+    typeof directError === "object" &&
+    directError !== null &&
+    "message" in directError &&
+    typeof directError.message === "string"
+  ) {
+    return directError.message;
+  }
+
+  return (
+    extractString(record, ["message", "detail"]) ?? "Codex response failed."
+  );
+};
+
+const parseCodexStreamMessage = (
+  message: SseMessage,
+): readonly CodexStreamEvent[] => {
+  if (message.data === "[DONE]") {
+    return [{ type: "output.completed" }];
+  }
+
+  const parsed = JSON.parse(message.data) as Record<string, unknown>;
+  const type = String(parsed.type ?? message.event ?? "");
+  logDebug("event", { event: message.event, type, payload: parsed });
+
+  switch (type) {
+    case "response.created":
+    case "response.in_progress":
+    case "response.output_item.added":
+    case "response.output_item.done":
+    case "response.content_part.added":
+    case "response.content_part.done":
+      return [];
+    case "response.output_text.delta":
+    case "response.output_text.annotation.added":
+    case "response.content_part.delta": {
+      const delta = extractDelta(parsed);
+      return delta.length > 0 ? [{ type: "output.delta", delta }] : [];
+    }
+    case "response.completed":
+      return [{ type: "output.completed" }];
+    case "response.text.done":
+      return [];
+    case "response.failed":
+    case "error":
+      return [{ type: "turn.failed", error: extractError(parsed) }];
+    default:
+      logDebug("ignored", { event: message.event, type, payload: parsed });
+      return [];
+  }
 };
 
 export class CodexResponsesClient {
@@ -181,11 +317,16 @@ export class CodexResponsesClient {
               body: JSON.stringify({
                 model: this.#defaultModel,
                 stream: true,
+                store: false,
+                instructions: CODEX_SYSTEM_PROMPT,
                 input: input.messages.map((message) => ({
                   role: message.role,
                   content: [
                     {
-                      type: "input_text",
+                      type:
+                        message.role === "assistant"
+                          ? "output_text"
+                          : "input_text",
                       text: message.content,
                     },
                   ],
@@ -195,9 +336,10 @@ export class CodexResponsesClient {
             });
 
             if (!response.ok) {
+              const detail = await response.text().catch(() => "");
               throw toProviderFailure(
                 response.status === 401 ? "auth_required" : "codex_http_failed",
-                `Codex request failed with status ${response.status}.`,
+                `Codex request failed with status ${response.status}.${detail ? ` ${detail}` : ""}`,
                 response.status >= 500,
               );
             }
@@ -232,55 +374,14 @@ export class CodexResponsesClient {
     return Stream.unwrap(
       execute.pipe(
         Effect.map((body) =>
-          Stream.fromAsyncIterable(parseSseFrames(body), (error) =>
+          Stream.fromAsyncIterable(parseSseMessages(body), (error) =>
             toProviderFailure(
               "codex_stream_parse_failed",
               error instanceof Error ? error.message : String(error),
             ),
           ).pipe(
-            Stream.map((frame) => {
-              if (frame === "[DONE]") {
-                return { type: "output.completed" } as const;
-              }
-
-              const parsed = JSON.parse(frame) as Record<string, unknown>;
-              const type = String(parsed.type ?? "");
-
-              if (
-                type === "response.output_text.delta" ||
-                type === "response.output_text.annotation.delta"
-              ) {
-                return {
-                  type: "output.delta" as const,
-                  delta:
-                    typeof parsed.delta === "string"
-                      ? parsed.delta
-                      : parseResponseItemText(parsed.text),
-                };
-              }
-
-              if (type === "response.completed") {
-                return { type: "output.completed" } as const;
-              }
-
-              if (type === "response.failed" || type === "error") {
-                return {
-                  type: "turn.failed" as const,
-                  error:
-                    typeof parsed.error === "string"
-                      ? parsed.error
-                      : typeof parsed.message === "string"
-                        ? parsed.message
-                        : "Codex response failed.",
-                };
-              }
-
-              return null;
-            }),
-            Stream.filter(
-              (event): event is CodexStreamEvent =>
-                event !== null &&
-                !(event.type === "output.delta" && event.delta.length === 0),
+            Stream.flatMap((message) =>
+              Stream.fromIterable(parseCodexStreamMessage(message)),
             ),
           ),
         ),

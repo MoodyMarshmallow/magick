@@ -9,6 +9,8 @@ import { ProviderFailureError } from "../../effect/errors";
 
 const CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann";
 const ISSUER = "https://auth.openai.com";
+const DEFAULT_CALLBACK_HOST = "localhost";
+const DEFAULT_CALLBACK_PORT = 1455;
 
 export interface CodexOAuthHarnessOptions {
   readonly issuer?: string;
@@ -60,6 +62,17 @@ const successHtml = `
   </body>
 </html>`;
 
+const redirectHtml = (target: string) => `
+<!doctype html>
+<html>
+  <head>
+    <meta http-equiv="refresh" content="0;url=${target}">
+  </head>
+  <body>
+    <p>Redirecting...</p>
+  </body>
+</html>`;
+
 const errorHtml = (message: string) => `
 <!doctype html>
 <html>
@@ -79,8 +92,8 @@ export class CodexOAuthHarness {
   constructor(options: CodexOAuthHarnessOptions = {}) {
     this.#issuer = options.issuer ?? ISSUER;
     this.#clientId = options.clientId ?? CLIENT_ID;
-    this.#callbackHost = options.callbackHost ?? "127.0.0.1";
-    this.#callbackPort = options.callbackPort ?? 0;
+    this.#callbackHost = options.callbackHost ?? DEFAULT_CALLBACK_HOST;
+    this.#callbackPort = options.callbackPort ?? DEFAULT_CALLBACK_PORT;
     this.#loginTimeoutMs = options.loginTimeoutMs ?? 5 * 60 * 1000;
   }
 
@@ -115,29 +128,63 @@ export class CodexOAuthHarness {
             const errorDescription = url.searchParams.get("error_description");
 
             if (error) {
-              response.writeHead(200, { "Content-Type": "text/html" });
-              response.end(errorHtml(errorDescription ?? error));
+              response.writeHead(302, {
+                Location: `/error?message=${encodeURIComponent(errorDescription ?? error)}`,
+                "Content-Type": "text/html",
+              });
+              response.end(
+                redirectHtml(
+                  `/error?message=${encodeURIComponent(errorDescription ?? error)}`,
+                ),
+              );
               finish?.({ error: errorDescription ?? error });
               return;
             }
 
             if (!code) {
-              response.writeHead(400, { "Content-Type": "text/html" });
-              response.end(errorHtml("Missing authorization code."));
+              response.writeHead(302, {
+                Location: "/error?message=Missing%20authorization%20code.",
+                "Content-Type": "text/html",
+              });
+              response.end(
+                redirectHtml("/error?message=Missing%20authorization%20code."),
+              );
               finish?.({ error: "Missing authorization code." });
               return;
             }
 
             if (returnedState !== state) {
-              response.writeHead(400, { "Content-Type": "text/html" });
-              response.end(errorHtml("Invalid OAuth state."));
+              response.writeHead(302, {
+                Location: "/error?message=Invalid%20OAuth%20state.",
+                "Content-Type": "text/html",
+              });
+              response.end(
+                redirectHtml("/error?message=Invalid%20OAuth%20state."),
+              );
               finish?.({ error: "Invalid OAuth state." });
               return;
             }
 
+            response.writeHead(302, {
+              Location: "/success",
+              "Content-Type": "text/html",
+            });
+            response.end(redirectHtml("/success"));
+            finish?.({ code });
+            return;
+          }
+
+          if (url.pathname === "/success") {
             response.writeHead(200, { "Content-Type": "text/html" });
             response.end(successHtml);
-            finish?.({ code });
+            return;
+          }
+
+          if (url.pathname === "/error") {
+            response.writeHead(200, { "Content-Type": "text/html" });
+            response.end(
+              errorHtml(url.searchParams.get("message") ?? "Unknown error"),
+            );
             return;
           }
 
@@ -207,7 +254,6 @@ export class CodexOAuthHarness {
           id_token_add_organizations: "true",
           codex_cli_simplified_flow: "true",
           state,
-          originator: "magick",
         }).toString()}`;
 
         return {

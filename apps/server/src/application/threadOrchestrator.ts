@@ -7,8 +7,8 @@ import type {
   ThreadRecord,
   ThreadSummary,
   ThreadViewModel,
-} from "../../../../packages/contracts/src/chat";
-import type { ProviderSessionRecord } from "../../../../packages/contracts/src/provider";
+} from "@magick/contracts/chat";
+import type { ProviderSessionRecord } from "@magick/contracts/provider";
 import {
   type BackendError,
   InvalidStateError,

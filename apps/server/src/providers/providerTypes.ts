@@ -6,7 +6,7 @@ import type {
   ProviderCapabilities,
   ProviderKey,
   ResumeStrategy,
-} from "../../../../packages/contracts/src/provider";
+} from "@magick/contracts/provider";
 import type {
   ProviderFailureError,
   ProviderUnavailableError,

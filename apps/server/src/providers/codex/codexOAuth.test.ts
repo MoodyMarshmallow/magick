@@ -40,10 +40,34 @@ describe("CodexOAuthHarness", () => {
 
     expect(redirectUri).toBe(login.redirectUri);
     expect(state).toBeTruthy();
+    expect(authUrl.hostname).toBe("auth.openai.com");
+    expect(authUrl.searchParams.get("client_id")).toBe(
+      "app_EMoamEEZ73f0CkXaXp7hrann",
+    );
+    expect(authUrl.searchParams.get("redirect_uri")).toMatch(
+      /^http:\/\/localhost:/,
+    );
+    expect(authUrl.searchParams.get("codex_cli_simplified_flow")).toBe("true");
+    expect(authUrl.searchParams.get("originator")).toBeNull();
 
     void fetchPath(`${login.redirectUri}?code=auth_code&state=${state}`);
 
     await expect(login.waitForCode()).resolves.toBe("auth_code");
+  });
+
+  it("uses localhost as the default callback host", async () => {
+    const harness = new CodexOAuthHarness({
+      callbackPort: 0,
+      loginTimeoutMs: 1000,
+    });
+    const login = await Effect.runPromise(harness.startLogin());
+
+    expect(login.redirectUri.startsWith("http://localhost:")).toBe(true);
+    expect(login.redirectUri.endsWith("/auth/callback")).toBe(true);
+
+    const completion = login.waitForCode().catch(() => undefined);
+    await login.cancel();
+    await completion;
   });
 
   it("can cancel an in-flight browser login", async () => {

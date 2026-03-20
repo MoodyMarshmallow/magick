@@ -1,6 +1,6 @@
 // Tracks websocket connections and per-thread subscriptions for server push delivery.
 
-import type { ServerPushEnvelope } from "../../../../packages/contracts/src/ws";
+import type { ServerPushEnvelope } from "@magick/contracts/ws";
 
 export interface PushConnection {
   readonly id: string;

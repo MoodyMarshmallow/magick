@@ -5,7 +5,7 @@ import type {
   ThreadSummary,
   ThreadViewModel,
   TranscriptMessage,
-} from "../../../../packages/contracts/src/chat";
+} from "@magick/contracts/chat";
 
 type MutableThreadViewModel = {
   -readonly [K in keyof ThreadViewModel]: ThreadViewModel[K];

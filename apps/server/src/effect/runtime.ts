@@ -2,9 +2,9 @@
 
 import { Context, Effect, Layer, Ref } from "effect";
 
-import type { DomainEvent } from "../../../../packages/contracts/src/chat";
-import { createId } from "../../../../packages/shared/src/id";
-import { nowIso } from "../../../../packages/shared/src/time";
+import type { DomainEvent } from "@magick/contracts/chat";
+import { createId } from "@magick/shared/id";
+import { nowIso } from "@magick/shared/time";
 import type { ProviderSessionRuntime } from "../providers/providerTypes";
 
 export interface ClockService {

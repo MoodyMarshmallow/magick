@@ -1,5 +1,6 @@
 {
   "compilerOptions": {
+    "baseUrl": ".",
     "target": "ES2022",
     "module": "ESNext",
     "moduleResolution": "Bundler",
@@ -13,6 +14,14 @@
     "isolatedModules": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
+    "paths": {
+      "@magick/contracts/chat": ["packages/contracts/src/chat.ts"],
+      "@magick/contracts/provider": ["packages/contracts/src/provider.ts"],
+      "@magick/contracts/ws": ["packages/contracts/src/ws.ts"],
+      "@magick/shared/errors": ["packages/shared/src/errors.ts"],
+      "@magick/shared/id": ["packages/shared/src/id.ts"],
+      "@magick/shared/time": ["packages/shared/src/time.ts"]
+    },
     "types": ["bun-types", "vitest/globals"]
   },
   "include": ["apps/**/*.ts", "packages/**/*.ts"]

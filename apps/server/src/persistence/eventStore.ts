@@ -2,7 +2,7 @@
 
 import { Context, Effect, Layer } from "effect";
 
-import type { DomainEvent } from "../../../../packages/contracts/src/chat";
+import type { DomainEvent } from "@magick/contracts/chat";
 import { PersistenceError } from "../effect/errors";
 import type { DatabaseClient } from "./database";
 

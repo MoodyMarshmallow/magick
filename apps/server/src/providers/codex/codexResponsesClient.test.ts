@@ -30,7 +30,10 @@ describe("CodexResponsesClient", () => {
       .fn()
       .mockResolvedValue(
         new Response(
-          'data: {"type":"response.output_text.delta","delta":"Hello"}\n\n' +
+          'event: response.created\ndata: {"type":"response.created"}\n\n' +
+            'event: response.output_item.added\ndata: {"type":"response.output_item.added"}\n\n' +
+            'event: response.output_text.delta\ndata: {"type":"response.output_text.delta","delta":"Hello"}\n\n' +
+            'event: response.text.done\ndata: {"type":"response.text.done"}\n\n' +
             "data: [DONE]\n\n",
           { status: 200, headers: { "Content-Type": "text/event-stream" } },
         ),
@@ -67,6 +70,65 @@ describe("CodexResponsesClient", () => {
       { type: "output.completed" },
     ]);
     expect(authRepository.upsert).toHaveBeenCalled();
+    const request = JSON.parse(
+      String(fetchMock.mock.calls[0]?.[1]?.body ?? "{}"),
+    );
+    expect(request.instructions).toContain("You are Codex, based on GPT-5");
+    expect(request.store).toBe(false);
+    expect(request.input[0].content[0].type).toBe("input_text");
+  });
+
+  it("serializes assistant history as output_text when rebuilding context", async () => {
+    const authRepository = {
+      get: vi.fn().mockReturnValue(
+        Effect.succeed({
+          providerKey: "codex",
+          authMode: "chatgpt",
+          accessToken: "access",
+          refreshToken: "refresh",
+          expiresAt: Date.now() + 120_000,
+          accountId: "acct_1",
+          email: "user@example.com",
+          planType: null,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        }),
+      ),
+      upsert: vi.fn().mockReturnValue(Effect.void),
+      delete: vi.fn().mockReturnValue(Effect.void),
+    };
+
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response("data: [DONE]\n\n", {
+        status: 200,
+        headers: { "Content-Type": "text/event-stream" },
+      }),
+    );
+
+    const client = new CodexResponsesClient({
+      authRepository: authRepository as never,
+      authClient: { refreshAccessToken: vi.fn() } as unknown as CodexAuthClient,
+      fetch: fetchMock as never,
+    });
+
+    await Effect.runPromise(
+      Stream.runCollect(
+        client.streamResponse({
+          messages: [
+            { role: "user", content: "First question" },
+            { role: "assistant", content: "First answer" },
+            { role: "user", content: "Second question" },
+          ],
+        }),
+      ),
+    );
+
+    const request = JSON.parse(
+      String(fetchMock.mock.calls[0]?.[1]?.body ?? "{}"),
+    );
+    expect(request.input[0].content[0].type).toBe("input_text");
+    expect(request.input[1].content[0].type).toBe("output_text");
+    expect(request.input[2].content[0].type).toBe("input_text");
   });
 
   it("fails when auth is missing", async () => {
@@ -142,6 +204,106 @@ describe("CodexResponsesClient", () => {
 
     expect(Array.from(events)).toEqual([
       { type: "turn.failed", error: "Boom" },
+    ]);
+  });
+
+  it("parses multiline sse frames and nested error payloads", async () => {
+    const authRepository = {
+      get: vi.fn().mockReturnValue(
+        Effect.succeed({
+          providerKey: "codex",
+          authMode: "chatgpt",
+          accessToken: "access",
+          refreshToken: "refresh",
+          expiresAt: Date.now() + 120_000,
+          accountId: null,
+          email: "user@example.com",
+          planType: null,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        }),
+      ),
+      upsert: vi.fn().mockReturnValue(Effect.void),
+      delete: vi.fn().mockReturnValue(Effect.void),
+    };
+
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(
+          'event: response.content_part.delta\ndata: {"type":"response.content_part.delta","text":"Hi"}\n\n' +
+            'event: error\ndata: {"type":"error","error":{"message":"nested boom"}}\n\n',
+          { status: 200, headers: { "Content-Type": "text/event-stream" } },
+        ),
+      );
+
+    const client = new CodexResponsesClient({
+      authRepository: authRepository as never,
+      authClient: { refreshAccessToken: vi.fn() } as unknown as CodexAuthClient,
+      fetch: fetchMock as never,
+    });
+
+    const events = await Effect.runPromise(
+      Stream.runCollect(
+        client.streamResponse({
+          messages: [{ role: "user", content: "Hello" }],
+        }),
+      ),
+    );
+
+    expect(Array.from(events)).toEqual([
+      { type: "output.delta", delta: "Hi" },
+      { type: "turn.failed", error: "nested boom" },
+    ]);
+  });
+
+  it("falls back to nested content part text when part is missing", async () => {
+    const authRepository = {
+      get: vi.fn().mockReturnValue(
+        Effect.succeed({
+          providerKey: "codex",
+          authMode: "chatgpt",
+          accessToken: "access",
+          refreshToken: "refresh",
+          expiresAt: Date.now() + 120_000,
+          accountId: null,
+          email: "user@example.com",
+          planType: null,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        }),
+      ),
+      upsert: vi.fn().mockReturnValue(Effect.void),
+      delete: vi.fn().mockReturnValue(Effect.void),
+    };
+
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(
+          'event: response.content_part.delta\ndata: {"type":"response.content_part.delta","content_part":{"text":"Nested delta"}}\n\n' +
+            "data: [DONE]\n\n",
+          { status: 200, headers: { "Content-Type": "text/event-stream" } },
+        ),
+      );
+
+    const client = new CodexResponsesClient({
+      authRepository: authRepository as never,
+      authClient: { refreshAccessToken: vi.fn() } as unknown as CodexAuthClient,
+      fetch: fetchMock as never,
+    });
+
+    const events = await Effect.runPromise(
+      Stream.runCollect(
+        client.streamResponse({
+          messages: [{ role: "user", content: "Hello" }],
+        }),
+      ),
+    );
+
+    expect(Array.from(events)).toEqual([
+      { type: "output.delta", delta: "Nested delta" },
+      { type: "output.completed" },
     ]);
   });
 
