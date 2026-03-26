@@ -33,22 +33,20 @@ describe("CodexProviderAdapter", () => {
 
   it("creates stateless direct-http sessions through the runtime factory", async () => {
     const authRepository = {
-      get: vi.fn().mockReturnValue(
-        Effect.succeed({
-          providerKey: "codex",
-          authMode: "chatgpt",
-          accessToken: "access",
-          refreshToken: "refresh",
-          expiresAt: Date.now() + 120_000,
-          accountId: "acct_1",
-          email: "user@example.com",
-          planType: null,
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        }),
-      ),
-      upsert: vi.fn().mockReturnValue(Effect.void),
-      delete: vi.fn().mockReturnValue(Effect.void),
+      get: vi.fn().mockReturnValue({
+        providerKey: "codex",
+        authMode: "chatgpt",
+        accessToken: "access",
+        refreshToken: "refresh",
+        expiresAt: Date.now() + 120_000,
+        accountId: "acct_1",
+        email: "user@example.com",
+        planType: null,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      }),
+      upsert: vi.fn(),
+      delete: vi.fn(),
     };
 
     const fetchMock = vi.fn().mockResolvedValue(
@@ -65,15 +63,13 @@ describe("CodexProviderAdapter", () => {
     const factory = createCodexRuntimeFactory({
       authRepository: authRepository as never,
       authClient: {
-        refreshAccessToken: vi.fn().mockReturnValue(
-          Effect.succeed({
-            accessToken: "access",
-            refreshToken: "refresh",
-            expiresAt: Date.now() + 120_000,
-            accountId: "acct_1",
-            email: "user@example.com",
-          }),
-        ),
+        refreshAccessToken: vi.fn().mockResolvedValue({
+          accessToken: "access",
+          refreshToken: "refresh",
+          expiresAt: Date.now() + 120_000,
+          accountId: "acct_1",
+          email: "user@example.com",
+        }),
       } as unknown as CodexAuthClient,
       fetch: fetchMock as unknown as typeof fetch,
       defaultModel: "gpt-5.3-codex",
@@ -92,22 +88,20 @@ describe("CodexProviderAdapter", () => {
 
   it("maps direct-http response streams into provider session events", async () => {
     const authRepository = {
-      get: vi.fn().mockReturnValue(
-        Effect.succeed({
-          providerKey: "codex",
-          authMode: "chatgpt",
-          accessToken: "access",
-          refreshToken: "refresh",
-          expiresAt: Date.now() + 120_000,
-          accountId: "acct_1",
-          email: "user@example.com",
-          planType: null,
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        }),
-      ),
-      upsert: vi.fn().mockReturnValue(Effect.void),
-      delete: vi.fn().mockReturnValue(Effect.void),
+      get: vi.fn().mockReturnValue({
+        providerKey: "codex",
+        authMode: "chatgpt",
+        accessToken: "access",
+        refreshToken: "refresh",
+        expiresAt: Date.now() + 120_000,
+        accountId: "acct_1",
+        email: "user@example.com",
+        planType: null,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      }),
+      upsert: vi.fn(),
+      delete: vi.fn(),
     };
     const fetchMock = vi
       .fn()
@@ -122,15 +116,13 @@ describe("CodexProviderAdapter", () => {
     const factory = createCodexRuntimeFactory({
       authRepository: authRepository as never,
       authClient: {
-        refreshAccessToken: vi.fn().mockReturnValue(
-          Effect.succeed({
-            accessToken: "access",
-            refreshToken: "refresh",
-            expiresAt: Date.now() + 120_000,
-            accountId: "acct_1",
-            email: "user@example.com",
-          }),
-        ),
+        refreshAccessToken: vi.fn().mockResolvedValue({
+          accessToken: "access",
+          refreshToken: "refresh",
+          expiresAt: Date.now() + 120_000,
+          accountId: "acct_1",
+          email: "user@example.com",
+        }),
       } as unknown as CodexAuthClient,
       fetch: fetchMock as unknown as typeof fetch,
       defaultModel: "gpt-5.3-codex",

@@ -3,7 +3,7 @@
 import { Effect, Stream } from "effect";
 
 import type { ProviderCapabilities } from "@magick/contracts/provider";
-import type { ProviderFailureError } from "../../effect/errors";
+import type { ProviderFailureError } from "../../core/errors";
 import type { ProviderAuthRepositoryClient } from "../../persistence/providerAuthRepository";
 import type {
   CreateProviderSessionInput,

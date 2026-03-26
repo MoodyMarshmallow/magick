@@ -1,8 +1,6 @@
 // Implements direct OAuth code exchange and token refresh for Codex browser auth.
 
-import { Effect } from "effect";
-
-import { ProviderFailureError } from "../../effect/errors";
+import { ProviderFailureError } from "../../core/errors";
 import {
   extractAccountIdFromClaims,
   extractEmailFromClaims,
@@ -66,83 +64,77 @@ export class CodexAuthClient {
     this.#issuer = options.issuer ?? ISSUER;
   }
 
-  exchangeAuthorizationCode(
+  async exchangeAuthorizationCode(
     code: string,
     redirectUri: string,
     codeVerifier: string,
-  ): Effect.Effect<CodexAuthTokenSet, ProviderFailureError> {
-    return Effect.tryPromise({
-      try: async () => {
-        const response = await this.#fetch(`${this.#issuer}/oauth/token`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/x-www-form-urlencoded",
-          },
-          body: new URLSearchParams({
-            grant_type: "authorization_code",
-            code,
-            redirect_uri: redirectUri,
-            client_id: this.#clientId,
-            code_verifier: codeVerifier,
-          }).toString(),
-        });
+  ): Promise<CodexAuthTokenSet> {
+    try {
+      const response = await this.#fetch(`${this.#issuer}/oauth/token`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        body: new URLSearchParams({
+          grant_type: "authorization_code",
+          code,
+          redirect_uri: redirectUri,
+          client_id: this.#clientId,
+          code_verifier: codeVerifier,
+        }).toString(),
+      });
 
-        if (!response.ok) {
-          throw toProviderFailure(
+      if (!response.ok) {
+        throw toProviderFailure(
+          "oauth_exchange_failed",
+          `OAuth token exchange failed with status ${response.status}.`,
+          false,
+        );
+      }
+
+      return toTokenSet((await response.json()) as CodexTokenResponse);
+    } catch (error) {
+      throw error instanceof ProviderFailureError
+        ? error
+        : toProviderFailure(
             "oauth_exchange_failed",
-            `OAuth token exchange failed with status ${response.status}.`,
+            error instanceof Error ? error.message : String(error),
             false,
           );
-        }
-
-        return toTokenSet((await response.json()) as CodexTokenResponse);
-      },
-      catch: (error) =>
-        error instanceof ProviderFailureError
-          ? error
-          : toProviderFailure(
-              "oauth_exchange_failed",
-              error instanceof Error ? error.message : String(error),
-              false,
-            ),
-    });
+    }
   }
 
-  refreshAccessToken(
-    refreshToken: string,
-  ): Effect.Effect<CodexAuthTokenSet, ProviderFailureError> {
-    return Effect.tryPromise({
-      try: async () => {
-        const response = await this.#fetch(`${this.#issuer}/oauth/token`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/x-www-form-urlencoded",
-          },
-          body: new URLSearchParams({
-            grant_type: "refresh_token",
-            refresh_token: refreshToken,
-            client_id: this.#clientId,
-          }).toString(),
-        });
+  async refreshAccessToken(refreshToken: string): Promise<CodexAuthTokenSet> {
+    try {
+      const response = await this.#fetch(`${this.#issuer}/oauth/token`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        body: new URLSearchParams({
+          grant_type: "refresh_token",
+          refresh_token: refreshToken,
+          client_id: this.#clientId,
+        }).toString(),
+      });
 
-        if (!response.ok) {
-          throw toProviderFailure(
+      if (!response.ok) {
+        throw toProviderFailure(
+          "oauth_refresh_failed",
+          `OAuth token refresh failed with status ${response.status}.`,
+          false,
+        );
+      }
+
+      return toTokenSet((await response.json()) as CodexTokenResponse);
+    } catch (error) {
+      throw error instanceof ProviderFailureError
+        ? error
+        : toProviderFailure(
             "oauth_refresh_failed",
-            `OAuth token refresh failed with status ${response.status}.`,
+            error instanceof Error ? error.message : String(error),
             false,
           );
-        }
-
-        return toTokenSet((await response.json()) as CodexTokenResponse);
-      },
-      catch: (error) =>
-        error instanceof ProviderFailureError
-          ? error
-          : toProviderFailure(
-              "oauth_refresh_failed",
-              error instanceof Error ? error.message : String(error),
-              false,
-            ),
-    });
+    }
   }
 }

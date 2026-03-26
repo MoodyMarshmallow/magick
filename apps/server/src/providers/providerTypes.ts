@@ -1,6 +1,6 @@
 // Defines the provider runtime interfaces shared by orchestration and provider adapters.
 
-import { Context, type Effect, type Stream } from "effect";
+import type { Effect, Stream } from "effect";
 
 import type {
   ProviderCapabilities,
@@ -10,7 +10,7 @@ import type {
 import type {
   ProviderFailureError,
   ProviderUnavailableError,
-} from "../effect/errors";
+} from "../core/errors";
 
 export interface ConversationContextMessage {
   readonly role: "user" | "assistant";
@@ -101,11 +101,5 @@ export interface ProviderSessionRuntime {
 }
 
 export interface ProviderRegistryService {
-  readonly get: (
-    providerKey: ProviderKey,
-  ) => Effect.Effect<ProviderAdapter, ProviderUnavailableError>;
+  readonly get: (providerKey: ProviderKey) => ProviderAdapter;
 }
-
-export const ProviderRegistry = Context.GenericTag<ProviderRegistryService>(
-  "@magick/ProviderRegistry",
-);

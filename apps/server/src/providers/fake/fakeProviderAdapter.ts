@@ -2,7 +2,7 @@
 
 import type { ProviderCapabilities } from "@magick/contracts/provider";
 import { Effect, Option, Stream } from "effect";
-import type { ProviderFailureError } from "../../effect/errors";
+import type { ProviderFailureError } from "../../core/errors";
 import type {
   CreateProviderSessionInput,
   InterruptTurnInput,

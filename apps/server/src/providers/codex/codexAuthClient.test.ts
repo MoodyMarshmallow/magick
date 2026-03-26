@@ -1,7 +1,5 @@
 // Verifies Codex OAuth code exchange and refresh behavior.
 
-import { Cause, Effect, Exit, Option } from "effect";
-
 import { CodexAuthClient } from "./codexAuthClient";
 
 describe("CodexAuthClient", () => {
@@ -55,18 +53,14 @@ describe("CodexAuthClient", () => {
 
     const client = new CodexAuthClient({ fetch: fetchMock as never });
 
-    const exchanged = await Effect.runPromise(
-      client.exchangeAuthorizationCode(
-        "code",
-        "http://localhost/callback",
-        "verifier",
-      ),
+    const exchanged = await client.exchangeAuthorizationCode(
+      "code",
+      "http://localhost/callback",
+      "verifier",
     );
     expect(exchanged.accountId).toBe("acct_1");
 
-    const refreshed = await Effect.runPromise(
-      client.refreshAccessToken("refresh_1"),
-    );
+    const refreshed = await client.refreshAccessToken("refresh_1");
     expect(refreshed.accountId).toBe("acct_2");
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
@@ -78,21 +72,15 @@ describe("CodexAuthClient", () => {
         .mockResolvedValue(new Response("nope", { status: 400 })) as never,
     });
 
-    const exit = await Effect.runPromiseExit(
+    await expect(
       client.exchangeAuthorizationCode(
         "code",
         "http://localhost/callback",
         "verifier",
       ),
-    );
-
-    expect(Exit.isFailure(exit)).toBe(true);
-    if (Exit.isFailure(exit)) {
-      const failure = Cause.failureOption(exit.cause);
-      expect(Option.isSome(failure) ? failure.value : null).toMatchObject({
-        code: "oauth_exchange_failed",
-      });
-    }
+    ).rejects.toMatchObject({
+      code: "oauth_exchange_failed",
+    });
   });
 
   it("fails when refresh is rejected by the issuer", async () => {
@@ -102,15 +90,8 @@ describe("CodexAuthClient", () => {
         .mockResolvedValue(new Response("nope", { status: 401 })) as never,
     });
 
-    const exit = await Effect.runPromiseExit(
-      client.refreshAccessToken("refresh"),
-    );
-    expect(Exit.isFailure(exit)).toBe(true);
-    if (Exit.isFailure(exit)) {
-      const failure = Cause.failureOption(exit.cause);
-      expect(Option.isSome(failure) ? failure.value : null).toMatchObject({
-        code: "oauth_refresh_failed",
-      });
-    }
+    await expect(client.refreshAccessToken("refresh")).rejects.toMatchObject({
+      code: "oauth_refresh_failed",
+    });
   });
 });

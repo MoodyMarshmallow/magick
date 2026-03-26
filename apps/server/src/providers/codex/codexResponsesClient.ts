@@ -4,7 +4,7 @@ import { Effect, Stream } from "effect";
 
 import type { ProviderAuthRecord } from "@magick/contracts/provider";
 import { nowIso } from "@magick/shared/time";
-import { ProviderFailureError } from "../../effect/errors";
+import { ProviderFailureError } from "../../core/errors";
 import type { ProviderAuthRepositoryClient } from "../../persistence/providerAuthRepository";
 import type { CodexAuthClient } from "./codexAuthClient";
 
@@ -235,7 +235,17 @@ export class CodexResponsesClient {
     ProviderAuthRecord,
     ProviderFailureError
   > {
-    return this.#authRepository.get("codex").pipe(
+    return Effect.try({
+      try: () => this.#authRepository.get("codex"),
+      catch: (error) =>
+        error instanceof ProviderFailureError
+          ? error
+          : toProviderFailure(
+              "auth_store_failed",
+              error instanceof Error ? error.message : String(error),
+              false,
+            ),
+    }).pipe(
       Effect.flatMap((record) => {
         if (!record) {
           return Effect.fail(
@@ -251,7 +261,17 @@ export class CodexResponsesClient {
           return Effect.succeed(record);
         }
 
-        return this.#authClient.refreshAccessToken(record.refreshToken).pipe(
+        return Effect.tryPromise({
+          try: () => this.#authClient.refreshAccessToken(record.refreshToken),
+          catch: (error) =>
+            error instanceof ProviderFailureError
+              ? error
+              : toProviderFailure(
+                  "auth_required",
+                  error instanceof Error ? error.message : String(error),
+                  false,
+                ),
+        }).pipe(
           Effect.flatMap((tokens) => {
             const nextRecord: ProviderAuthRecord = {
               providerKey: "codex",
@@ -265,32 +285,39 @@ export class CodexResponsesClient {
               createdAt: record.createdAt,
               updatedAt: nowIso(),
             };
-            return this.#authRepository
-              .upsert(nextRecord)
-              .pipe(Effect.as(nextRecord));
-          }),
-          Effect.catchAll(() =>
-            this.#authRepository
-              .delete("codex")
-              .pipe(
-                Effect.zipRight(
-                  Effect.fail(
-                    toProviderFailure(
-                      "auth_required",
-                      "Codex login expired and refresh failed.",
+            return Effect.try({
+              try: () => this.#authRepository.upsert(nextRecord),
+              catch: (error) =>
+                error instanceof ProviderFailureError
+                  ? error
+                  : toProviderFailure(
+                      "auth_store_failed",
+                      error instanceof Error ? error.message : String(error),
                       false,
                     ),
+            }).pipe(Effect.as(nextRecord));
+          }),
+          Effect.catchAll(() =>
+            Effect.sync(() => {
+              try {
+                this.#authRepository.delete("codex");
+              } catch {
+                return;
+              }
+            }).pipe(
+              Effect.zipRight(
+                Effect.fail(
+                  toProviderFailure(
+                    "auth_required",
+                    "Codex login expired and refresh failed.",
+                    false,
                   ),
                 ),
               ),
+            ),
           ),
         );
       }),
-      Effect.mapError((error) =>
-        error instanceof ProviderFailureError
-          ? error
-          : toProviderFailure("auth_store_failed", error.detail, false),
-      ),
     );
   }
 

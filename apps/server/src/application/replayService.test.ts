@@ -1,50 +1,33 @@
 // Verifies replay service behavior for missing threads and replay queries.
 
-import { Cause, Exit, Layer, Option } from "effect";
-import * as ManagedRuntime from "effect/ManagedRuntime";
-
 import { createDatabase } from "../persistence/database";
-import { makeEventStoreLayer } from "../persistence/eventStore";
-import { makeThreadRepositoryLayer } from "../persistence/threadRepository";
-import { ReplayService, ReplayServiceLive } from "./replayService";
+import { EventStore } from "../persistence/eventStore";
+import { ThreadRepository } from "../persistence/threadRepository";
+import { ReplayService } from "./replayService";
 
-const makeReplayRuntime = () => {
+const makeReplayService = () => {
   const database = createDatabase();
-  const baseLayer = Layer.mergeAll(
-    makeEventStoreLayer(database),
-    makeThreadRepositoryLayer(database),
-  );
-
-  return ManagedRuntime.make(ReplayServiceLive.pipe(Layer.provide(baseLayer)));
+  return new ReplayService({
+    eventStore: new EventStore(database),
+    threadRepository: new ThreadRepository(database),
+  });
 };
 
 describe("ReplayService", () => {
-  it("fails when requesting state for an unknown thread", async () => {
-    const runtime = makeReplayRuntime();
-    const replayService = await runtime.runPromise(ReplayService);
+  it("fails when requesting state for an unknown thread", () => {
+    const replayService = makeReplayService();
 
-    const exit = await runtime.runPromiseExit(
-      replayService.getThreadState("missing_thread"),
-    );
-
-    expect(Exit.isFailure(exit)).toBe(true);
-    if (Exit.isFailure(exit)) {
-      const failure = Cause.failureOption(exit.cause);
-      expect(Option.isSome(failure) ? failure.value : null).toMatchObject({
+    expect(() => replayService.getThreadState("missing_thread")).toThrowError(
+      expect.objectContaining({
         _tag: "NotFoundError",
         id: "missing_thread",
-      });
-    }
+      }),
+    );
   });
 
-  it("returns an empty replay when no events exist after the checkpoint", async () => {
-    const runtime = makeReplayRuntime();
-    const replayService = await runtime.runPromise(ReplayService);
+  it("returns an empty replay when no events exist after the checkpoint", () => {
+    const replayService = makeReplayService();
 
-    const events = await runtime.runPromise(
-      replayService.replayThread("unknown_thread", 99),
-    );
-
-    expect(events).toEqual([]);
+    expect(replayService.replayThread("unknown_thread", 99)).toEqual([]);
   });
 });

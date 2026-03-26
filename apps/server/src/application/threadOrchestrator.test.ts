@@ -1,115 +1,75 @@
 // Exercises the orchestrator across create, send, replay, retry, and interrupt flows.
 
-import { Cause, Effect, Exit, Layer, Option, Stream } from "effect";
-import * as ManagedRuntime from "effect/ManagedRuntime";
+import { Cause, Effect, Exit, Option, Stream } from "effect";
 
 import {
-  ClockLive,
-  EventPublisher,
-  IdGeneratorLive,
-  RuntimeStateLive,
-} from "../effect/runtime";
+  createClock,
+  createIdGenerator,
+  createRuntimeState,
+} from "../core/runtime";
 import { createDatabase } from "../persistence/database";
-import {
-  type EventStoreService,
-  makeEventStoreLayer,
-} from "../persistence/eventStore";
-import {
-  ProviderSessionRepository,
-  type ProviderSessionRepositoryService,
-  makeProviderSessionRepositoryLayer,
-} from "../persistence/providerSessionRepository";
-import {
-  type ThreadRepositoryService,
-  makeThreadRepositoryLayer,
-} from "../persistence/threadRepository";
+import { EventStore } from "../persistence/eventStore";
+import { ProviderSessionRepository } from "../persistence/providerSessionRepository";
+import { ThreadRepository } from "../persistence/threadRepository";
 import { FakeProviderAdapter } from "../providers/fake/fakeProviderAdapter";
 import type {
   ProviderAdapter,
-  ProviderRegistryService,
   ProviderSessionHandle,
 } from "../providers/providerTypes";
-import { makeProviderRegistryLayer } from "./providerRegistry";
-import {
-  ReplayService,
-  type ReplayServiceApi,
-  ReplayServiceLive,
-} from "./replayService";
-import {
-  ThreadOrchestrator,
-  type ThreadOrchestratorApi,
-  ThreadOrchestratorLive,
-} from "./threadOrchestrator";
+import { ProviderRegistry } from "./providerRegistry";
+import { ReplayService } from "./replayService";
+import { ThreadOrchestrator } from "./threadOrchestrator";
 
-type TestRuntime =
-  | ProviderRegistryService
-  | EventStoreService
-  | ThreadRepositoryService
-  | ProviderSessionRepositoryService
-  | ReplayServiceApi
-  | ThreadOrchestratorApi;
+const run = <A, E>(effect: Effect.Effect<A, E>) => Effect.runPromise(effect);
 
 const createTestContext = (adapter: FakeProviderAdapter) => {
   const database = createDatabase();
   const publishedEvents: string[] = [];
-
-  const baseLayer = Layer.mergeAll(
-    ClockLive,
-    IdGeneratorLive,
-    RuntimeStateLive,
-    makeEventStoreLayer(database),
-    makeThreadRepositoryLayer(database),
-    makeProviderSessionRepositoryLayer(database),
-    makeProviderRegistryLayer([adapter]),
-    Layer.succeed(EventPublisher, {
-      publish: (events) =>
-        Effect.sync(() => {
-          publishedEvents.push(...events.map((event) => event.type));
-        }),
-    }),
-  );
-
-  const appLayer = Layer.mergeAll(
-    ReplayServiceLive,
-    ThreadOrchestratorLive,
-  ).pipe(Layer.provide(baseLayer));
+  const threadRepository = new ThreadRepository(database);
 
   return {
-    runtime: ManagedRuntime.make(Layer.mergeAll(baseLayer, appLayer)),
+    orchestrator: new ThreadOrchestrator({
+      providerRegistry: new ProviderRegistry([adapter]),
+      eventStore: new EventStore(database),
+      threadRepository,
+      providerSessionRepository: new ProviderSessionRepository(database),
+      publisher: {
+        publish: async (events) => {
+          publishedEvents.push(...events.map((event) => event.type));
+        },
+      },
+      runtimeState: createRuntimeState(),
+      clock: createClock(),
+      idGenerator: createIdGenerator(),
+    }),
+    replayService: new ReplayService({
+      eventStore: new EventStore(database),
+      threadRepository,
+    }),
+    providerSessionRepository: new ProviderSessionRepository(database),
     publishedEvents,
   };
 };
 
 const createProviderContext = (adapter: ProviderAdapter) => {
   const database = createDatabase();
-
-  const baseLayer = Layer.mergeAll(
-    ClockLive,
-    IdGeneratorLive,
-    RuntimeStateLive,
-    makeEventStoreLayer(database),
-    makeThreadRepositoryLayer(database),
-    makeProviderSessionRepositoryLayer(database),
-    makeProviderRegistryLayer([adapter]),
-    Layer.succeed(EventPublisher, {
-      publish: () => Effect.void,
-    }),
-  );
-
-  const appLayer = Layer.mergeAll(
-    ReplayServiceLive,
-    ThreadOrchestratorLive,
-  ).pipe(Layer.provide(baseLayer));
+  const threadRepository = new ThreadRepository(database);
 
   return {
-    runtime: ManagedRuntime.make(Layer.mergeAll(baseLayer, appLayer)),
+    orchestrator: new ThreadOrchestrator({
+      providerRegistry: new ProviderRegistry([adapter]),
+      eventStore: new EventStore(database),
+      threadRepository,
+      providerSessionRepository: new ProviderSessionRepository(database),
+      publisher: {
+        publish: async () => undefined,
+      },
+      runtimeState: createRuntimeState(),
+      clock: createClock(),
+      idGenerator: createIdGenerator(),
+    }),
   };
 };
-
-const runWithRuntime = <A, E>(
-  runtime: ManagedRuntime.ManagedRuntime<TestRuntime, never>,
-  effect: Effect.Effect<A, E, TestRuntime>,
-) => runtime.runPromise(effect);
 
 describe("ThreadOrchestrator", () => {
   it("creates a thread and streams a reply through the provider adapter", async () => {
@@ -117,19 +77,16 @@ describe("ThreadOrchestrator", () => {
       mode: "stateful",
       chunkDelayMs: 0,
     });
-    const { runtime, publishedEvents } = createTestContext(adapter);
+    const { orchestrator, publishedEvents } = createTestContext(adapter);
 
-    const orchestrator = await runtime.runPromise(ThreadOrchestrator);
-    const thread = await runWithRuntime(
-      runtime,
+    const thread = await run(
       orchestrator.createThread({
         workspaceId: "workspace_1",
         providerKey: adapter.key,
         title: "Primary chat",
       }),
     );
-    const updatedThread = await runWithRuntime(
-      runtime,
+    const updatedThread = await run(
       orchestrator.sendMessage(thread.threadId, "Hello there"),
     );
 
@@ -147,33 +104,20 @@ describe("ThreadOrchestrator", () => {
       responder: ({ contextMessages, userMessage }) =>
         `context:${contextMessages.map((message) => message.content).join(",")}; latest:${userMessage}`,
     });
-    const { runtime } = createTestContext(adapter);
-    const orchestrator = await runtime.runPromise(ThreadOrchestrator);
-    const providerSessionRepository = await runtime.runPromise(
-      ProviderSessionRepository,
-    );
+    const { orchestrator, providerSessionRepository } =
+      createTestContext(adapter);
 
-    const thread = await runWithRuntime(
-      runtime,
+    const thread = await run(
       orchestrator.createThread({
         workspaceId: "workspace_1",
         providerKey: adapter.key,
       }),
     );
 
-    await runWithRuntime(
-      runtime,
-      orchestrator.sendMessage(thread.threadId, "First"),
-    );
-    await runWithRuntime(
-      runtime,
-      orchestrator.sendMessage(thread.threadId, "Second"),
-    );
+    await run(orchestrator.sendMessage(thread.threadId, "First"));
+    await run(orchestrator.sendMessage(thread.threadId, "Second"));
 
-    const session = await runWithRuntime(
-      runtime,
-      providerSessionRepository.get(thread.providerSessionId),
-    );
+    const session = providerSessionRepository.get(thread.providerSessionId);
     expect(session?.capabilities.supportsNativeResume).toBe(false);
 
     const sessionRuntime = adapter.sessions.get(thread.providerSessionId);
@@ -193,25 +137,20 @@ describe("ThreadOrchestrator", () => {
       mode: "stateful",
       chunkDelayMs: 5,
     });
-    const { runtime } = createTestContext(adapter);
-    const orchestrator = await runtime.runPromise(ThreadOrchestrator);
+    const { orchestrator } = createTestContext(adapter);
 
-    const thread = await runWithRuntime(
-      runtime,
+    const thread = await run(
       orchestrator.createThread({
         workspaceId: "workspace_1",
         providerKey: adapter.key,
       }),
     );
 
-    const sendFiber = runtime.runFork(
+    const sendFiber = Effect.runFork(
       orchestrator.sendMessage(thread.threadId, "Interrupt me"),
     );
     await Effect.runPromise(Effect.sleep("1 millis"));
-    const interruptedThread = await runWithRuntime(
-      runtime,
-      orchestrator.stopTurn(thread.threadId),
-    );
+    const interruptedThread = await run(orchestrator.stopTurn(thread.threadId));
     const finalThread = await Effect.runPromise(Effect.fromFiber(sendFiber));
 
     expect(interruptedThread.status).toBe("interrupted");
@@ -220,44 +159,33 @@ describe("ThreadOrchestrator", () => {
 
   it("replays events after a sequence checkpoint", async () => {
     const adapter = new FakeProviderAdapter({ mode: "stateful" });
-    const { runtime } = createTestContext(adapter);
-    const orchestrator = await runtime.runPromise(ThreadOrchestrator);
-    const replayService = await runtime.runPromise(ReplayService);
+    const { orchestrator, replayService } = createTestContext(adapter);
 
-    const thread = await runWithRuntime(
-      runtime,
+    const thread = await run(
       orchestrator.createThread({
         workspaceId: "workspace_1",
         providerKey: adapter.key,
       }),
     );
-    await runWithRuntime(
-      runtime,
-      orchestrator.sendMessage(thread.threadId, "Replay this"),
-    );
+    await run(orchestrator.sendMessage(thread.threadId, "Replay this"));
 
-    const replayedEvents = await runWithRuntime(
-      runtime,
-      replayService.replayThread(thread.threadId, 2),
-    );
+    const replayedEvents = replayService.replayThread(thread.threadId, 2);
     expect(replayedEvents.length).toBeGreaterThan(0);
     expect(replayedEvents[0]?.sequence).toBeGreaterThan(2);
   });
 
   it("retries the last user message and fails when retry is impossible", async () => {
     const adapter = new FakeProviderAdapter({ mode: "stateful" });
-    const { runtime } = createTestContext(adapter);
-    const orchestrator = await runtime.runPromise(ThreadOrchestrator);
+    const { orchestrator } = createTestContext(adapter);
 
-    const thread = await runWithRuntime(
-      runtime,
+    const thread = await run(
       orchestrator.createThread({
         workspaceId: "workspace_1",
         providerKey: adapter.key,
       }),
     );
 
-    const exit = await runtime.runPromiseExit(
+    const exit = await Effect.runPromiseExit(
       orchestrator.retryTurn(thread.threadId),
     );
     expect(Exit.isFailure(exit)).toBe(true);
@@ -268,14 +196,8 @@ describe("ThreadOrchestrator", () => {
       });
     }
 
-    await runWithRuntime(
-      runtime,
-      orchestrator.sendMessage(thread.threadId, "Retry me"),
-    );
-    const retried = await runWithRuntime(
-      runtime,
-      orchestrator.retryTurn(thread.threadId),
-    );
+    await run(orchestrator.sendMessage(thread.threadId, "Retry me"));
+    const retried = await run(orchestrator.retryTurn(thread.threadId));
 
     expect(
       retried.messages.filter((message) => message.role === "user"),
@@ -284,11 +206,9 @@ describe("ThreadOrchestrator", () => {
 
   it("lists, opens, and ensures sessions for created threads", async () => {
     const adapter = new FakeProviderAdapter({ mode: "stateful" });
-    const { runtime } = createTestContext(adapter);
-    const orchestrator = await runtime.runPromise(ThreadOrchestrator);
+    const { orchestrator } = createTestContext(adapter);
 
-    const thread = await runWithRuntime(
-      runtime,
+    const thread = await run(
       orchestrator.createThread({
         workspaceId: "workspace_1",
         providerKey: adapter.key,
@@ -296,43 +216,29 @@ describe("ThreadOrchestrator", () => {
       }),
     );
 
-    const summaries = await runWithRuntime(
-      runtime,
-      orchestrator.listThreads("workspace_1"),
-    );
+    const summaries = await run(orchestrator.listThreads("workspace_1"));
     expect(summaries).toHaveLength(1);
     expect(summaries[0]?.threadId).toBe(thread.threadId);
 
-    const opened = await runWithRuntime(
-      runtime,
-      orchestrator.openThread(thread.threadId),
-    );
+    const opened = await run(orchestrator.openThread(thread.threadId));
     expect(opened.title).toBe("Opened chat");
 
-    const ensured = await runWithRuntime(
-      runtime,
-      orchestrator.ensureSession(thread.threadId),
-    );
+    const ensured = await run(orchestrator.ensureSession(thread.threadId));
     expect(ensured.threadId).toBe(thread.threadId);
   });
 
   it("returns the current thread when stopTurn is called without an active turn", async () => {
     const adapter = new FakeProviderAdapter({ mode: "stateful" });
-    const { runtime } = createTestContext(adapter);
-    const orchestrator = await runtime.runPromise(ThreadOrchestrator);
+    const { orchestrator } = createTestContext(adapter);
 
-    const thread = await runWithRuntime(
-      runtime,
+    const thread = await run(
       orchestrator.createThread({
         workspaceId: "workspace_1",
         providerKey: adapter.key,
       }),
     );
 
-    const stopped = await runWithRuntime(
-      runtime,
-      orchestrator.stopTurn(thread.threadId),
-    );
+    const stopped = await run(orchestrator.stopTurn(thread.threadId));
     expect(stopped.threadId).toBe(thread.threadId);
     expect(stopped.status).toBe("idle");
   });
@@ -388,18 +294,15 @@ describe("ThreadOrchestrator", () => {
         } as unknown as ProviderSessionHandle),
     };
 
-    const { runtime } = createProviderContext(adapter);
-    const orchestrator = await runtime.runPromise(ThreadOrchestrator);
-    const thread = await runWithRuntime(
-      runtime,
+    const { orchestrator } = createProviderContext(adapter);
+    const thread = await run(
       orchestrator.createThread({
         workspaceId: "workspace_1",
         providerKey: adapter.key,
       }),
     );
 
-    const result = await runWithRuntime(
-      runtime,
+    const result = await run(
       orchestrator.sendMessage(thread.threadId, "Hello"),
     );
 

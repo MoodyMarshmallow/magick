@@ -8,22 +8,20 @@ import { CodexResponsesClient } from "./codexResponsesClient";
 describe("CodexResponsesClient", () => {
   it("refreshes auth when needed and streams response deltas", async () => {
     const authRepository = {
-      get: vi.fn().mockReturnValue(
-        Effect.succeed({
-          providerKey: "codex",
-          authMode: "chatgpt",
-          accessToken: "expired",
-          refreshToken: "refresh_1",
-          expiresAt: Date.now() - 1,
-          accountId: "acct_1",
-          email: "user@example.com",
-          planType: null,
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        }),
-      ),
-      upsert: vi.fn().mockReturnValue(Effect.void),
-      delete: vi.fn().mockReturnValue(Effect.void),
+      get: vi.fn().mockReturnValue({
+        providerKey: "codex",
+        authMode: "chatgpt",
+        accessToken: "expired",
+        refreshToken: "refresh_1",
+        expiresAt: Date.now() - 1,
+        accountId: "acct_1",
+        email: "user@example.com",
+        planType: null,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      }),
+      upsert: vi.fn(),
+      delete: vi.fn(),
     };
 
     const fetchMock = vi
@@ -40,15 +38,13 @@ describe("CodexResponsesClient", () => {
       );
 
     const authClient = {
-      refreshAccessToken: vi.fn().mockReturnValue(
-        Effect.succeed({
-          accessToken: "fresh_access",
-          refreshToken: "fresh_refresh",
-          expiresAt: Date.now() + 60_000,
-          accountId: "acct_1",
-          email: "user@example.com",
-        }),
-      ),
+      refreshAccessToken: vi.fn().mockResolvedValue({
+        accessToken: "fresh_access",
+        refreshToken: "fresh_refresh",
+        expiresAt: Date.now() + 60_000,
+        accountId: "acct_1",
+        email: "user@example.com",
+      }),
     } as unknown as CodexAuthClient;
 
     const client = new CodexResponsesClient({
@@ -80,22 +76,20 @@ describe("CodexResponsesClient", () => {
 
   it("serializes assistant history as output_text when rebuilding context", async () => {
     const authRepository = {
-      get: vi.fn().mockReturnValue(
-        Effect.succeed({
-          providerKey: "codex",
-          authMode: "chatgpt",
-          accessToken: "access",
-          refreshToken: "refresh",
-          expiresAt: Date.now() + 120_000,
-          accountId: "acct_1",
-          email: "user@example.com",
-          planType: null,
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        }),
-      ),
-      upsert: vi.fn().mockReturnValue(Effect.void),
-      delete: vi.fn().mockReturnValue(Effect.void),
+      get: vi.fn().mockReturnValue({
+        providerKey: "codex",
+        authMode: "chatgpt",
+        accessToken: "access",
+        refreshToken: "refresh",
+        expiresAt: Date.now() + 120_000,
+        accountId: "acct_1",
+        email: "user@example.com",
+        planType: null,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      }),
+      upsert: vi.fn(),
+      delete: vi.fn(),
     };
 
     const fetchMock = vi.fn().mockResolvedValue(
@@ -134,9 +128,9 @@ describe("CodexResponsesClient", () => {
   it("fails when auth is missing", async () => {
     const client = new CodexResponsesClient({
       authRepository: {
-        get: vi.fn().mockReturnValue(Effect.succeed(null)),
-        upsert: vi.fn().mockReturnValue(Effect.void),
-        delete: vi.fn().mockReturnValue(Effect.void),
+        get: vi.fn().mockReturnValue(null),
+        upsert: vi.fn(),
+        delete: vi.fn(),
       } as never,
       authClient: {} as CodexAuthClient,
       fetch: vi.fn() as never,
@@ -161,22 +155,20 @@ describe("CodexResponsesClient", () => {
 
   it("maps failed response events into turn failures", async () => {
     const authRepository = {
-      get: vi.fn().mockReturnValue(
-        Effect.succeed({
-          providerKey: "codex",
-          authMode: "chatgpt",
-          accessToken: "access",
-          refreshToken: "refresh",
-          expiresAt: Date.now() + 120_000,
-          accountId: null,
-          email: "user@example.com",
-          planType: null,
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        }),
-      ),
-      upsert: vi.fn().mockReturnValue(Effect.void),
-      delete: vi.fn().mockReturnValue(Effect.void),
+      get: vi.fn().mockReturnValue({
+        providerKey: "codex",
+        authMode: "chatgpt",
+        accessToken: "access",
+        refreshToken: "refresh",
+        expiresAt: Date.now() + 120_000,
+        accountId: null,
+        email: "user@example.com",
+        planType: null,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      }),
+      upsert: vi.fn(),
+      delete: vi.fn(),
     };
 
     const fetchMock = vi.fn().mockResolvedValue(
@@ -209,22 +201,20 @@ describe("CodexResponsesClient", () => {
 
   it("parses multiline sse frames and nested error payloads", async () => {
     const authRepository = {
-      get: vi.fn().mockReturnValue(
-        Effect.succeed({
-          providerKey: "codex",
-          authMode: "chatgpt",
-          accessToken: "access",
-          refreshToken: "refresh",
-          expiresAt: Date.now() + 120_000,
-          accountId: null,
-          email: "user@example.com",
-          planType: null,
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        }),
-      ),
-      upsert: vi.fn().mockReturnValue(Effect.void),
-      delete: vi.fn().mockReturnValue(Effect.void),
+      get: vi.fn().mockReturnValue({
+        providerKey: "codex",
+        authMode: "chatgpt",
+        accessToken: "access",
+        refreshToken: "refresh",
+        expiresAt: Date.now() + 120_000,
+        accountId: null,
+        email: "user@example.com",
+        planType: null,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      }),
+      upsert: vi.fn(),
+      delete: vi.fn(),
     };
 
     const fetchMock = vi
@@ -259,22 +249,20 @@ describe("CodexResponsesClient", () => {
 
   it("falls back to nested content part text when part is missing", async () => {
     const authRepository = {
-      get: vi.fn().mockReturnValue(
-        Effect.succeed({
-          providerKey: "codex",
-          authMode: "chatgpt",
-          accessToken: "access",
-          refreshToken: "refresh",
-          expiresAt: Date.now() + 120_000,
-          accountId: null,
-          email: "user@example.com",
-          planType: null,
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        }),
-      ),
-      upsert: vi.fn().mockReturnValue(Effect.void),
-      delete: vi.fn().mockReturnValue(Effect.void),
+      get: vi.fn().mockReturnValue({
+        providerKey: "codex",
+        authMode: "chatgpt",
+        accessToken: "access",
+        refreshToken: "refresh",
+        expiresAt: Date.now() + 120_000,
+        accountId: null,
+        email: "user@example.com",
+        planType: null,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      }),
+      upsert: vi.fn(),
+      delete: vi.fn(),
     };
 
     const fetchMock = vi
@@ -309,22 +297,20 @@ describe("CodexResponsesClient", () => {
 
   it("deletes auth when refresh fails", async () => {
     const authRepository = {
-      get: vi.fn().mockReturnValue(
-        Effect.succeed({
-          providerKey: "codex",
-          authMode: "chatgpt",
-          accessToken: "expired",
-          refreshToken: "refresh",
-          expiresAt: Date.now() - 1,
-          accountId: null,
-          email: "user@example.com",
-          planType: null,
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        }),
-      ),
-      upsert: vi.fn().mockReturnValue(Effect.void),
-      delete: vi.fn().mockReturnValue(Effect.void),
+      get: vi.fn().mockReturnValue({
+        providerKey: "codex",
+        authMode: "chatgpt",
+        accessToken: "expired",
+        refreshToken: "refresh",
+        expiresAt: Date.now() - 1,
+        accountId: null,
+        email: "user@example.com",
+        planType: null,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      }),
+      upsert: vi.fn(),
+      delete: vi.fn(),
     };
 
     const client = new CodexResponsesClient({
@@ -332,7 +318,7 @@ describe("CodexResponsesClient", () => {
       authClient: {
         refreshAccessToken: vi
           .fn()
-          .mockReturnValue(Effect.fail(new Error("refresh failed"))),
+          .mockRejectedValue(new Error("refresh failed")),
       } as unknown as CodexAuthClient,
       fetch: vi.fn() as never,
     });
@@ -362,9 +348,9 @@ describe("CodexResponsesClient", () => {
       updatedAt: new Date().toISOString(),
     };
     const authRepository = {
-      get: vi.fn().mockReturnValue(Effect.succeed(authRecord)),
-      upsert: vi.fn().mockReturnValue(Effect.void),
-      delete: vi.fn().mockReturnValue(Effect.void),
+      get: vi.fn().mockReturnValue(authRecord),
+      upsert: vi.fn(),
+      delete: vi.fn(),
     };
 
     const failingClient = new CodexResponsesClient({

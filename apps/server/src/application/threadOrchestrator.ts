@@ -1,6 +1,6 @@
 // Coordinates thread lifecycle, provider execution, persistence, and event projection.
 
-import { Context, Effect, Layer, Stream } from "effect";
+import { Effect, Stream } from "effect";
 
 import type {
   DomainEvent,
@@ -13,26 +13,30 @@ import {
   type BackendError,
   InvalidStateError,
   NotFoundError,
+  PersistenceError,
+  ProviderFailureError,
+  ProviderUnavailableError,
+  ReplayError,
   backendErrorMessage,
-} from "../effect/errors";
-import {
-  Clock,
-  EventPublisher,
-  IdGenerator,
-  RuntimeState,
-} from "../effect/runtime";
-import { EventStore } from "../persistence/eventStore";
-import { ProviderSessionRepository } from "../persistence/providerSessionRepository";
-import { ThreadRepository } from "../persistence/threadRepository";
+} from "../core/errors";
+import type {
+  ClockService,
+  EventPublisherService,
+  IdGeneratorService,
+  RuntimeStateService,
+} from "../core/runtime";
+import type { EventStore } from "../persistence/eventStore";
+import type { ProviderSessionRepository } from "../persistence/providerSessionRepository";
+import type { ThreadRepository } from "../persistence/threadRepository";
 import {
   projectThreadEvents,
   toThreadSummary,
 } from "../projections/threadProjector";
-import {
-  type ConversationContextMessage,
-  type ProviderEvent,
-  ProviderRegistry,
-  type ProviderSessionRuntime,
+import type {
+  ConversationContextMessage,
+  ProviderEvent,
+  ProviderRegistryService,
+  ProviderSessionRuntime,
 } from "../providers/providerTypes";
 
 export interface CreateThreadInput {
@@ -66,25 +70,74 @@ export interface ThreadOrchestratorApi {
   ) => Effect.Effect<ThreadViewModel, BackendError>;
 }
 
-export const ThreadOrchestrator = Context.GenericTag<ThreadOrchestratorApi>(
-  "@magick/ThreadOrchestrator",
-);
+const toBackendError = (error: unknown): BackendError => {
+  if (
+    error instanceof NotFoundError ||
+    error instanceof InvalidStateError ||
+    error instanceof ProviderUnavailableError ||
+    error instanceof ProviderFailureError ||
+    error instanceof PersistenceError ||
+    error instanceof ReplayError
+  ) {
+    return error;
+  }
 
-export const ThreadOrchestratorLive = Layer.effect(
-  ThreadOrchestrator,
-  Effect.gen(function* () {
-    const providerRegistry = yield* ProviderRegistry;
-    const eventStore = yield* EventStore;
-    const threadRepository = yield* ThreadRepository;
-    const providerSessionRepository = yield* ProviderSessionRepository;
-    const publisher = yield* EventPublisher;
-    const runtimeState = yield* RuntimeState;
-    const clock = yield* Clock;
-    const idGenerator = yield* IdGenerator;
+  return new InvalidStateError({
+    code: "backend_unexpected_error",
+    detail: error instanceof Error ? error.message : String(error),
+  });
+};
 
-    const requireThread = (threadId: string) =>
-      Effect.gen(function* () {
-        const thread = yield* threadRepository.get(threadId);
+const fromSync = <A>(thunk: () => A): Effect.Effect<A, BackendError> =>
+  Effect.try({
+    try: thunk,
+    catch: toBackendError,
+  });
+
+const fromPromise = <A>(
+  thunk: () => Promise<A>,
+): Effect.Effect<A, BackendError> =>
+  Effect.tryPromise({
+    try: thunk,
+    catch: toBackendError,
+  });
+
+export class ThreadOrchestrator implements ThreadOrchestratorApi {
+  readonly #providerRegistry: ProviderRegistryService;
+  readonly #eventStore: EventStore;
+  readonly #threadRepository: ThreadRepository;
+  readonly #providerSessionRepository: ProviderSessionRepository;
+  readonly #publisher: EventPublisherService;
+  readonly #runtimeState: RuntimeStateService;
+  readonly #clock: ClockService;
+  readonly #idGenerator: IdGeneratorService;
+
+  constructor(args: {
+    providerRegistry: ProviderRegistryService;
+    eventStore: EventStore;
+    threadRepository: ThreadRepository;
+    providerSessionRepository: ProviderSessionRepository;
+    publisher: EventPublisherService;
+    runtimeState: RuntimeStateService;
+    clock: ClockService;
+    idGenerator: IdGeneratorService;
+  }) {
+    this.#providerRegistry = args.providerRegistry;
+    this.#eventStore = args.eventStore;
+    this.#threadRepository = args.threadRepository;
+    this.#providerSessionRepository = args.providerSessionRepository;
+    this.#publisher = args.publisher;
+    this.#runtimeState = args.runtimeState;
+    this.#clock = args.clock;
+    this.#idGenerator = args.idGenerator;
+  }
+
+  readonly #requireThread = (threadId: string) =>
+    Effect.gen(
+      function* (this: ThreadOrchestrator) {
+        const thread = yield* fromSync(() =>
+          this.#threadRepository.get(threadId),
+        );
         if (!thread) {
           return yield* Effect.fail(
             new NotFoundError({ entity: "thread", id: threadId }),
@@ -92,11 +145,15 @@ export const ThreadOrchestratorLive = Layer.effect(
         }
 
         return thread;
-      });
+      }.bind(this),
+    );
 
-    const openThread = (threadId: string) =>
-      Effect.gen(function* () {
-        const snapshot = yield* threadRepository.getSnapshot(threadId);
+  readonly openThread = (threadId: string) =>
+    Effect.gen(
+      function* (this: ThreadOrchestrator) {
+        const snapshot = yield* fromSync(() =>
+          this.#threadRepository.getSnapshot(threadId),
+        );
         if (!snapshot) {
           return yield* Effect.fail(
             new NotFoundError({ entity: "thread", id: threadId }),
@@ -104,146 +161,164 @@ export const ThreadOrchestratorLive = Layer.effect(
         }
 
         return snapshot;
-      });
+      }.bind(this),
+    );
 
-    const buildContextMessages = (
-      thread: ThreadViewModel,
-    ): readonly ConversationContextMessage[] => {
-      return thread.messages.map((message) => ({
-        role: message.role,
-        content: message.content,
-      }));
-    };
+  readonly #buildContextMessages = (
+    thread: ThreadViewModel,
+  ): readonly ConversationContextMessage[] => {
+    return thread.messages.map((message) => ({
+      role: message.role,
+      content: message.content,
+    }));
+  };
 
-    const persistAndProject = (
-      threadId: string,
-      events: readonly Omit<DomainEvent, "sequence">[],
-    ) =>
-      Effect.gen(function* () {
-        const persistedEvents = yield* eventStore.append(threadId, events);
-        const projectedThread = projectThreadEvents(
-          yield* threadRepository.getSnapshot(threadId),
-          persistedEvents,
+  readonly #persistAndProject = (
+    threadId: string,
+    events: readonly Omit<DomainEvent, "sequence">[],
+  ) =>
+    Effect.gen(
+      function* (this: ThreadOrchestrator) {
+        const persistedEvents = yield* fromSync(() =>
+          this.#eventStore.append(threadId, events),
+        );
+        const seed = yield* fromSync(() =>
+          this.#threadRepository.getSnapshot(threadId),
+        );
+        const projectedThread = projectThreadEvents(seed, persistedEvents);
+
+        yield* fromSync(() =>
+          this.#threadRepository.saveSnapshot(
+            threadId,
+            toThreadSummary(projectedThread),
+            projectedThread,
+          ),
         );
 
-        yield* threadRepository.saveSnapshot(
-          threadId,
-          toThreadSummary(projectedThread),
-          projectedThread,
+        yield* fromPromise(() => this.#publisher.publish(persistedEvents)).pipe(
+          Effect.catchAllCause(() => Effect.void),
         );
-
-        yield* publisher
-          .publish(persistedEvents)
-          .pipe(Effect.catchAllCause(() => Effect.void));
 
         return {
           events: persistedEvents,
           thread: projectedThread,
         } as const;
-      });
+      }.bind(this),
+    );
 
-    const applyProviderEvent = (
-      threadId: string,
-      providerSessionId: string,
-      providerEvent: ProviderEvent,
-    ) => {
-      switch (providerEvent.type) {
-        case "output.delta":
-          return persistAndProject(threadId, [
-            {
-              eventId: idGenerator.next("event"),
-              threadId,
-              providerSessionId,
-              occurredAt: clock.now(),
-              type: "turn.delta",
-              payload: {
-                turnId: providerEvent.turnId,
-                messageId: providerEvent.messageId,
-                delta: providerEvent.delta,
-              },
+  readonly #applyProviderEvent = (
+    threadId: string,
+    providerSessionId: string,
+    providerEvent: ProviderEvent,
+  ) => {
+    switch (providerEvent.type) {
+      case "output.delta":
+        return this.#persistAndProject(threadId, [
+          {
+            eventId: this.#idGenerator.next("event"),
+            threadId,
+            providerSessionId,
+            occurredAt: this.#clock.now(),
+            type: "turn.delta",
+            payload: {
+              turnId: providerEvent.turnId,
+              messageId: providerEvent.messageId,
+              delta: providerEvent.delta,
             },
-          ]);
-        case "output.completed":
-          return persistAndProject(threadId, [
-            {
-              eventId: idGenerator.next("event"),
-              threadId,
-              providerSessionId,
-              occurredAt: clock.now(),
-              type: "turn.completed",
-              payload: {
-                turnId: providerEvent.turnId,
-                messageId: providerEvent.messageId,
-              },
+          },
+        ]);
+      case "output.completed":
+        return this.#persistAndProject(threadId, [
+          {
+            eventId: this.#idGenerator.next("event"),
+            threadId,
+            providerSessionId,
+            occurredAt: this.#clock.now(),
+            type: "turn.completed",
+            payload: {
+              turnId: providerEvent.turnId,
+              messageId: providerEvent.messageId,
             },
-          ]);
-        case "turn.failed":
-          return persistAndProject(threadId, [
-            {
-              eventId: idGenerator.next("event"),
-              threadId,
-              providerSessionId,
-              occurredAt: clock.now(),
-              type: "turn.failed",
-              payload: {
-                turnId: providerEvent.turnId,
-                error: providerEvent.error,
-              },
+          },
+        ]);
+      case "turn.failed":
+        return this.#persistAndProject(threadId, [
+          {
+            eventId: this.#idGenerator.next("event"),
+            threadId,
+            providerSessionId,
+            occurredAt: this.#clock.now(),
+            type: "turn.failed",
+            payload: {
+              turnId: providerEvent.turnId,
+              error: providerEvent.error,
             },
-          ]);
-        case "session.disconnected":
-          return providerSessionRepository
-            .updateStatus(providerSessionId, "disconnected", clock.now())
-            .pipe(
-              Effect.flatMap(() =>
-                persistAndProject(threadId, [
-                  {
-                    eventId: idGenerator.next("event"),
-                    threadId,
-                    providerSessionId,
-                    occurredAt: clock.now(),
-                    type: "provider.session.disconnected",
-                    payload: {
-                      reason: providerEvent.reason,
-                    },
-                  },
-                ]),
-              ),
-            );
-        case "session.recovered":
-          return providerSessionRepository
-            .updateStatus(providerSessionId, "active", clock.now())
-            .pipe(
-              Effect.flatMap(() =>
-                persistAndProject(threadId, [
-                  {
-                    eventId: idGenerator.next("event"),
-                    threadId,
-                    providerSessionId,
-                    occurredAt: clock.now(),
-                    type: "provider.session.recovered",
-                    payload: {
-                      reason: providerEvent.reason,
-                    },
-                  },
-                ]),
-              ),
-            );
-      }
-    };
+          },
+        ]);
+      case "session.disconnected":
+        return fromSync(() =>
+          this.#providerSessionRepository.updateStatus(
+            providerSessionId,
+            "disconnected",
+            this.#clock.now(),
+          ),
+        ).pipe(
+          Effect.flatMap(() =>
+            this.#persistAndProject(threadId, [
+              {
+                eventId: this.#idGenerator.next("event"),
+                threadId,
+                providerSessionId,
+                occurredAt: this.#clock.now(),
+                type: "provider.session.disconnected",
+                payload: {
+                  reason: providerEvent.reason,
+                },
+              },
+            ]),
+          ),
+        );
+      case "session.recovered":
+        return fromSync(() =>
+          this.#providerSessionRepository.updateStatus(
+            providerSessionId,
+            "active",
+            this.#clock.now(),
+          ),
+        ).pipe(
+          Effect.flatMap(() =>
+            this.#persistAndProject(threadId, [
+              {
+                eventId: this.#idGenerator.next("event"),
+                threadId,
+                providerSessionId,
+                occurredAt: this.#clock.now(),
+                type: "provider.session.recovered",
+                payload: {
+                  reason: providerEvent.reason,
+                },
+              },
+            ]),
+          ),
+        );
+    }
+  };
 
-    const getOrCreateSessionRuntime = (thread: ThreadRecord) =>
-      Effect.gen(function* () {
-        const cached = yield* runtimeState.getSessionRuntime(
+  readonly #getOrCreateSessionRuntime = (thread: ThreadRecord) =>
+    Effect.gen(
+      function* (this: ThreadOrchestrator) {
+        const cached = this.#runtimeState.getSessionRuntime(
           thread.providerSessionId,
         );
         if (cached) {
           return cached;
         }
 
-        const adapter = yield* providerRegistry.get(thread.providerKey);
-        const sessionRecord = yield* providerSessionRepository.get(
-          thread.providerSessionId,
+        const adapter = yield* fromSync(() =>
+          this.#providerRegistry.get(thread.providerKey),
+        );
+        const sessionRecord = yield* fromSync(() =>
+          this.#providerSessionRepository.get(thread.providerSessionId),
         );
         if (!sessionRecord) {
           return yield* Effect.fail(
@@ -276,23 +351,29 @@ export const ThreadOrchestratorLive = Layer.effect(
           session.providerSessionRef !== sessionRecord.providerSessionRef ||
           session.providerThreadRef !== sessionRecord.providerThreadRef
         ) {
-          yield* providerSessionRepository.updateRefs(sessionRecord.id, {
-            providerSessionRef: session.providerSessionRef,
-            providerThreadRef: session.providerThreadRef,
-            updatedAt: clock.now(),
-          });
+          yield* fromSync(() =>
+            this.#providerSessionRepository.updateRefs(sessionRecord.id, {
+              providerSessionRef: session.providerSessionRef,
+              providerThreadRef: session.providerThreadRef,
+              updatedAt: this.#clock.now(),
+            }),
+          );
         }
 
-        yield* runtimeState.setSessionRuntime(sessionRecord.id, runtime);
+        this.#runtimeState.setSessionRuntime(sessionRecord.id, runtime);
         return runtime;
-      });
+      }.bind(this),
+    );
 
-    const createThread = (input: CreateThreadInput) =>
-      Effect.gen(function* () {
-        const adapter = yield* providerRegistry.get(input.providerKey);
-        const now = clock.now();
-        const providerSessionId = idGenerator.next("session");
-        const threadId = idGenerator.next("thread");
+  readonly createThread = (input: CreateThreadInput) =>
+    Effect.gen(
+      function* (this: ThreadOrchestrator) {
+        const adapter = yield* fromSync(() =>
+          this.#providerRegistry.get(input.providerKey),
+        );
+        const now = this.#clock.now();
+        const providerSessionId = this.#idGenerator.next("session");
+        const threadId = this.#idGenerator.next("thread");
 
         const sessionRecord: ProviderSessionRecord = {
           id: providerSessionId,
@@ -305,7 +386,9 @@ export const ThreadOrchestratorLive = Layer.effect(
           createdAt: now,
           updatedAt: now,
         };
-        yield* providerSessionRepository.create(sessionRecord);
+        yield* fromSync(() =>
+          this.#providerSessionRepository.create(sessionRecord),
+        );
 
         const threadRecord: ThreadRecord = {
           id: threadId,
@@ -316,11 +399,11 @@ export const ThreadOrchestratorLive = Layer.effect(
           createdAt: now,
           updatedAt: now,
         };
-        yield* threadRepository.create(threadRecord);
+        yield* fromSync(() => this.#threadRepository.create(threadRecord));
 
-        const created = yield* persistAndProject(threadId, [
+        const created = yield* this.#persistAndProject(threadId, [
           {
-            eventId: idGenerator.next("event"),
+            eventId: this.#idGenerator.next("event"),
             threadId,
             providerSessionId,
             occurredAt: now,
@@ -332,7 +415,7 @@ export const ThreadOrchestratorLive = Layer.effect(
             },
           },
           {
-            eventId: idGenerator.next("event"),
+            eventId: this.#idGenerator.next("event"),
             threadId,
             providerSessionId,
             occurredAt: now,
@@ -345,14 +428,16 @@ export const ThreadOrchestratorLive = Layer.effect(
         ]);
 
         return created.thread;
-      });
+      }.bind(this),
+    );
 
-    const sendMessage = (threadId: string, content: string) =>
-      Effect.gen(function* () {
-        const thread = yield* requireThread(threadId);
-        const snapshot = yield* openThread(threadId);
+  readonly sendMessage = (threadId: string, content: string) =>
+    Effect.gen(
+      function* (this: ThreadOrchestrator) {
+        const thread = yield* this.#requireThread(threadId);
+        const snapshot = yield* this.openThread(threadId);
 
-        const activeTurn = yield* runtimeState.getActiveTurn(threadId);
+        const activeTurn = this.#runtimeState.getActiveTurn(threadId);
         if (snapshot.activeTurnId || activeTurn) {
           return yield* Effect.fail(
             new InvalidStateError({
@@ -362,25 +447,25 @@ export const ThreadOrchestratorLive = Layer.effect(
           );
         }
 
-        const runtime = yield* getOrCreateSessionRuntime(thread);
-        const turnId = idGenerator.next("turn");
-        const assistantMessageId = idGenerator.next("message");
-        const now = clock.now();
+        const runtime = yield* this.#getOrCreateSessionRuntime(thread);
+        const turnId = this.#idGenerator.next("turn");
+        const assistantMessageId = this.#idGenerator.next("message");
+        const now = this.#clock.now();
 
-        const prelude = yield* persistAndProject(threadId, [
+        const prelude = yield* this.#persistAndProject(threadId, [
           {
-            eventId: idGenerator.next("event"),
+            eventId: this.#idGenerator.next("event"),
             threadId,
             providerSessionId: thread.providerSessionId,
             occurredAt: now,
             type: "message.user.created",
             payload: {
-              messageId: idGenerator.next("message"),
+              messageId: this.#idGenerator.next("message"),
               content,
             },
           },
           {
-            eventId: idGenerator.next("event"),
+            eventId: this.#idGenerator.next("event"),
             threadId,
             providerSessionId: thread.providerSessionId,
             occurredAt: now,
@@ -392,7 +477,7 @@ export const ThreadOrchestratorLive = Layer.effect(
           },
         ]);
 
-        yield* runtimeState.setActiveTurn(threadId, {
+        this.#runtimeState.setActiveTurn(threadId, {
           turnId,
           sessionId: runtime.recordId,
         });
@@ -402,23 +487,23 @@ export const ThreadOrchestratorLive = Layer.effect(
           turnId,
           messageId: assistantMessageId,
           userMessage: content,
-          contextMessages: buildContextMessages(prelude.thread),
+          contextMessages: this.#buildContextMessages(prelude.thread),
         });
 
         yield* Stream.runForEach(stream, (providerEvent) =>
-          applyProviderEvent(
+          this.#applyProviderEvent(
             threadId,
             thread.providerSessionId,
             providerEvent,
           ).pipe(Effect.asVoid),
         ).pipe(
           Effect.catchAll((error) =>
-            persistAndProject(threadId, [
+            this.#persistAndProject(threadId, [
               {
-                eventId: idGenerator.next("event"),
+                eventId: this.#idGenerator.next("event"),
                 threadId,
                 providerSessionId: thread.providerSessionId,
-                occurredAt: clock.now(),
+                occurredAt: this.#clock.now(),
                 type: "turn.failed",
                 payload: {
                   turnId,
@@ -427,20 +512,24 @@ export const ThreadOrchestratorLive = Layer.effect(
               },
             ]).pipe(Effect.asVoid),
           ),
-          Effect.ensuring(runtimeState.clearActiveTurn(threadId)),
+          Effect.ensuring(
+            Effect.sync(() => this.#runtimeState.clearActiveTurn(threadId)),
+          ),
         );
 
-        return yield* openThread(threadId);
-      });
+        return yield* this.openThread(threadId);
+      }.bind(this),
+    );
 
-    const stopTurn = (threadId: string) =>
-      Effect.gen(function* () {
-        const activeTurn = yield* runtimeState.getActiveTurn(threadId);
+  readonly stopTurn = (threadId: string) =>
+    Effect.gen(
+      function* (this: ThreadOrchestrator) {
+        const activeTurn = this.#runtimeState.getActiveTurn(threadId);
         if (!activeTurn) {
-          return yield* openThread(threadId);
+          return yield* this.openThread(threadId);
         }
 
-        const runtime = yield* runtimeState.getSessionRuntime(
+        const runtime = this.#runtimeState.getSessionRuntime(
           activeTurn.sessionId,
         );
         if (!runtime) {
@@ -456,12 +545,12 @@ export const ThreadOrchestratorLive = Layer.effect(
           turnId: activeTurn.turnId,
           reason: "Interrupted by user",
         });
-        yield* persistAndProject(threadId, [
+        yield* this.#persistAndProject(threadId, [
           {
-            eventId: idGenerator.next("event"),
+            eventId: this.#idGenerator.next("event"),
             threadId,
             providerSessionId: runtime.recordId,
-            occurredAt: clock.now(),
+            occurredAt: this.#clock.now(),
             type: "turn.interrupted",
             payload: {
               turnId: activeTurn.turnId,
@@ -469,13 +558,15 @@ export const ThreadOrchestratorLive = Layer.effect(
             },
           },
         ]);
-        yield* runtimeState.clearActiveTurn(threadId);
-        return yield* openThread(threadId);
-      });
+        this.#runtimeState.clearActiveTurn(threadId);
+        return yield* this.openThread(threadId);
+      }.bind(this),
+    );
 
-    const retryTurn = (threadId: string) =>
-      Effect.gen(function* () {
-        const thread = yield* openThread(threadId);
+  readonly retryTurn = (threadId: string) =>
+    Effect.gen(
+      function* (this: ThreadOrchestrator) {
+        const thread = yield* this.openThread(threadId);
         const lastUserMessage = [...thread.messages]
           .reverse()
           .find((message) => message.role === "user");
@@ -489,25 +580,19 @@ export const ThreadOrchestratorLive = Layer.effect(
           );
         }
 
-        return yield* sendMessage(threadId, lastUserMessage.content);
-      });
+        return yield* this.sendMessage(threadId, lastUserMessage.content);
+      }.bind(this),
+    );
 
-    const ensureSession = (threadId: string) =>
-      Effect.gen(function* () {
-        const thread = yield* requireThread(threadId);
-        yield* getOrCreateSessionRuntime(thread);
-        return yield* openThread(threadId);
-      });
+  readonly ensureSession = (threadId: string) =>
+    Effect.gen(
+      function* (this: ThreadOrchestrator) {
+        const thread = yield* this.#requireThread(threadId);
+        yield* this.#getOrCreateSessionRuntime(thread);
+        return yield* this.openThread(threadId);
+      }.bind(this),
+    );
 
-    return {
-      createThread,
-      listThreads: (workspaceId: string) =>
-        threadRepository.listByWorkspace(workspaceId),
-      openThread,
-      sendMessage,
-      stopTurn,
-      retryTurn,
-      ensureSession,
-    } satisfies ThreadOrchestratorApi;
-  }),
-);
+  readonly listThreads = (workspaceId: string) =>
+    fromSync(() => this.#threadRepository.listByWorkspace(workspaceId));
+}

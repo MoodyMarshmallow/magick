@@ -1,47 +1,40 @@
 // Exposes replay-oriented reads for thread snapshots and event streams.
 
-import { Context, Effect, Layer } from "effect";
-
 import type { DomainEvent, ThreadViewModel } from "@magick/contracts/chat";
-import type { BackendError } from "../effect/errors";
-import { NotFoundError } from "../effect/errors";
-import { EventStore } from "../persistence/eventStore";
-import { ThreadRepository } from "../persistence/threadRepository";
+import { NotFoundError } from "../core/errors";
+import type { EventStore } from "../persistence/eventStore";
+import type { ThreadRepository } from "../persistence/threadRepository";
 
 export interface ReplayServiceApi {
-  readonly getThreadState: (
-    threadId: string,
-  ) => Effect.Effect<ThreadViewModel, BackendError>;
+  readonly getThreadState: (threadId: string) => ThreadViewModel;
   readonly replayThread: (
     threadId: string,
     afterSequence?: number,
-  ) => Effect.Effect<readonly DomainEvent[], BackendError>;
+  ) => readonly DomainEvent[];
 }
 
-export const ReplayService = Context.GenericTag<ReplayServiceApi>(
-  "@magick/ReplayService",
-);
+export class ReplayService implements ReplayServiceApi {
+  readonly #eventStore: EventStore;
+  readonly #threadRepository: ThreadRepository;
 
-export const ReplayServiceLive = Layer.effect(
-  ReplayService,
-  Effect.gen(function* () {
-    const eventStore = yield* EventStore;
-    const threadRepository = yield* ThreadRepository;
+  constructor(args: {
+    eventStore: EventStore;
+    threadRepository: ThreadRepository;
+  }) {
+    this.#eventStore = args.eventStore;
+    this.#threadRepository = args.threadRepository;
+  }
 
-    return {
-      getThreadState: (threadId: string) =>
-        Effect.gen(function* () {
-          const snapshot = yield* threadRepository.getSnapshot(threadId);
-          if (!snapshot) {
-            return yield* Effect.fail(
-              new NotFoundError({ entity: "thread", id: threadId }),
-            );
-          }
+  getThreadState(threadId: string): ThreadViewModel {
+    const snapshot = this.#threadRepository.getSnapshot(threadId);
+    if (!snapshot) {
+      throw new NotFoundError({ entity: "thread", id: threadId });
+    }
 
-          return snapshot;
-        }),
-      replayThread: (threadId: string, afterSequence = 0) =>
-        eventStore.listThreadEvents(threadId, afterSequence),
-    } satisfies ReplayServiceApi;
-  }),
-);
+    return snapshot;
+  }
+
+  replayThread(threadId: string, afterSequence = 0): readonly DomainEvent[] {
+    return this.#eventStore.listThreadEvents(threadId, afterSequence);
+  }
+}

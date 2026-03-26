@@ -3,25 +3,15 @@ import { createServer } from "node:http";
 import { join } from "node:path";
 
 import { attachWebSocketServer, createBackendServices } from "./index";
-import { ProviderRegistry } from "./providers/providerTypes";
 
 describe("createBackendServices", () => {
-  it("builds a runtime with fake and codex providers registered", async () => {
+  it("builds services with fake and codex providers registered", () => {
     const services = createBackendServices();
-    const registry = (await services.runtime.runPromise(
-      ProviderRegistry as never,
-    )) as {
-      readonly get: (providerKey: string) => Promise<unknown> | unknown;
-    };
 
-    await expect(
-      services.runtime.runPromise(registry.get("codex") as never),
-    ).resolves.toMatchObject({
+    expect(services.providerRegistry.get("codex")).toMatchObject({
       key: "codex",
     });
-    await expect(
-      services.runtime.runPromise(registry.get("fake") as never),
-    ).resolves.toMatchObject({
+    expect(services.providerRegistry.get("fake")).toMatchObject({
       key: "fake",
     });
   });

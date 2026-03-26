@@ -1,9 +1,8 @@
-// Handles websocket commands and bridges transport requests into backend Effect services.
+// Handles websocket commands and bridges transport requests into backend services.
 
 import type { Server } from "node:http";
 
 import { Cause, Effect, Exit, Option } from "effect";
-import type * as ManagedRuntime from "effect/ManagedRuntime";
 import { type WebSocket, WebSocketServer } from "ws";
 
 import type { DomainEvent } from "@magick/contracts/chat";
@@ -12,20 +11,20 @@ import type {
   CommandResponseEnvelope,
 } from "@magick/contracts/ws";
 import { createId } from "@magick/shared/id";
+import type { ProviderAuthServiceApi } from "../application/providerAuthService";
+import type { ReplayServiceApi } from "../application/replayService";
+import type { ThreadOrchestratorApi } from "../application/threadOrchestrator";
+import type { BackendError } from "../core/errors";
 import {
-  ProviderAuthService,
-  type ProviderAuthServiceApi,
-} from "../application/providerAuthService";
-import {
-  ReplayService,
-  type ReplayServiceApi,
-} from "../application/replayService";
-import {
-  ThreadOrchestrator,
-  type ThreadOrchestratorApi,
-} from "../application/threadOrchestrator";
-import type { BackendError } from "../effect/errors";
-import { backendErrorCode, backendErrorMessage } from "../effect/errors";
+  InvalidStateError,
+  NotFoundError,
+  PersistenceError,
+  ProviderFailureError,
+  ProviderUnavailableError,
+  ReplayError,
+  backendErrorCode,
+  backendErrorMessage,
+} from "../core/errors";
 import { ConnectionRegistry, type PushConnection } from "./connectionRegistry";
 
 class WsPushConnection implements PushConnection {
@@ -42,22 +41,57 @@ class WsPushConnection implements PushConnection {
   }
 }
 
-type TransportRuntime =
-  | ProviderAuthServiceApi
-  | ReplayServiceApi
-  | ThreadOrchestratorApi;
+const toBackendError = (error: unknown): BackendError => {
+  if (
+    error instanceof NotFoundError ||
+    error instanceof InvalidStateError ||
+    error instanceof ProviderUnavailableError ||
+    error instanceof ProviderFailureError ||
+    error instanceof PersistenceError ||
+    error instanceof ReplayError
+  ) {
+    return error;
+  }
+
+  return new InvalidStateError({
+    code: "backend_unexpected_error",
+    detail: error instanceof Error ? error.message : String(error),
+  });
+};
+
+const runBackendEffect = <A>(
+  effect: Effect.Effect<A, BackendError>,
+): Promise<A> =>
+  Effect.runPromiseExit(effect).then((exit) => {
+    if (Exit.isSuccess(exit)) {
+      return exit.value;
+    }
+
+    const failure = Cause.failureOption(exit.cause);
+    if (Option.isSome(failure)) {
+      throw failure.value;
+    }
+
+    throw new Error("Unhandled backend effect failure");
+  });
 
 export class WebSocketCommandServer {
   readonly #connections: ConnectionRegistry;
-  readonly #runtime: ManagedRuntime.ManagedRuntime<TransportRuntime, never>;
+  readonly #providerAuth: ProviderAuthServiceApi;
+  readonly #replayService: ReplayServiceApi;
+  readonly #threadOrchestrator: ThreadOrchestratorApi;
   readonly #server: WebSocketServer;
 
   constructor(args: {
     httpServer: Server;
-    runtime: ManagedRuntime.ManagedRuntime<TransportRuntime, never>;
+    providerAuth: ProviderAuthServiceApi;
+    replayService: ReplayServiceApi;
+    threadOrchestrator: ThreadOrchestratorApi;
     connections?: ConnectionRegistry;
   }) {
-    this.#runtime = args.runtime;
+    this.#providerAuth = args.providerAuth;
+    this.#replayService = args.replayService;
+    this.#threadOrchestrator = args.threadOrchestrator;
     this.#connections = args.connections ?? new ConnectionRegistry();
     this.#server = new WebSocketServer({ server: args.httpServer });
     this.#server.on("connection", (socket) => {
@@ -116,18 +150,21 @@ export class WebSocketCommandServer {
     connectionId: string,
   ): Promise<CommandResponseEnvelope> {
     const connections = this.#connections;
-    const program = Effect.gen(function* () {
-      const orchestrator = yield* ThreadOrchestrator;
-      const providerAuth = yield* ProviderAuthService;
-      const replayService = yield* ReplayService;
 
+    try {
       switch (envelope.command.type) {
         case "app.bootstrap": {
-          const threadSummaries = yield* orchestrator.listThreads(
-            envelope.command.payload.workspaceId,
+          const threadSummaries = await runBackendEffect(
+            this.#threadOrchestrator.listThreads(
+              envelope.command.payload.workspaceId,
+            ),
           );
           const activeThread = envelope.command.payload.threadId
-            ? yield* orchestrator.openThread(envelope.command.payload.threadId)
+            ? await runBackendEffect(
+                this.#threadOrchestrator.openThread(
+                  envelope.command.payload.threadId,
+                ),
+              )
             : null;
 
           if (envelope.command.payload.threadId) {
@@ -140,9 +177,9 @@ export class WebSocketCommandServer {
           return {
             requestId: envelope.requestId,
             result: {
-              ok: true as const,
+              ok: true,
               data: {
-                kind: "bootstrap" as const,
+                kind: "bootstrap",
                 threadSummaries,
                 activeThread,
                 capabilities: null,
@@ -154,42 +191,46 @@ export class WebSocketCommandServer {
           return {
             requestId: envelope.requestId,
             result: {
-              ok: true as const,
+              ok: true,
               data: {
-                kind: "threadList" as const,
-                threadSummaries: yield* orchestrator.listThreads(
-                  envelope.command.payload.workspaceId,
+                kind: "threadList",
+                threadSummaries: await runBackendEffect(
+                  this.#threadOrchestrator.listThreads(
+                    envelope.command.payload.workspaceId,
+                  ),
                 ),
               },
             },
           } satisfies CommandResponseEnvelope;
         case "thread.create": {
-          const thread = yield* orchestrator.createThread(
-            envelope.command.payload,
+          const thread = await runBackendEffect(
+            this.#threadOrchestrator.createThread(envelope.command.payload),
           );
           connections.subscribeThread(connectionId, thread.threadId);
           return {
             requestId: envelope.requestId,
             result: {
-              ok: true as const,
+              ok: true,
               data: {
-                kind: "threadState" as const,
+                kind: "threadState",
                 thread,
               },
             },
           } satisfies CommandResponseEnvelope;
         }
         case "thread.open": {
-          const thread = yield* orchestrator.openThread(
-            envelope.command.payload.threadId,
+          const thread = await runBackendEffect(
+            this.#threadOrchestrator.openThread(
+              envelope.command.payload.threadId,
+            ),
           );
           connections.subscribeThread(connectionId, thread.threadId);
           return {
             requestId: envelope.requestId,
             result: {
-              ok: true as const,
+              ok: true,
               data: {
-                kind: "threadState" as const,
+                kind: "threadState",
                 thread,
               },
             },
@@ -200,43 +241,51 @@ export class WebSocketCommandServer {
             connectionId,
             envelope.command.payload.threadId,
           );
-          yield* orchestrator.sendMessage(
-            envelope.command.payload.threadId,
-            envelope.command.payload.content,
+          await runBackendEffect(
+            this.#threadOrchestrator.sendMessage(
+              envelope.command.payload.threadId,
+              envelope.command.payload.content,
+            ),
           );
           return {
             requestId: envelope.requestId,
             result: {
-              ok: true as const,
+              ok: true,
               data: {
-                kind: "accepted" as const,
+                kind: "accepted",
                 threadId: envelope.command.payload.threadId,
               },
             },
           } satisfies CommandResponseEnvelope;
         case "thread.stopTurn": {
-          const thread = yield* orchestrator.stopTurn(
-            envelope.command.payload.threadId,
+          const thread = await runBackendEffect(
+            this.#threadOrchestrator.stopTurn(
+              envelope.command.payload.threadId,
+            ),
           );
           return {
             requestId: envelope.requestId,
             result: {
-              ok: true as const,
+              ok: true,
               data: {
-                kind: "threadState" as const,
+                kind: "threadState",
                 thread,
               },
             },
           } satisfies CommandResponseEnvelope;
         }
         case "thread.retryTurn":
-          yield* orchestrator.retryTurn(envelope.command.payload.threadId);
+          await runBackendEffect(
+            this.#threadOrchestrator.retryTurn(
+              envelope.command.payload.threadId,
+            ),
+          );
           return {
             requestId: envelope.requestId,
             result: {
-              ok: true as const,
+              ok: true,
               data: {
-                kind: "accepted" as const,
+                kind: "accepted",
                 threadId: envelope.command.payload.threadId,
               },
             },
@@ -246,10 +295,12 @@ export class WebSocketCommandServer {
             connectionId,
             envelope.command.payload.threadId,
           );
-          const thread = yield* orchestrator.ensureSession(
-            envelope.command.payload.threadId,
+          const thread = await runBackendEffect(
+            this.#threadOrchestrator.ensureSession(
+              envelope.command.payload.threadId,
+            ),
           );
-          const replayedEvents = yield* replayService.replayThread(
+          const replayedEvents = this.#replayService.replayThread(
             envelope.command.payload.threadId,
             envelope.command.payload.afterSequence ?? 0,
           );
@@ -257,9 +308,9 @@ export class WebSocketCommandServer {
           return {
             requestId: envelope.requestId,
             result: {
-              ok: true as const,
+              ok: true,
               data: {
-                kind: "threadState" as const,
+                kind: "threadState",
                 thread,
                 replayedEvents,
               },
@@ -267,48 +318,48 @@ export class WebSocketCommandServer {
           } satisfies CommandResponseEnvelope;
         }
         case "provider.auth.read": {
-          const auth = yield* providerAuth.read(
+          const auth = await this.#providerAuth.read(
             envelope.command.payload.providerKey,
             envelope.command.payload.refreshToken ?? false,
           );
           return {
             requestId: envelope.requestId,
             result: {
-              ok: true as const,
+              ok: true,
               data: {
-                kind: "providerAuthState" as const,
+                kind: "providerAuthState",
                 auth,
               },
             },
           } satisfies CommandResponseEnvelope;
         }
         case "provider.auth.login.start": {
-          const auth = yield* providerAuth.startChatGptLogin(
+          const auth = await this.#providerAuth.startChatGptLogin(
             envelope.command.payload.providerKey,
           );
           return {
             requestId: envelope.requestId,
             result: {
-              ok: true as const,
+              ok: true,
               data: {
-                kind: "providerAuthLoginStart" as const,
+                kind: "providerAuthLoginStart",
                 auth,
               },
             },
           } satisfies CommandResponseEnvelope;
         }
         case "provider.auth.login.cancel": {
-          yield* providerAuth.cancelLogin(
+          await this.#providerAuth.cancelLogin(
             envelope.command.payload.providerKey,
             envelope.command.payload.loginId,
           );
           return {
             requestId: envelope.requestId,
             result: {
-              ok: true as const,
+              ok: true,
               data: {
-                kind: "providerAuthState" as const,
-                auth: yield* providerAuth.read(
+                kind: "providerAuthState",
+                auth: await this.#providerAuth.read(
                   envelope.command.payload.providerKey,
                 ),
               },
@@ -316,14 +367,14 @@ export class WebSocketCommandServer {
           } satisfies CommandResponseEnvelope;
         }
         case "provider.auth.logout": {
-          yield* providerAuth.logout(envelope.command.payload.providerKey);
+          await this.#providerAuth.logout(envelope.command.payload.providerKey);
           return {
             requestId: envelope.requestId,
             result: {
-              ok: true as const,
+              ok: true,
               data: {
-                kind: "providerAuthState" as const,
-                auth: yield* providerAuth.read(
+                kind: "providerAuthState",
+                auth: await this.#providerAuth.read(
                   envelope.command.payload.providerKey,
                 ),
               },
@@ -331,22 +382,8 @@ export class WebSocketCommandServer {
           } satisfies CommandResponseEnvelope;
         }
       }
-    });
-
-    return this.#runtime.runPromiseExit(program).then((exit) => {
-      if (Exit.isSuccess(exit)) {
-        return exit.value;
-      }
-
-      const failure = Cause.failureOption(exit.cause);
-      const backendError = Option.isSome(failure)
-        ? (failure.value as BackendError)
-        : ({
-            _tag: "ReplayError",
-            threadId: "unknown",
-            detail: "Unhandled runtime failure",
-          } as BackendError);
-
+    } catch (error) {
+      const backendError = toBackendError(error);
       return {
         requestId: envelope.requestId,
         result: {
@@ -357,6 +394,6 @@ export class WebSocketCommandServer {
           },
         },
       } satisfies CommandResponseEnvelope;
-    });
+    }
   }
 }

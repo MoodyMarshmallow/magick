@@ -2,96 +2,63 @@
 
 import { createServer } from "node:http";
 
-import { Effect, Layer } from "effect";
-import * as ManagedRuntime from "effect/ManagedRuntime";
+import { Effect } from "effect";
 
+import { ProviderRegistry } from "../application/providerRegistry";
+import { ReplayService } from "../application/replayService";
+import { ThreadOrchestrator } from "../application/threadOrchestrator";
 import {
-  ProviderAuthService,
-  type ProviderAuthServiceApi,
-} from "../application/providerAuthService";
-import { makeProviderRegistryLayer } from "../application/providerRegistry";
-import {
-  ReplayService,
-  type ReplayServiceApi,
-  ReplayServiceLive,
-} from "../application/replayService";
-import {
-  ThreadOrchestrator,
-  type ThreadOrchestratorApi,
-  ThreadOrchestratorLive,
-} from "../application/threadOrchestrator";
-import {
-  ClockLive,
-  EventPublisher,
-  IdGeneratorLive,
-  RuntimeStateLive,
-} from "../effect/runtime";
+  createClock,
+  createIdGenerator,
+  createRuntimeState,
+} from "../core/runtime";
 import { createDatabase } from "../persistence/database";
-import {
-  type EventStoreService,
-  makeEventStoreLayer,
-} from "../persistence/eventStore";
-import {
-  type ProviderSessionRepositoryService,
-  makeProviderSessionRepositoryLayer,
-} from "../persistence/providerSessionRepository";
-import {
-  type ThreadRepositoryService,
-  makeThreadRepositoryLayer,
-} from "../persistence/threadRepository";
+import { EventStore } from "../persistence/eventStore";
+import { ProviderSessionRepository } from "../persistence/providerSessionRepository";
+import { ThreadRepository } from "../persistence/threadRepository";
 import { FakeProviderAdapter } from "../providers/fake/fakeProviderAdapter";
-import type { ProviderRegistryService } from "../providers/providerTypes";
 import { ConnectionRegistry } from "./connectionRegistry";
 import { WebSocketCommandServer } from "./wsServer";
 
-type TestRuntime =
-  | ProviderAuthServiceApi
-  | ReplayServiceApi
-  | ThreadOrchestratorApi;
-
-const makeRuntime = () => {
+const makeServices = () => {
   const database = createDatabase();
   const adapter = new FakeProviderAdapter({ mode: "stateful" });
+  const threadRepository = new ThreadRepository(database);
+  const eventStore = new EventStore(database);
 
-  const baseLayer = Layer.mergeAll(
-    ClockLive,
-    IdGeneratorLive,
-    RuntimeStateLive,
-    makeEventStoreLayer(database),
-    makeThreadRepositoryLayer(database),
-    makeProviderSessionRepositoryLayer(database),
-    makeProviderRegistryLayer([adapter]),
-    Layer.succeed(EventPublisher, {
-      publish: () => Effect.void,
-    }),
-  );
-
-  const appLayer = Layer.mergeAll(
-    ReplayServiceLive,
-    ThreadOrchestratorLive,
-  ).pipe(Layer.provide(baseLayer));
-
-  const authLayer = Layer.succeed(ProviderAuthService, {
-    read: (providerKey: string) =>
-      Effect.succeed({
+  return {
+    adapter,
+    providerAuth: {
+      read: async (providerKey: string) => ({
         providerKey,
         requiresOpenaiAuth: providerKey === "codex",
         account: null,
         activeLoginId: null,
       }),
-    startChatGptLogin: (providerKey: string) =>
-      Effect.succeed({
+      startChatGptLogin: async (providerKey: string) => ({
         providerKey,
         loginId: "login_1",
         authUrl: "https://chatgpt.com/login",
       }),
-    cancelLogin: () => Effect.void,
-    logout: () => Effect.void,
-  });
-
-  return {
-    runtime: ManagedRuntime.make(Layer.mergeAll(appLayer, authLayer)),
-    adapter,
+      cancelLogin: async () => undefined,
+      logout: async () => undefined,
+    },
+    replayService: new ReplayService({
+      eventStore,
+      threadRepository,
+    }),
+    threadOrchestrator: new ThreadOrchestrator({
+      providerRegistry: new ProviderRegistry([adapter]),
+      eventStore,
+      threadRepository,
+      providerSessionRepository: new ProviderSessionRepository(database),
+      publisher: {
+        publish: async () => undefined,
+      },
+      runtimeState: createRuntimeState(),
+      clock: createClock(),
+      idGenerator: createIdGenerator(),
+    }),
   };
 };
 
@@ -114,12 +81,14 @@ const closeServer = (server: ReturnType<typeof createServer>) =>
 
 describe("WebSocketCommandServer", () => {
   it("maps backend not found errors into command responses", async () => {
-    const { runtime } = makeRuntime();
+    const services = makeServices();
     const server = createServer();
     await listen(server);
     const wsServer = new WebSocketCommandServer({
       httpServer: server,
-      runtime: runtime as ManagedRuntime.ManagedRuntime<TestRuntime, never>,
+      providerAuth: services.providerAuth,
+      replayService: services.replayService,
+      threadOrchestrator: services.threadOrchestrator,
       connections: new ConnectionRegistry(),
     });
 
@@ -148,20 +117,21 @@ describe("WebSocketCommandServer", () => {
   });
 
   it("returns accepted for sendMessage after creating a thread", async () => {
-    const { runtime, adapter } = makeRuntime();
+    const services = makeServices();
     const server = createServer();
     await listen(server);
     const wsServer = new WebSocketCommandServer({
       httpServer: server,
-      runtime: runtime as ManagedRuntime.ManagedRuntime<TestRuntime, never>,
+      providerAuth: services.providerAuth,
+      replayService: services.replayService,
+      threadOrchestrator: services.threadOrchestrator,
       connections: new ConnectionRegistry(),
     });
 
-    const orchestrator = await runtime.runPromise(ThreadOrchestrator);
-    const thread = await runtime.runPromise(
-      orchestrator.createThread({
+    const thread = await Effect.runPromise(
+      services.threadOrchestrator.createThread({
         workspaceId: "workspace_1",
-        providerKey: adapter.key,
+        providerKey: services.adapter.key,
       }),
     );
 
@@ -191,12 +161,14 @@ describe("WebSocketCommandServer", () => {
   });
 
   it("returns codex auth status from the provider auth service", async () => {
-    const { runtime } = makeRuntime();
+    const services = makeServices();
     const server = createServer();
     await listen(server);
     const wsServer = new WebSocketCommandServer({
       httpServer: server,
-      runtime: runtime as ManagedRuntime.ManagedRuntime<TestRuntime, never>,
+      providerAuth: services.providerAuth,
+      replayService: services.replayService,
+      threadOrchestrator: services.threadOrchestrator,
       connections: new ConnectionRegistry(),
     });
 
@@ -231,12 +203,14 @@ describe("WebSocketCommandServer", () => {
   });
 
   it("handles bootstrap, list, create, stop, retry, resume, and auth commands", async () => {
-    const { runtime, adapter } = makeRuntime();
+    const services = makeServices();
     const server = createServer();
     await listen(server);
     const wsServer = new WebSocketCommandServer({
       httpServer: server,
-      runtime: runtime as ManagedRuntime.ManagedRuntime<TestRuntime, never>,
+      providerAuth: services.providerAuth,
+      replayService: services.replayService,
+      threadOrchestrator: services.threadOrchestrator,
       connections: new ConnectionRegistry(),
     });
 
@@ -257,7 +231,10 @@ describe("WebSocketCommandServer", () => {
         requestId: "req_create",
         command: {
           type: "thread.create",
-          payload: { workspaceId: "workspace_1", providerKey: adapter.key },
+          payload: {
+            workspaceId: "workspace_1",
+            providerKey: services.adapter.key,
+          },
         },
       },
       "conn_create",
@@ -397,7 +374,7 @@ describe("WebSocketCommandServer", () => {
   });
 
   it("publishes pushed domain events to subscribed connections", async () => {
-    const { runtime, adapter } = makeRuntime();
+    const services = makeServices();
     const server = createServer();
     await listen(server);
     const connections = new ConnectionRegistry();
@@ -411,15 +388,16 @@ describe("WebSocketCommandServer", () => {
 
     const wsServer = new WebSocketCommandServer({
       httpServer: server,
-      runtime: runtime as ManagedRuntime.ManagedRuntime<TestRuntime, never>,
+      providerAuth: services.providerAuth,
+      replayService: services.replayService,
+      threadOrchestrator: services.threadOrchestrator,
       connections,
     });
 
-    const orchestrator = await runtime.runPromise(ThreadOrchestrator);
-    const thread = await runtime.runPromise(
-      orchestrator.createThread({
+    const thread = await Effect.runPromise(
+      services.threadOrchestrator.createThread({
         workspaceId: "workspace_1",
-        providerKey: adapter.key,
+        providerKey: services.adapter.key,
       }),
     );
     connections.subscribeThread("conn_push", thread.threadId);
@@ -434,7 +412,7 @@ describe("WebSocketCommandServer", () => {
         type: "thread.created",
         payload: {
           workspaceId: "workspace_1",
-          providerKey: adapter.key,
+          providerKey: services.adapter.key,
           title: "Chat",
         },
       },
@@ -444,35 +422,42 @@ describe("WebSocketCommandServer", () => {
     await closeServer(server);
   });
 
-  it("maps unexpected runtime failures to internal_error responses", async () => {
+  it("maps unexpected runtime failures to backend_unexpected_error responses", async () => {
     const server = createServer();
     await listen(server);
-    const runtime = ManagedRuntime.make(
-      Layer.mergeAll(
-        Layer.succeed(ThreadOrchestrator, {
-          createThread: () => Effect.die(new Error("boom")),
-          listThreads: () => Effect.die(new Error("boom")),
-          openThread: () => Effect.die(new Error("boom")),
-          sendMessage: () => Effect.die(new Error("boom")),
-          stopTurn: () => Effect.die(new Error("boom")),
-          retryTurn: () => Effect.die(new Error("boom")),
-          ensureSession: () => Effect.die(new Error("boom")),
-        }),
-        Layer.succeed(ReplayService, {
-          getThreadState: () => Effect.die(new Error("boom")),
-          replayThread: () => Effect.die(new Error("boom")),
-        }),
-        Layer.succeed(ProviderAuthService, {
-          read: () => Effect.die(new Error("boom")),
-          startChatGptLogin: () => Effect.die(new Error("boom")),
-          cancelLogin: () => Effect.die(new Error("boom")),
-          logout: () => Effect.die(new Error("boom")),
-        }),
-      ),
-    );
     const wsServer = new WebSocketCommandServer({
       httpServer: server,
-      runtime: runtime as ManagedRuntime.ManagedRuntime<TestRuntime, never>,
+      providerAuth: {
+        read: async () => {
+          throw new Error("boom");
+        },
+        startChatGptLogin: async () => {
+          throw new Error("boom");
+        },
+        cancelLogin: async () => {
+          throw new Error("boom");
+        },
+        logout: async () => {
+          throw new Error("boom");
+        },
+      },
+      replayService: {
+        getThreadState: () => {
+          throw new Error("boom");
+        },
+        replayThread: () => {
+          throw new Error("boom");
+        },
+      },
+      threadOrchestrator: {
+        createThread: () => Effect.die(new Error("boom")),
+        listThreads: () => Effect.die(new Error("boom")),
+        openThread: () => Effect.die(new Error("boom")),
+        sendMessage: () => Effect.die(new Error("boom")),
+        stopTurn: () => Effect.die(new Error("boom")),
+        retryTurn: () => Effect.die(new Error("boom")),
+        ensureSession: () => Effect.die(new Error("boom")),
+      },
       connections: new ConnectionRegistry(),
     });
 
@@ -489,7 +474,7 @@ describe("WebSocketCommandServer", () => {
 
     expect(response).toMatchObject({
       requestId: "req_internal",
-      result: { ok: false, error: { code: "replay_failure" } },
+      result: { ok: false, error: { code: "backend_unexpected_error" } },
     });
 
     await closeServer(server);

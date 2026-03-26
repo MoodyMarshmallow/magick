@@ -2,8 +2,6 @@
 
 import { request } from "node:http";
 
-import { Effect } from "effect";
-
 import { CodexOAuthHarness } from "./codexOAuth";
 
 const fetchPath = async (urlString: string) => {
@@ -32,7 +30,7 @@ describe("CodexOAuthHarness", () => {
       callbackPort: 0,
       loginTimeoutMs: 1000,
     });
-    const login = await Effect.runPromise(harness.startLogin());
+    const login = await harness.startLogin();
 
     const authUrl = new URL(login.authUrl);
     const redirectUri = authUrl.searchParams.get("redirect_uri");
@@ -60,7 +58,7 @@ describe("CodexOAuthHarness", () => {
       callbackPort: 0,
       loginTimeoutMs: 1000,
     });
-    const login = await Effect.runPromise(harness.startLogin());
+    const login = await harness.startLogin();
 
     expect(login.redirectUri.startsWith("http://localhost:")).toBe(true);
     expect(login.redirectUri.endsWith("/auth/callback")).toBe(true);
@@ -75,7 +73,7 @@ describe("CodexOAuthHarness", () => {
       callbackPort: 0,
       loginTimeoutMs: 1000,
     });
-    const login = await Effect.runPromise(harness.startLogin());
+    const login = await harness.startLogin();
 
     await login.cancel();
     await expect(login.waitForCode()).rejects.toThrow("Login cancelled");
@@ -86,7 +84,7 @@ describe("CodexOAuthHarness", () => {
       callbackPort: 0,
       loginTimeoutMs: 1000,
     });
-    const login = await Effect.runPromise(harness.startLogin());
+    const login = await harness.startLogin();
 
     void fetchPath(`${login.redirectUri}?code=auth_code&state=wrong-state`);
 
@@ -98,7 +96,7 @@ describe("CodexOAuthHarness", () => {
       callbackPort: 0,
       loginTimeoutMs: 1000,
     });
-    const login = await Effect.runPromise(harness.startLogin());
+    const login = await harness.startLogin();
     const authUrl = new URL(login.authUrl);
     const state = authUrl.searchParams.get("state");
 
@@ -114,7 +112,7 @@ describe("CodexOAuthHarness", () => {
       callbackPort: 0,
       loginTimeoutMs: 10,
     });
-    const login = await Effect.runPromise(harness.startLogin());
+    const login = await harness.startLogin();
 
     await expect(login.waitForCode()).rejects.toThrow("OAuth login timed out");
   });
@@ -124,7 +122,7 @@ describe("CodexOAuthHarness", () => {
       callbackPort: 0,
       loginTimeoutMs: 1000,
     });
-    const login = await Effect.runPromise(harness.startLogin());
+    const login = await harness.startLogin();
     const authUrl = new URL(login.authUrl);
     const state = authUrl.searchParams.get("state");
 
@@ -140,13 +138,13 @@ describe("CodexOAuthHarness", () => {
       callbackPort: 14555,
       loginTimeoutMs: 1000,
     });
-    const login = await Effect.runPromise(first.startLogin());
+    const login = await first.startLogin();
     const second = new CodexOAuthHarness({
       callbackPort: 14555,
       loginTimeoutMs: 1000,
     });
 
-    await expect(Effect.runPromise(second.startLogin())).rejects.toBeTruthy();
+    await expect(second.startLogin()).rejects.toBeTruthy();
     const completion = login.waitForCode().catch(() => undefined);
     await login.cancel();
     await completion;
