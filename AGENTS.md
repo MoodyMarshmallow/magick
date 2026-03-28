@@ -23,6 +23,42 @@ If a tradeoff is required, choose correctness and robustness over short-term con
 
 Long term maintainability is a core priority. If you add new functionality, first check if there are shared logic that can be extracted to a separate module. Duplicate logic across mulitple files is a code smell and should be avoided. Don't be afraid to change existing code. Don't take shortcuts by just adding local logic to solve a problem. In addition, you need to make sure your code is easy to evaluate and debug. Towards this end, you should always write unit testing for all files with logic that you write. You should also make extensive logging that is clear, detailed, and specific.
 
+## Testing
+
+- Always write comprehensive unit tests for the code you add or change when that code contains logic.
+- Build tests bottom-up: start with the smallest pure helpers and reducers first, then add tests for higher-level orchestration built on top of them.
+- After writing tests, read them back critically and make sure they cover the real edge cases, not just the happy path.
+- Prefer small, deterministic tests with explicit inputs and outputs over broad tests that are hard to debug.
+- Test failure paths, malformed input, replay or duplicate events, persistence boundaries, and recovery behavior whenever those concerns exist in the code under test.
+- When state changes over time, test the full lifecycle: initial state, transition states, terminal states, and no-op or invalid transitions.
+- For streaming or async behavior, make tests deterministic by controlling time, ids, scheduling, and network or provider boundaries with test doubles.
+- Keep tests close to the logic they verify, and structure them so a future contributor can understand the intended behavior from the test file alone.
+- Avoid shallow tests that only assert implementation details. Focus on observable behavior, invariants, and contract guarantees.
+- If you add a new bug fix, add or update a regression test that would have failed before the fix.
+
+## Effect vs Promise Guidance
+
+Use plain TypeScript functions, classes, and `Promise`/`async` by default. Only use Effect when it is clearly buying us something material for correctness, cancellation, streaming, or resource lifetime management.
+
+Use Effect when:
+
+- You are implementing provider streaming, event streams, or other long-lived async flows where `Stream`, cancellation, or structured composition is genuinely useful.
+- You need precise resource lifetime management, interruption, or cleanup around sockets, subprocesses, or similar runtime-managed resources.
+- You are working in the existing provider/orchestration boundary that already uses Effect and changing just one local piece to promises would make the surrounding code more awkward.
+
+Use promises/plain TypeScript when:
+
+- The code is straightforward request/response logic, repository access, fetch wrappers, mapping, validation, or application service orchestration.
+- The module mainly performs synchronous database work or simple async calls and Effect would just wrap thrown errors in extra ceremony.
+- A plain class with constructor injection and `async` methods is easier to read and provides the same reliability.
+
+Specific guidance for this repo:
+
+- Prefer promises for persistence, auth helpers, transport handlers, composition roots, and simple application services.
+- Keep Effect in the provider streaming/runtime path only where it is already central to the design.
+- Do not introduce `Context.GenericTag`, `Layer`, or runtime plumbing for new code unless the module truly needs Effect-style dependency management.
+- If a module could reasonably be written either way, choose the version that is easier for a new contributor to read and debug.
+
 ## Package Roles
 
 - `apps/server`: Node.js WebSocket server. Owns provider orchestration, auth integration, persistence, and WebSocket delivery for the React app.

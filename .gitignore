@@ -2,5 +2,6 @@ node_modules/
 dist/
 coverage/
 .magick/
+.playwright-cli/
 *.log
 .DS_Store
