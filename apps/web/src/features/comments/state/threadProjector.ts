@@ -13,8 +13,7 @@ export interface CommentMessage {
 export interface CommentThread {
   readonly threadId: string;
   readonly documentId: string;
-  readonly anchorText: string;
-  readonly quote: string;
+  readonly title: string;
   readonly status: CommentThreadStatus;
   readonly updatedAt: string;
   readonly messages: readonly CommentMessage[];

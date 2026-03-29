@@ -22,6 +22,9 @@
       "@magick/contracts/ws": ["packages/contracts/src/ws.ts"],
       "@magick/shared/errors": ["packages/shared/src/errors.ts"],
       "@magick/shared/id": ["packages/shared/src/id.ts"],
+      "@magick/shared/localWorkspace": [
+        "packages/shared/src/localWorkspace.ts"
+      ],
       "@magick/shared/time": ["packages/shared/src/time.ts"]
     },
     "types": ["bun-types", "vitest/globals"]

@@ -37,7 +37,7 @@ export function CommentSidebar({
           <span>{threads.length}</span>
         </div>
         <div className="thread-ledger__items">
-          {threads.map((thread, index) => (
+          {threads.map((thread) => (
             <article
               key={thread.threadId}
               className={`thread-entry${
@@ -57,7 +57,7 @@ export function CommentSidebar({
                   )}
                 </div>
                 <div className="thread-entry__body">
-                  <strong>{`Thread ${index + 1}`}</strong>
+                  <strong>{thread.title}</strong>
                   <span>{thread.threadId}</span>
                   <p>{thread.messages.at(-1)?.body ?? "No messages yet."}</p>
                 </div>

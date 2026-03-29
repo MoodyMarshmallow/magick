@@ -1,21 +1,14 @@
 import { useQuery } from "@tanstack/react-query";
 import {
-  Asterisk,
   CircleDot,
   Crosshair,
   FileText,
   FolderTree,
   LocateFixed,
-  MessageSquareQuote,
-  MoonStar,
-  ScanLine,
 } from "lucide-react";
 import { useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { CommentSidebar } from "../features/comments/components/CommentSidebar";
-import {
-  demoDocumentId,
-  demoMagickClient,
-} from "../features/comments/data/demoMagickClient";
+import { workspaceClient } from "../features/comments/data/workspaceClient";
 import {
   type SelectionState,
   useCommentUiStore,
@@ -29,11 +22,11 @@ import {
   EditorSurface,
   type EditorSurfaceHandle,
 } from "../features/document/components/EditorSurface";
-import { AuthStatus } from "../features/providers/components/AuthStatus";
 
 export function AppShell() {
   const editorRef = useRef<EditorSurfaceHandle | null>(null);
   const [markdown, setMarkdown] = useState("");
+  const [activeDocumentId, setActiveDocumentId] = useState<string | null>(null);
   const [threads, dispatch] = useReducer(
     projectThreadEvent,
     [] as readonly CommentThread[],
@@ -42,30 +35,50 @@ export function AppShell() {
     useCommentUiStore();
 
   const bootstrapQuery = useQuery({
-    queryKey: ["document-bootstrap", demoDocumentId],
-    queryFn: () => demoMagickClient.getDocumentBootstrap(demoDocumentId),
+    queryKey: ["workspace-bootstrap"],
+    queryFn: () => workspaceClient.getWorkspaceBootstrap(),
+  });
+
+  const documentQuery = useQuery({
+    enabled: activeDocumentId !== null,
+    queryKey: ["document", activeDocumentId],
+    queryFn: async () => {
+      if (!activeDocumentId) {
+        throw new Error("No active document selected.");
+      }
+
+      return workspaceClient.openDocument(activeDocumentId);
+    },
   });
 
   useEffect(() => {
-    if (!bootstrapQuery.data) {
+    if (!bootstrapQuery.data || activeDocumentId) {
       return;
     }
 
-    setMarkdown(bootstrapQuery.data.markdown);
-    dispatch({
-      type: "snapshot.loaded",
-      threads: bootstrapQuery.data.threads,
-    });
-    setActiveThreadId(bootstrapQuery.data.threads[0]?.threadId ?? null);
-  }, [bootstrapQuery.data, setActiveThreadId]);
+    setActiveDocumentId(bootstrapQuery.data.documents[0]?.documentId ?? null);
+  }, [activeDocumentId, bootstrapQuery.data]);
 
   useEffect(() => {
-    return demoMagickClient.subscribe((event) => {
+    if (!documentQuery.data) {
+      return;
+    }
+
+    setMarkdown(documentQuery.data.markdown);
+    dispatch({
+      type: "snapshot.loaded",
+      threads: documentQuery.data.threads,
+    });
+    setActiveThreadId(documentQuery.data.threads[0]?.threadId ?? null);
+  }, [documentQuery.data, setActiveThreadId]);
+
+  useEffect(() => {
+    return workspaceClient.subscribe((event) => {
       dispatch(event);
     });
   }, []);
 
-  const activeDocumentTitle = bootstrapQuery.data?.title ?? "Loading document";
+  const activeDocumentTitle = documentQuery.data?.title ?? "Loading document";
   const selectedThread = useMemo(
     () => threads.find((thread) => thread.threadId === activeThreadId) ?? null,
     [activeThreadId, threads],
@@ -88,19 +101,24 @@ export function AppShell() {
     editorRef.current?.focusThread(threadId);
   };
 
-  if (bootstrapQuery.isLoading) {
+  if (
+    bootstrapQuery.isLoading ||
+    (activeDocumentId !== null && documentQuery.isLoading)
+  ) {
     return (
       <div className="app-shell app-shell--loading">Loading Magick...</div>
     );
   }
 
-  if (bootstrapQuery.isError || !bootstrapQuery.data) {
+  if (bootstrapQuery.isError || !bootstrapQuery.data || documentQuery.isError) {
     return (
       <div className="app-shell app-shell--loading">
         Failed to load the document workspace.
       </div>
     );
   }
+
+  const documents = bootstrapQuery.data.documents;
 
   return (
     <main className="app-shell">
@@ -126,24 +144,24 @@ export function AppShell() {
             <span>Index</span>
             <FolderTree size={16} />
           </div>
-          <button className="document-entry is-active" type="button">
-            <span className="document-entry__icon">
-              <FileText size={16} />
-            </span>
-            <span className="document-entry__body">
-              <strong>{activeDocumentTitle}</strong>
-              <span>{threads.length} threads</span>
-            </span>
-          </button>
-          <button className="document-entry" type="button">
-            <span className="document-entry__icon">
-              <FileText size={16} />
-            </span>
-            <span className="document-entry__body">
-              <strong>Design system field notes</strong>
-              <span>sealed / pending</span>
-            </span>
-          </button>
+          {documents.map((document) => (
+            <button
+              className={`document-entry${
+                document.documentId === activeDocumentId ? " is-active" : ""
+              }`}
+              key={document.documentId}
+              onClick={() => setActiveDocumentId(document.documentId)}
+              type="button"
+            >
+              <span className="document-entry__icon">
+                <FileText size={16} />
+              </span>
+              <span className="document-entry__body">
+                <strong>{document.title}</strong>
+                <span>{document.threadCount} threads</span>
+              </span>
+            </button>
+          ))}
         </section>
       </aside>
 
@@ -181,7 +199,12 @@ export function AppShell() {
               markdown={markdown}
               onMarkdownChange={(nextMarkdown) => {
                 setMarkdown(nextMarkdown);
-                demoMagickClient.updateDocumentMarkup(nextMarkdown);
+                if (activeDocumentId) {
+                  void workspaceClient.saveDocument(
+                    activeDocumentId,
+                    nextMarkdown,
+                  );
+                }
               }}
               onSelectionChange={handleSelectionChange}
               onThreadClick={handleActivateThread}
@@ -195,11 +218,11 @@ export function AppShell() {
         activeThreadId={activeThreadId}
         onActivateThread={handleActivateThread}
         onSendReply={async (threadId: string, message: string) => {
-          await demoMagickClient.sendReply({ threadId, body: message });
+          await workspaceClient.sendThreadMessage(threadId, message);
           setActiveThreadId(threadId);
         }}
         onToggleResolved={async (threadId: string) => {
-          await demoMagickClient.toggleResolved(threadId);
+          await workspaceClient.toggleThreadResolved(threadId);
         }}
       />
     </main>

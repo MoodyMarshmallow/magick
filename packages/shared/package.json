@@ -5,6 +5,7 @@
   "exports": {
     "./errors": "./src/errors.ts",
     "./id": "./src/id.ts",
+    "./localWorkspace": "./src/localWorkspace.ts",
     "./time": "./src/time.ts"
   }
 }

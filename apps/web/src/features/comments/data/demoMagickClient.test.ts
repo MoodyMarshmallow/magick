@@ -52,15 +52,13 @@ describe("demoMagickClient", () => {
     if (!firstThread) {
       throw new Error("Expected seed thread to exist.");
     }
-    (firstThread as { quote: string }).quote = "mutated";
+    (firstThread as { title: string }).title = "mutated";
 
     const nextBootstrap = await client.getDocumentBootstrap(
       "doc_everforest_manifesto",
     );
 
-    expect(nextBootstrap.threads[0]?.quote).toBe(
-      "Use shared contracts to keep streaming and replay predictable.",
-    );
+    expect(nextBootstrap.threads[0]?.title).toBe("Thread 1");
   });
 
   it("throws when a document id is unknown", async () => {
@@ -92,7 +90,7 @@ describe("demoMagickClient", () => {
     });
 
     const thread = await client.createCommentThread({
-      anchorText: "A fresh anchor",
+      title: "Thread 2",
       initialMessage: "First note",
     });
 

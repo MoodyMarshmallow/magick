@@ -3,8 +3,7 @@ import { type CommentThread, projectThreadEvent } from "./threadProjector";
 const baseThread: CommentThread = {
   threadId: "thread_1",
   documentId: "doc_1",
-  anchorText: "Shared contracts matter.",
-  quote: "Shared contracts matter.",
+  title: "Thread 1",
   status: "open",
   updatedAt: "2026-03-27T10:00:00.000Z",
   messages: [],

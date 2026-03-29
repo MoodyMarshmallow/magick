@@ -1,0 +1,9 @@
+{
+  "name": "@magick/desktop",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "electron ./src/main/main.ts",
+    "start": "electron ./src/main/main.ts"
+  }
+}

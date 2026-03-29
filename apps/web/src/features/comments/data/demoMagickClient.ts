@@ -22,8 +22,7 @@ interface MutableCommentMessage {
 interface MutableCommentThread {
   threadId: string;
   documentId: string;
-  anchorText: string;
-  quote: string;
+  title: string;
   status: CommentThread["status"];
   updatedAt: string;
   messages: MutableCommentMessage[];
@@ -55,7 +54,7 @@ export interface DemoMagickClient {
   subscribe: (listener: (event: CommentThreadEvent) => void) => () => void;
   updateDocumentMarkup: (markdown: string) => void;
   createCommentThread: (args: {
-    anchorText: string;
+    title: string;
     initialMessage: string;
   }) => Promise<CommentThread>;
   sendReply: (args: { threadId: string; body: string }) => Promise<void>;
@@ -77,9 +76,7 @@ const createInitialState = (
       {
         threadId: "thread_seed_1",
         documentId,
-        anchorText:
-          "Use shared contracts to keep streaming and replay predictable.",
-        quote: "Use shared contracts to keep streaming and replay predictable.",
+        title: "Thread 1",
         status: "open",
         updatedAt: now(),
         messages: [
@@ -237,8 +234,7 @@ export const createDemoMagickClient = (
       const thread: MutableCommentThread = {
         threadId: `thread_${createId()}`,
         documentId,
-        anchorText: args.anchorText,
-        quote: args.anchorText,
+        title: args.title,
         status: "open",
         updatedAt: timestamp,
         messages: [
