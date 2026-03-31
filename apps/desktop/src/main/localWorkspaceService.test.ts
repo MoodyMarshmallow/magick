@@ -21,24 +21,78 @@ const createHarness = () => {
 };
 
 describe("LocalWorkspaceService", () => {
-  it("seeds a local workspace with documents and thread counts", () => {
+  it("seeds a local workspace with a nested file tree and thread counts", () => {
     const harness = createHarness();
 
     try {
       const bootstrap = harness.service.getWorkspaceBootstrap();
-      const fieldNotes = bootstrap.documents.find(
-        (document) => document.documentId === "doc_field_notes",
-      );
+      expect(bootstrap.tree).toEqual([
+        {
+          id: "directory:codex",
+          type: "directory",
+          name: "codex",
+          path: "codex",
+          children: [
+            {
+              id: "file:doc_evergreen",
+              type: "file",
+              name: "evergreen-systems-memo.md",
+              path: "codex/evergreen-systems-memo.md",
+              documentId: "doc_evergreen",
+              threadCount: 1,
+            },
+          ],
+        },
+        {
+          id: "directory:notes",
+          type: "directory",
+          name: "notes",
+          path: "notes",
+          children: [
+            {
+              id: "directory:notes/patterns",
+              type: "directory",
+              name: "patterns",
+              path: "notes/patterns",
+              children: [
+                {
+                  id: "file:doc_field_notes",
+                  type: "file",
+                  name: "design-system-field-notes.md",
+                  path: "notes/patterns/design-system-field-notes.md",
+                  documentId: "doc_field_notes",
+                  threadCount: 1,
+                },
+              ],
+            },
+          ],
+        },
+      ]);
+      expect(
+        readFileSync(join(harness.root, "workspace", "workspace.json"), "utf8"),
+      ).toContain("notes/patterns/design-system-field-notes.md");
+    } finally {
+      harness.cleanup();
+    }
+  });
 
-      if (!fieldNotes) {
-        throw new Error("Expected field notes document to exist.");
-      }
+  it("persists seeded markdown files inside nested folders", () => {
+    const harness = createHarness();
 
-      expect(bootstrap.documents).toHaveLength(2);
-      expect(fieldNotes).toMatchObject({
-        documentId: "doc_field_notes",
-        threadCount: 1,
-      });
+    try {
+      expect(
+        readFileSync(
+          join(
+            harness.root,
+            "workspace",
+            "documents",
+            "notes",
+            "patterns",
+            "design-system-field-notes.md",
+          ),
+          "utf8",
+        ),
+      ).toContain("Keep the interface flat");
     } finally {
       harness.cleanup();
     }
@@ -69,20 +123,19 @@ describe("LocalWorkspaceService", () => {
     try {
       const document = harness.service.openDocument("doc_field_notes");
       harness.service.saveDocument(document.documentId, "Fresh local markdown");
-      const savedDocument = harness.service
-        .getWorkspaceBootstrap()
-        .documents.find(
-          (documentSummary) =>
-            documentSummary.documentId === document.documentId,
-        );
-
-      if (!savedDocument) {
-        throw new Error("Expected saved document summary to exist.");
-      }
-
-      expect(readFileSync(savedDocument.filePath, "utf8")).toContain(
-        "Fresh local markdown",
-      );
+      expect(
+        readFileSync(
+          join(
+            harness.root,
+            "workspace",
+            "documents",
+            "notes",
+            "patterns",
+            "design-system-field-notes.md",
+          ),
+          "utf8",
+        ),
+      ).toContain("Fresh local markdown");
     } finally {
       harness.cleanup();
     }

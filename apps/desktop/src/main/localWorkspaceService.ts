@@ -1,14 +1,14 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import type {
   LocalDocumentPayload,
-  LocalDocumentSummary,
   LocalDocumentThread,
   LocalThreadEvent,
   LocalThreadMessage,
   LocalThreadStatus,
   LocalWorkspaceBootstrap,
 } from "@magick/shared/localWorkspace";
+import { createWorkspaceBootstrap } from "./localWorkspaceTree";
 
 interface LocalWorkspaceServiceOptions {
   readonly workspaceDir: string;
@@ -41,7 +41,7 @@ const seedDocuments = [
   {
     id: "doc_evergreen",
     title: "Evergreen Systems Memo",
-    fileName: "evergreen-systems-memo.md",
+    fileName: "codex/evergreen-systems-memo.md",
     markdown:
       "Magick should feel like a calm studio for thinking with AI.\n\nThe best interfaces keep momentum without hiding system state.\n\nUse shared contracts to keep streaming and replay predictable.\n\nWe should treat threads like durable conversations, not disposable UI fragments.",
     thread: {
@@ -54,7 +54,7 @@ const seedDocuments = [
   {
     id: "doc_field_notes",
     title: "Design System Field Notes",
-    fileName: "design-system-field-notes.md",
+    fileName: "notes/patterns/design-system-field-notes.md",
     markdown:
       "Keep the interface flat, direct, and readable.\n\nAvoid decorative layering that competes with the writing surface.\n\nFavor thread chat over annotation theater for now.",
     thread: {
@@ -86,18 +86,11 @@ export class LocalWorkspaceService {
 
   public getWorkspaceBootstrap(): LocalWorkspaceBootstrap {
     const state = this.readWorkspace();
-    return {
-      documents: state.documents
-        .map((document) => ({
-          documentId: document.id,
-          title: document.title,
-          filePath: document.filePath,
-          threadCount: state.threads.filter(
-            (thread) => thread.documentId === document.id,
-          ).length,
-        }))
-        .sort((left, right) => right.title.localeCompare(left.title)),
-    };
+    return createWorkspaceBootstrap({
+      documents: state.documents,
+      threads: state.threads,
+      documentsDir: this.documentsDir,
+    });
   }
 
   public openDocument(documentId: string): LocalDocumentPayload {
@@ -203,6 +196,7 @@ export class LocalWorkspaceService {
       for (const document of seedDocuments) {
         const updatedAt = this.now();
         const filePath = join(this.documentsDir, document.fileName);
+        mkdirSync(dirname(filePath), { recursive: true });
         writeFileSync(filePath, document.markdown, "utf8");
         state.documents.push({
           id: document.id,
@@ -251,7 +245,3 @@ export class LocalWorkspaceService {
     writeFileSync(this.metadataPath, JSON.stringify(state, null, 2), "utf8");
   }
 }
-
-export const toDocumentSummaries = (
-  bootstrap: LocalWorkspaceBootstrap,
-): readonly LocalDocumentSummary[] => bootstrap.documents;

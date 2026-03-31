@@ -27,7 +27,7 @@ Long term maintainability is a core priority. If you add new functionality, firs
 
 - Always write comprehensive unit tests for the code you add or change when that code contains logic.
 - Build tests bottom-up: start with the smallest pure helpers and reducers first, then add tests for higher-level orchestration built on top of them.
-- After writing tests, read them back critically and make sure they cover the real edge cases, not just the happy path.
+- After writing tests, use a file read tool to read them again and think to yourself about whether the test cases cover all edge cases that would be encountered in real usage. If tests are not absolutely comprehensive, you should iterate on them.
 - Prefer small, deterministic tests with explicit inputs and outputs over broad tests that are hard to debug.
 - Test failure paths, malformed input, replay or duplicate events, persistence boundaries, and recovery behavior whenever those concerns exist in the code under test.
 - When state changes over time, test the full lifecycle: initial state, transition states, terminal states, and no-op or invalid transitions.

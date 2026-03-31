@@ -26,16 +26,7 @@ export function CommentSidebar({
 
   return (
     <aside className="comment-sidebar">
-      <header className="comment-sidebar__header">
-        <h2>Threads</h2>
-        <p>Open a thread to view the full chat history for this document.</p>
-      </header>
-
       <section className="sidebar-section thread-ledger">
-        <div className="sidebar-section__header thread-ledger__header">
-          <span>Thread list</span>
-          <span>{threads.length}</span>
-        </div>
         <div className="thread-ledger__items">
           {threads.map((thread) => (
             <article
@@ -56,10 +47,8 @@ export function CommentSidebar({
                     <CircleDashed size={14} />
                   )}
                 </div>
-                <div className="thread-entry__body">
+                <div className="thread-entry__content">
                   <strong>{thread.title}</strong>
-                  <span>{thread.threadId}</span>
-                  <p>{thread.messages.at(-1)?.body ?? "No messages yet."}</p>
                 </div>
               </button>
 
@@ -94,6 +83,7 @@ export function CommentSidebar({
                         rows={3}
                       />
                       <button
+                        aria-label="Send reply"
                         className="flat-button flat-button--accent"
                         disabled={!replyDraft.trim()}
                         onClick={async () => {
@@ -103,7 +93,6 @@ export function CommentSidebar({
                         type="button"
                       >
                         <CornerDownRight size={15} />
-                        respond
                       </button>
                     </div>
                     <div className="thread-entry__actions">

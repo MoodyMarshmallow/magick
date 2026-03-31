@@ -3,6 +3,7 @@ import type {
   LocalDocumentThread,
   LocalThreadEvent,
   LocalWorkspaceBootstrap,
+  LocalWorkspaceTreeNode,
   MagickDesktopApi,
 } from "@magick/shared/localWorkspace";
 import {
@@ -55,19 +56,41 @@ const toLocalThreadEvent = (
   return event;
 };
 
+const createBrowserWorkspaceTree = (
+  document: DocumentBootstrap,
+): readonly LocalWorkspaceTreeNode[] => [
+  {
+    id: "directory:notes",
+    type: "directory",
+    name: "notes",
+    path: "notes",
+    children: [
+      {
+        id: "directory:notes/studio",
+        type: "directory",
+        name: "studio",
+        path: "notes/studio",
+        children: [
+          {
+            id: `file:${document.documentId}`,
+            type: "file",
+            name: "evergreen-systems-memo.md",
+            path: "notes/studio/evergreen-systems-memo.md",
+            documentId: document.documentId,
+            threadCount: document.threads.length,
+          },
+        ],
+      },
+    ],
+  },
+];
+
 const createBrowserWorkspaceClient = (): WorkspaceClient => ({
   async getWorkspaceBootstrap() {
     const document =
       await demoMagickClient.getDocumentBootstrap(demoDocumentId);
     return {
-      documents: [
-        {
-          documentId: document.documentId,
-          title: document.title,
-          filePath: `local://${document.documentId}.md`,
-          threadCount: document.threads.length,
-        },
-      ],
+      tree: createBrowserWorkspaceTree(document),
     };
   },
   async openDocument(documentId) {

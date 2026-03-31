@@ -13,13 +13,40 @@ export interface EditorSelectionState {
   readonly threadId: string | null;
 }
 
+export interface EditorFormatState {
+  readonly paragraph: boolean;
+  readonly heading1: boolean;
+  readonly heading2: boolean;
+  readonly bulletList: boolean;
+  readonly orderedList: boolean;
+  readonly blockquote: boolean;
+  readonly bold: boolean;
+  readonly italic: boolean;
+  readonly strike: boolean;
+  readonly code: boolean;
+}
+
+export type EditorCommandName =
+  | "setParagraph"
+  | "toggleHeading1"
+  | "toggleHeading2"
+  | "toggleBulletList"
+  | "toggleOrderedList"
+  | "toggleBlockquote"
+  | "toggleBold"
+  | "toggleItalic"
+  | "toggleStrike"
+  | "toggleCode";
+
 export interface EditorSurfaceHandle {
   applyThreadToSelection: (threadId: string) => string | null;
   focusThread: (threadId: string) => void;
+  runCommand: (commandName: EditorCommandName) => void;
 }
 
 interface EditorSurfaceProps {
   readonly markdown: string;
+  readonly onFormatStateChange: (state: EditorFormatState) => void;
   readonly onMarkdownChange: (markdown: string) => void;
   readonly onSelectionChange: (selection: EditorSelectionState | null) => void;
   readonly onThreadClick: (threadId: string) => void;
@@ -53,11 +80,70 @@ const getThreadIdFromSelection = (
   return detected;
 };
 
+const getEditorFormatState = (
+  editor: NonNullable<ReturnType<typeof useEditor>>,
+): EditorFormatState => ({
+  paragraph: editor.isActive("paragraph"),
+  heading1: editor.isActive("heading", { level: 1 }),
+  heading2: editor.isActive("heading", { level: 2 }),
+  bulletList: editor.isActive("bulletList"),
+  orderedList: editor.isActive("orderedList"),
+  blockquote: editor.isActive("blockquote"),
+  bold: editor.isActive("bold"),
+  italic: editor.isActive("italic"),
+  strike: editor.isActive("strike"),
+  code: editor.isActive("code"),
+});
+
+const runEditorCommand = (
+  editor: NonNullable<ReturnType<typeof useEditor>>,
+  commandName: EditorCommandName,
+) => {
+  switch (commandName) {
+    case "setParagraph":
+      editor.chain().focus().setParagraph().run();
+      break;
+    case "toggleHeading1":
+      editor.chain().focus().toggleHeading({ level: 1 }).run();
+      break;
+    case "toggleHeading2":
+      editor.chain().focus().toggleHeading({ level: 2 }).run();
+      break;
+    case "toggleBulletList":
+      editor.chain().focus().toggleBulletList().run();
+      break;
+    case "toggleOrderedList":
+      editor.chain().focus().toggleOrderedList().run();
+      break;
+    case "toggleBlockquote":
+      editor.chain().focus().toggleBlockquote().run();
+      break;
+    case "toggleBold":
+      editor.chain().focus().toggleBold().run();
+      break;
+    case "toggleItalic":
+      editor.chain().focus().toggleItalic().run();
+      break;
+    case "toggleStrike":
+      editor.chain().focus().toggleStrike().run();
+      break;
+    case "toggleCode":
+      editor.chain().focus().toggleCode().run();
+      break;
+  }
+};
+
 export const EditorSurface = forwardRef<
   EditorSurfaceHandle,
   EditorSurfaceProps
 >(function EditorSurface(
-  { markdown, onMarkdownChange, onSelectionChange, onThreadClick },
+  {
+    markdown,
+    onFormatStateChange,
+    onMarkdownChange,
+    onSelectionChange,
+    onThreadClick,
+  },
   ref,
 ) {
   const rootRef = useRef<HTMLDivElement | null>(null);
@@ -71,6 +157,7 @@ export const EditorSurface = forwardRef<
       },
     },
     onSelectionUpdate: ({ editor: currentEditor }) => {
+      onFormatStateChange(getEditorFormatState(currentEditor));
       const { empty, from, to } = currentEditor.state.selection;
       if (empty) {
         onSelectionChange(null);
@@ -88,9 +175,13 @@ export const EditorSurface = forwardRef<
       );
     },
     onUpdate: ({ editor: currentEditor }) => {
+      onFormatStateChange(getEditorFormatState(currentEditor));
       const nextMarkdown = editorJsonToMarkdown(currentEditor.getJSON());
       lastSyncedMarkdownRef.current = nextMarkdown;
       onMarkdownChange(nextMarkdown);
+    },
+    onCreate: ({ editor: currentEditor }) => {
+      onFormatStateChange(getEditorFormatState(currentEditor));
     },
   });
 
@@ -157,6 +248,14 @@ export const EditorSurface = forwardRef<
         anchorTo,
       );
       editor.view.dispatch(editor.state.tr.setSelection(selection));
+    },
+    runCommand(commandName) {
+      if (!editor) {
+        return;
+      }
+
+      runEditorCommand(editor, commandName);
+      onFormatStateChange(getEditorFormatState(editor));
     },
   }));
 

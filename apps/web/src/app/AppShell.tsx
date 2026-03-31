@@ -1,12 +1,25 @@
 import { useQuery } from "@tanstack/react-query";
 import {
-  CircleDot,
-  Crosshair,
-  FileText,
-  FolderTree,
-  LocateFixed,
+  Bold,
+  Code2,
+  Heading1,
+  Heading2,
+  Italic,
+  List,
+  ListOrdered,
+  type LucideIcon,
+  Pilcrow,
+  Quote,
+  Strikethrough,
 } from "lucide-react";
-import { useEffect, useMemo, useReducer, useRef, useState } from "react";
+import {
+  type CSSProperties,
+  type PointerEvent as ReactPointerEvent,
+  useEffect,
+  useReducer,
+  useRef,
+  useState,
+} from "react";
 import { CommentSidebar } from "../features/comments/components/CommentSidebar";
 import { workspaceClient } from "../features/comments/data/workspaceClient";
 import {
@@ -18,20 +31,125 @@ import {
   projectThreadEvent,
 } from "../features/comments/state/threadProjector";
 import {
+  type EditorCommandName,
+  type EditorFormatState,
   type EditorSelectionState,
   EditorSurface,
   type EditorSurfaceHandle,
 } from "../features/document/components/EditorSurface";
+import {
+  clampLeftSidebarWidth,
+  clampRightSidebarWidth,
+} from "../features/workspace/layout/sidebarResize";
+import { FileTree } from "../features/workspace/tree/FileTree";
+import {
+  findFirstWorkspaceDocumentId,
+  reconcileExpandedDirectoryIds,
+} from "../features/workspace/tree/fileTreeState";
+
+type ResizeSide = "left" | "right";
+
+interface ResizeState {
+  readonly side: ResizeSide;
+}
+
+const defaultEditorFormatState: EditorFormatState = {
+  paragraph: true,
+  heading1: false,
+  heading2: false,
+  bulletList: false,
+  orderedList: false,
+  blockquote: false,
+  bold: false,
+  italic: false,
+  strike: false,
+  code: false,
+};
+
+const editorToolbarActions: readonly {
+  readonly label: string;
+  readonly icon: LucideIcon;
+  readonly commandName: EditorCommandName;
+  readonly isActive: (state: EditorFormatState) => boolean;
+}[] = [
+  {
+    label: "Paragraph",
+    icon: Pilcrow,
+    commandName: "setParagraph",
+    isActive: (state) => state.paragraph,
+  },
+  {
+    label: "Heading 1",
+    icon: Heading1,
+    commandName: "toggleHeading1",
+    isActive: (state) => state.heading1,
+  },
+  {
+    label: "Heading 2",
+    icon: Heading2,
+    commandName: "toggleHeading2",
+    isActive: (state) => state.heading2,
+  },
+  {
+    label: "Bold",
+    icon: Bold,
+    commandName: "toggleBold",
+    isActive: (state) => state.bold,
+  },
+  {
+    label: "Italic",
+    icon: Italic,
+    commandName: "toggleItalic",
+    isActive: (state) => state.italic,
+  },
+  {
+    label: "Strike",
+    icon: Strikethrough,
+    commandName: "toggleStrike",
+    isActive: (state) => state.strike,
+  },
+  {
+    label: "Bullet List",
+    icon: List,
+    commandName: "toggleBulletList",
+    isActive: (state) => state.bulletList,
+  },
+  {
+    label: "Ordered List",
+    icon: ListOrdered,
+    commandName: "toggleOrderedList",
+    isActive: (state) => state.orderedList,
+  },
+  {
+    label: "Quote",
+    icon: Quote,
+    commandName: "toggleBlockquote",
+    isActive: (state) => state.blockquote,
+  },
+  {
+    label: "Inline Code",
+    icon: Code2,
+    commandName: "toggleCode",
+    isActive: (state) => state.code,
+  },
+];
 
 export function AppShell() {
   const editorRef = useRef<EditorSurfaceHandle | null>(null);
+  const resizeStateRef = useRef<ResizeState | null>(null);
   const [markdown, setMarkdown] = useState("");
   const [activeDocumentId, setActiveDocumentId] = useState<string | null>(null);
+  const [expandedTreeItemIds, setExpandedTreeItemIds] = useState<string[]>([]);
+  const [editorFormatState, setEditorFormatState] = useState<EditorFormatState>(
+    defaultEditorFormatState,
+  );
+  const [leftRailWidth, setLeftRailWidth] = useState(272);
+  const [rightRailWidth, setRightRailWidth] = useState(384);
   const [threads, dispatch] = useReducer(
     projectThreadEvent,
     [] as readonly CommentThread[],
   );
-  const { activeThreadId, selection, setActiveThreadId, setSelection } =
+  const { activeThreadId, setActiveThreadId, setSelection } =
     useCommentUiStore();
 
   const bootstrapQuery = useQuery({
@@ -56,7 +174,21 @@ export function AppShell() {
       return;
     }
 
-    setActiveDocumentId(bootstrapQuery.data.documents[0]?.documentId ?? null);
+    setActiveDocumentId(findFirstWorkspaceDocumentId(bootstrapQuery.data.tree));
+  }, [activeDocumentId, bootstrapQuery.data]);
+
+  useEffect(() => {
+    if (!bootstrapQuery.data) {
+      return;
+    }
+
+    setExpandedTreeItemIds((currentExpandedIds) => [
+      ...reconcileExpandedDirectoryIds({
+        tree: bootstrapQuery.data.tree,
+        expandedIds: currentExpandedIds,
+        activeDocumentId,
+      }),
+    ]);
   }, [activeDocumentId, bootstrapQuery.data]);
 
   useEffect(() => {
@@ -78,11 +210,59 @@ export function AppShell() {
     });
   }, []);
 
+  useEffect(() => {
+    const handlePointerMove = (event: PointerEvent) => {
+      const resizeState = resizeStateRef.current;
+      if (!resizeState) {
+        return;
+      }
+
+      if (resizeState.side === "left") {
+        setLeftRailWidth(
+          clampLeftSidebarWidth({
+            viewportWidth: window.innerWidth,
+            nextWidth: event.clientX,
+            rightSidebarWidth: rightRailWidth,
+          }),
+        );
+        return;
+      }
+
+      setRightRailWidth(
+        clampRightSidebarWidth({
+          viewportWidth: window.innerWidth,
+          nextWidth: window.innerWidth - event.clientX,
+          leftSidebarWidth: leftRailWidth,
+        }),
+      );
+    };
+
+    const handlePointerUp = () => {
+      clearResizeState();
+    };
+
+    const handlePointerCancel = () => {
+      clearResizeState();
+    };
+
+    const handleWindowBlur = () => {
+      clearResizeState();
+    };
+
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp);
+    window.addEventListener("pointercancel", handlePointerCancel);
+    window.addEventListener("blur", handleWindowBlur);
+
+    return () => {
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+      window.removeEventListener("pointercancel", handlePointerCancel);
+      window.removeEventListener("blur", handleWindowBlur);
+    };
+  }, [leftRailWidth, rightRailWidth]);
+
   const activeDocumentTitle = documentQuery.data?.title ?? "Loading document";
-  const selectedThread = useMemo(
-    () => threads.find((thread) => thread.threadId === activeThreadId) ?? null,
-    [activeThreadId, threads],
-  );
 
   const handleSelectionChange = (
     nextSelection: EditorSelectionState | null,
@@ -99,6 +279,20 @@ export function AppShell() {
   const handleActivateThread = (threadId: string) => {
     setActiveThreadId(threadId);
     editorRef.current?.focusThread(threadId);
+  };
+
+  const clearResizeState = () => {
+    resizeStateRef.current = null;
+    document.body.classList.remove("is-resizing-sidebars");
+  };
+
+  const handleResizeStart = (
+    event: ReactPointerEvent<HTMLDivElement>,
+    side: ResizeSide,
+  ) => {
+    resizeStateRef.current = { side };
+    document.body.classList.add("is-resizing-sidebars");
+    event.currentTarget.setPointerCapture(event.pointerId);
   };
 
   if (
@@ -118,10 +312,13 @@ export function AppShell() {
     );
   }
 
-  const documents = bootstrapQuery.data.documents;
+  const shellStyle = {
+    "--left-rail-width": `${leftRailWidth}px`,
+    "--right-rail-width": `${rightRailWidth}px`,
+  } as CSSProperties;
 
   return (
-    <main className="app-shell">
+    <main className="app-shell app-shell--resizable" style={shellStyle}>
       <aside className="left-rail">
         {/* <header className="masthead">
           <div className="masthead__sigil" aria-hidden="true">
@@ -140,63 +337,62 @@ export function AppShell() {
         {/* <AuthStatus /> */}
 
         <section className="sidebar-section rail-section">
-          <div className="sidebar-section__header rail-section__header">
-            <span>Index</span>
-            <FolderTree size={16} />
-          </div>
-          {documents.map((document) => (
-            <button
-              className={`document-entry${
-                document.documentId === activeDocumentId ? " is-active" : ""
-              }`}
-              key={document.documentId}
-              onClick={() => setActiveDocumentId(document.documentId)}
-              type="button"
-            >
-              <span className="document-entry__icon">
-                <FileText size={16} />
-              </span>
-              <span className="document-entry__body">
-                <strong>{document.title}</strong>
-                <span>{document.threadCount} threads</span>
-              </span>
-            </button>
-          ))}
+          <FileTree
+            activeDocumentId={activeDocumentId}
+            expandedIds={expandedTreeItemIds}
+            onExpandedIdsChange={setExpandedTreeItemIds}
+            onOpenDocument={setActiveDocumentId}
+            tree={bootstrapQuery.data.tree}
+          />
         </section>
       </aside>
 
-      <section className="workspace">
-        <header className="workspace__header">
-          <div className="workspace__titleblock">
-            <h2>{activeDocumentTitle}</h2>
-          </div>
-          <div className="workspace__statusline">
-            <span>
-              <CircleDot size={14} />
-              {markdown.length} chars persisted
-            </span>
-            <span>
-              <Crosshair size={14} />
-              {selection?.threadId
-                ? `bound to ${selection.threadId}`
-                : selection?.text
-                  ? "selection ready"
-                  : "no active selection"}
-            </span>
-            <span>
-              <LocateFixed size={14} />
-              {selectedThread
-                ? `focus ${selectedThread.threadId}`
-                : "no thread focused"}
-            </span>
-          </div>
-        </header>
+      <div
+        aria-hidden="true"
+        className="sidebar-resizer sidebar-resizer--left"
+        onLostPointerCapture={clearResizeState}
+        onPointerCancel={clearResizeState}
+        onPointerDown={(event) => handleResizeStart(event, "left")}
+        onPointerUp={clearResizeState}
+      />
 
+      <section className="workspace">
         <section className="workspace__canvas">
           <div className="workspace__frame">
+            <div
+              className="workspace__toolbar"
+              role="toolbar"
+              aria-label="Text editing options"
+            >
+              {editorToolbarActions.map((action) => {
+                const Icon = action.icon;
+                return (
+                  <button
+                    aria-label={action.label}
+                    className={`workspace__toolbar-button${
+                      action.isActive(editorFormatState) ? " is-active" : ""
+                    }`}
+                    key={action.commandName}
+                    onClick={() =>
+                      editorRef.current?.runCommand(action.commandName)
+                    }
+                    type="button"
+                  >
+                    <Icon size={15} />
+                  </button>
+                );
+              })}
+            </div>
+            <div
+              className="workspace__document-title"
+              title={activeDocumentTitle}
+            >
+              {activeDocumentTitle}
+            </div>
             <EditorSurface
               ref={editorRef}
               markdown={markdown}
+              onFormatStateChange={setEditorFormatState}
               onMarkdownChange={(nextMarkdown) => {
                 setMarkdown(nextMarkdown);
                 if (activeDocumentId) {
@@ -212,6 +408,15 @@ export function AppShell() {
           </div>
         </section>
       </section>
+
+      <div
+        aria-hidden="true"
+        className="sidebar-resizer sidebar-resizer--right"
+        onLostPointerCapture={clearResizeState}
+        onPointerCancel={clearResizeState}
+        onPointerDown={(event) => handleResizeStart(event, "right")}
+        onPointerUp={clearResizeState}
+      />
 
       <CommentSidebar
         threads={threads}

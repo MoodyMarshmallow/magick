@@ -19,12 +19,27 @@ export interface LocalDocumentThread {
   readonly messages: readonly LocalThreadMessage[];
 }
 
-export interface LocalDocumentSummary {
+export interface LocalWorkspaceTreeBaseNode {
+  readonly id: string;
+  readonly name: string;
+  readonly path: string;
+}
+
+export interface LocalWorkspaceDirectoryNode
+  extends LocalWorkspaceTreeBaseNode {
+  readonly type: "directory";
+  readonly children: readonly LocalWorkspaceTreeNode[];
+}
+
+export interface LocalWorkspaceFileNode extends LocalWorkspaceTreeBaseNode {
+  readonly type: "file";
   readonly documentId: string;
-  readonly title: string;
-  readonly filePath: string;
   readonly threadCount: number;
 }
+
+export type LocalWorkspaceTreeNode =
+  | LocalWorkspaceDirectoryNode
+  | LocalWorkspaceFileNode;
 
 export interface LocalDocumentPayload {
   readonly documentId: string;
@@ -34,7 +49,7 @@ export interface LocalDocumentPayload {
 }
 
 export interface LocalWorkspaceBootstrap {
-  readonly documents: readonly LocalDocumentSummary[];
+  readonly tree: readonly LocalWorkspaceTreeNode[];
 }
 
 export type LocalThreadEvent =

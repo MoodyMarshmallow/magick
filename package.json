@@ -17,6 +17,8 @@
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",
     "@electron/rebuild": "^4.0.3",
+    "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^14.6.1",
     "@types/better-sqlite3": "^7.6.13",
     "@types/ws": "^8.5.13",
     "@vitest/coverage-v8": "^3.2.4",
@@ -25,6 +27,7 @@
     "concurrently": "^9.2.1",
     "cross-env": "^10.1.0",
     "effect": "^3.13.11",
+    "jsdom": "^29.0.1",
     "nodemon": "^3.1.14",
     "tsx": "^4.20.5",
     "typescript": "^5.7.3",
@@ -33,6 +36,9 @@
     "ws": "^8.18.1"
   },
   "dependencies": {
+    "@headless-tree/core": "^1.6.3",
+    "@headless-tree/react": "^1.6.3",
+    "@proj-airi/font-departure-mono": "^0.9.0-alpha.34",
     "@tanstack/react-query": "^5.95.2",
     "@tanstack/react-router": "^1.168.7",
     "@tiptap/core": "^3.20.5",
