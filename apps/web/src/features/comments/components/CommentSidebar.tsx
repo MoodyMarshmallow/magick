@@ -48,7 +48,6 @@ export function CommentSidebar({
                 className="thread-entry__summary"
                 onClick={async () => {
                   if (thread.threadId === activeThreadId) {
-                    onActivateThread(thread.threadId);
                     await onToggleResolved(thread.threadId);
                     return;
                   }

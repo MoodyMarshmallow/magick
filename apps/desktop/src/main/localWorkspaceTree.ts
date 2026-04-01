@@ -3,16 +3,13 @@ import type {
   LocalWorkspaceBootstrap,
   LocalWorkspaceDirectoryNode,
   LocalWorkspaceFileNode,
+  LocalWorkspaceThread,
   LocalWorkspaceTreeNode,
 } from "@magick/shared/localWorkspace";
 
 export interface LocalWorkspaceTreeDocument {
   readonly id: string;
   readonly filePath: string;
-}
-
-export interface LocalWorkspaceTreeThread {
-  readonly documentId: string;
 }
 
 interface MutableDirectoryNode {
@@ -64,19 +61,10 @@ const toSortedTree = (
 
 export const createWorkspaceTree = (args: {
   documents: readonly LocalWorkspaceTreeDocument[];
-  threads: readonly LocalWorkspaceTreeThread[];
   documentsDir: string;
 }): readonly LocalWorkspaceTreeNode[] => {
   const rootNodes: LocalWorkspaceTreeNode[] = [];
   const directories = new Map<string, MutableDirectoryNode>();
-  const threadCounts = new Map<string, number>();
-
-  for (const thread of args.threads) {
-    threadCounts.set(
-      thread.documentId,
-      (threadCounts.get(thread.documentId) ?? 0) + 1,
-    );
-  }
 
   for (const document of args.documents) {
     const relativePath = toRelativeWorkspacePath(
@@ -113,7 +101,6 @@ export const createWorkspaceTree = (args: {
       name: fileName,
       path: relativePath,
       documentId: document.id,
-      threadCount: threadCounts.get(document.id) ?? 0,
     };
     parentChildren.push(fileNode);
   }
@@ -123,10 +110,14 @@ export const createWorkspaceTree = (args: {
 
 export const createWorkspaceBootstrap = (args: {
   documents: readonly LocalWorkspaceTreeDocument[];
-  threads: readonly LocalWorkspaceTreeThread[];
+  threads: readonly LocalWorkspaceThread[];
   documentsDir: string;
 }): LocalWorkspaceBootstrap => ({
-  tree: createWorkspaceTree(args),
+  tree: createWorkspaceTree({
+    documents: args.documents,
+    documentsDir: args.documentsDir,
+  }),
+  threads: args.threads,
 });
 
 export const findFirstDocumentIdInTree = (

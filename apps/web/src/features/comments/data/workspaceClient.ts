@@ -1,8 +1,8 @@
 import type {
   LocalDocumentPayload,
-  LocalDocumentThread,
   LocalThreadEvent,
   LocalWorkspaceBootstrap,
+  LocalWorkspaceThread,
   LocalWorkspaceTreeNode,
   MagickDesktopApi,
 } from "@magick/shared/localWorkspace";
@@ -21,11 +21,10 @@ export interface WorkspaceClient {
   subscribe: (listener: (event: LocalThreadEvent) => void) => () => void;
 }
 
-const toLocalDocumentThread = (
-  thread: DocumentBootstrap["threads"][number],
-): LocalDocumentThread => ({
+const toLocalWorkspaceThread = (
+  thread: Awaited<ReturnType<typeof demoMagickClient.getThreads>>[number],
+): LocalWorkspaceThread => ({
   threadId: thread.threadId,
-  documentId: thread.documentId,
   title: thread.title,
   status: thread.status,
   updatedAt: thread.updatedAt,
@@ -42,14 +41,14 @@ const toLocalThreadEvent = (
   if (event.type === "snapshot.loaded") {
     return {
       type: event.type,
-      threads: event.threads.map(toLocalDocumentThread),
+      threads: event.threads.map(toLocalWorkspaceThread),
     };
   }
 
   if (event.type === "thread.created") {
     return {
       type: event.type,
-      thread: toLocalDocumentThread(event.thread),
+      thread: toLocalWorkspaceThread(event.thread),
     };
   }
 
@@ -77,7 +76,6 @@ const createBrowserWorkspaceTree = (
             name: "evergreen-systems-memo.md",
             path: "notes/studio/evergreen-systems-memo.md",
             documentId: document.documentId,
-            threadCount: document.threads.length,
           },
         ],
       },
@@ -89,8 +87,10 @@ const createBrowserWorkspaceClient = (): WorkspaceClient => ({
   async getWorkspaceBootstrap() {
     const document =
       await demoMagickClient.getDocumentBootstrap(demoDocumentId);
+    const threads = await demoMagickClient.getThreads();
     return {
       tree: createBrowserWorkspaceTree(document),
+      threads: threads.map(toLocalWorkspaceThread),
     };
   },
   async openDocument(documentId) {
@@ -99,7 +99,6 @@ const createBrowserWorkspaceClient = (): WorkspaceClient => ({
       documentId: document.documentId,
       title: document.title,
       markdown: document.markdown,
-      threads: document.threads.map(toLocalDocumentThread),
     };
   },
   async saveDocument(_documentId, markdown) {

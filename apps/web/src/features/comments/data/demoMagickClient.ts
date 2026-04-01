@@ -8,7 +8,6 @@ export interface DocumentBootstrap {
   readonly documentId: string;
   readonly title: string;
   readonly markdown: string;
-  readonly threads: readonly CommentThread[];
 }
 
 interface MutableCommentMessage {
@@ -21,7 +20,6 @@ interface MutableCommentMessage {
 
 interface MutableCommentThread {
   threadId: string;
-  documentId: string;
   title: string;
   status: CommentThread["status"];
   updatedAt: string;
@@ -32,11 +30,11 @@ interface MutableBootstrap {
   documentId: string;
   title: string;
   markdown: string;
-  threads: MutableCommentThread[];
 }
 
 interface DemoMagickClientState {
   bootstrap: MutableBootstrap;
+  threads: MutableCommentThread[];
 }
 
 export interface DemoMagickClientOptions {
@@ -51,6 +49,7 @@ export interface DemoMagickClient {
   getDocumentBootstrap: (
     requestedDocumentId: string,
   ) => Promise<DocumentBootstrap>;
+  getThreads: () => Promise<readonly CommentThread[]>;
   subscribe: (listener: (event: CommentThreadEvent) => void) => () => void;
   updateDocumentMarkup: (markdown: string) => void;
   createCommentThread: (args: {
@@ -71,33 +70,32 @@ const createInitialState = (
     documentId,
     title: "Evergreen Systems Memo",
     markdown:
-      "Magick should feel like a calm studio for thinking with AI.\n\nThe best interfaces keep momentum without hiding system state.\n\n::comment-start[thread_seed_1]{}Use shared contracts to keep streaming and replay predictable.::comment-end[thread_seed_1]{}\n\nWe should treat comments like durable conversations, not disposable UI fragments.",
-    threads: [
-      {
-        threadId: "thread_seed_1",
-        documentId,
-        title: "Thread 1",
-        status: "open",
-        updatedAt: now(),
-        messages: [
-          {
-            id: "message_seed_1",
-            author: "human",
-            body: "We should preserve this sentence. It explains why the backend owns recovery semantics.",
-            createdAt: now(),
-            status: "complete",
-          },
-          {
-            id: "message_seed_2",
-            author: "ai",
-            body: "Agreed. It also clarifies why replay correctness matters more than optimistic transcript tricks.",
-            createdAt: now(),
-            status: "complete",
-          },
-        ],
-      },
-    ],
+      "Magick should feel like a calm studio for thinking with AI.\n\nThe best interfaces keep momentum without hiding system state.\n\nUse shared contracts to keep streaming and replay predictable.\n\nWe should treat comments like durable conversations, not disposable UI fragments.",
   },
+  threads: [
+    {
+      threadId: "thread_seed_1",
+      title: "Chat 1",
+      status: "open",
+      updatedAt: now(),
+      messages: [
+        {
+          id: "message_seed_1",
+          author: "human",
+          body: "We should preserve this sentence. It explains why the backend owns recovery semantics.",
+          createdAt: now(),
+          status: "complete",
+        },
+        {
+          id: "message_seed_2",
+          author: "ai",
+          body: "Agreed. It also clarifies why replay correctness matters more than optimistic transcript tricks.",
+          createdAt: now(),
+          status: "complete",
+        },
+      ],
+    },
+  ],
 });
 
 const clone = <T>(value: T): T => structuredClone(value);
@@ -128,8 +126,10 @@ export const createDemoMagickClient = (
     documentId: state.bootstrap.documentId,
     title: state.bootstrap.title,
     markdown: state.bootstrap.markdown,
-    threads: state.bootstrap.threads.map(toPublicThread),
   });
+
+  const getThreadsSnapshot = (): readonly CommentThread[] =>
+    state.threads.map(toPublicThread);
 
   const emit = (event: CommentThreadEvent): void => {
     for (const listener of listeners) {
@@ -138,7 +138,7 @@ export const createDemoMagickClient = (
   };
 
   const findThread = (threadId: string): MutableCommentThread => {
-    const thread = state.bootstrap.threads.find(
+    const thread = state.threads.find(
       (candidate) => candidate.threadId === threadId,
     );
     if (!thread) {
@@ -233,7 +233,6 @@ export const createDemoMagickClient = (
       const timestamp = now();
       const thread: MutableCommentThread = {
         threadId: `thread_${createId()}`,
-        documentId,
         title: args.title,
         status: "open",
         updatedAt: timestamp,
@@ -248,11 +247,11 @@ export const createDemoMagickClient = (
         ],
       };
 
-      state.bootstrap.threads = [thread, ...state.bootstrap.threads];
+      state.threads = [thread, ...state.threads];
       emit({ type: "thread.created", thread: toPublicThread(thread) });
       appendAssistantReply(
         thread.threadId,
-        "I'll treat this comment as its own backend thread, so every follow-up stays attached to the same anchored span.",
+        "I'll treat this as its own chat, so every follow-up stays in the same conversation history.",
       );
 
       return clone(toPublicThread(thread));
@@ -278,7 +277,7 @@ export const createDemoMagickClient = (
 
       appendAssistantReply(
         thread.threadId,
-        `This reply stays in ${thread.threadId}, which keeps the comment conversation durable across streaming and replay.`,
+        `This reply stays in ${thread.threadId}, which keeps the chat durable across streaming and replay.`,
       );
     },
 
@@ -292,6 +291,9 @@ export const createDemoMagickClient = (
         status: thread.status,
         updatedAt: thread.updatedAt,
       });
+    },
+    async getThreads() {
+      return clone(getThreadsSnapshot());
     },
   };
 };

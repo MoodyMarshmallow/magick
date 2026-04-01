@@ -44,21 +44,17 @@ const createHarness = () => {
 describe("demoMagickClient", () => {
   it("returns an isolated bootstrap snapshot", async () => {
     const { client } = createHarness();
-    const bootstrap = await client.getDocumentBootstrap(
-      "doc_everforest_manifesto",
-    );
+    const threads = await client.getThreads();
 
-    const firstThread = bootstrap.threads[0];
+    const firstThread = threads[0];
     if (!firstThread) {
       throw new Error("Expected seed thread to exist.");
     }
     (firstThread as { title: string }).title = "mutated";
 
-    const nextBootstrap = await client.getDocumentBootstrap(
-      "doc_everforest_manifesto",
-    );
+    const nextThreads = await client.getThreads();
 
-    expect(nextBootstrap.threads[0]?.title).toBe("Thread 1");
+    expect(nextThreads[0]?.title).toBe("Chat 1");
   });
 
   it("throws when a document id is unknown", async () => {
@@ -69,7 +65,7 @@ describe("demoMagickClient", () => {
     );
   });
 
-  it("persists document markup updates independently from thread events", async () => {
+  it("persists document markup independently from chat state", async () => {
     const { client } = createHarness();
 
     client.updateDocumentMarkup("next markdown state");
@@ -81,7 +77,7 @@ describe("demoMagickClient", () => {
     expect(bootstrap.markdown).toBe("next markdown state");
   });
 
-  it("creates a new thread and emits streaming lifecycle events", async () => {
+  it("creates a new chat and emits streaming lifecycle events", async () => {
     const { client, flushScheduled } = createHarness();
     const events: string[] = [];
 
@@ -90,7 +86,7 @@ describe("demoMagickClient", () => {
     });
 
     const thread = await client.createCommentThread({
-      title: "Thread 2",
+      title: "Chat 2",
       initialMessage: "First note",
     });
 
@@ -102,10 +98,8 @@ describe("demoMagickClient", () => {
 
     flushScheduled();
 
-    const bootstrap = await client.getDocumentBootstrap(
-      "doc_everforest_manifesto",
-    );
-    const persistedThread = bootstrap.threads.find(
+    const threads = await client.getThreads();
+    const persistedThread = threads.find(
       (candidate) => candidate.threadId === thread.threadId,
     );
 
@@ -119,11 +113,9 @@ describe("demoMagickClient", () => {
     });
   });
 
-  it("keeps replies on the existing thread instead of creating a new one", async () => {
+  it("keeps replies on the existing chat instead of creating a new one", async () => {
     const { client, flushScheduled } = createHarness();
-    const before = await client.getDocumentBootstrap(
-      "doc_everforest_manifesto",
-    );
+    const before = await client.getThreads();
 
     await client.sendReply({
       threadId: "thread_seed_1",
@@ -131,12 +123,12 @@ describe("demoMagickClient", () => {
     });
     flushScheduled();
 
-    const after = await client.getDocumentBootstrap("doc_everforest_manifesto");
-    const thread = after.threads.find(
+    const after = await client.getThreads();
+    const thread = after.find(
       (candidate) => candidate.threadId === "thread_seed_1",
     );
 
-    expect(after.threads).toHaveLength(before.threads.length);
+    expect(after).toHaveLength(before.length);
     expect(
       thread?.messages.some((message) => message.body === "Follow-up reply"),
     ).toBe(true);
@@ -153,10 +145,8 @@ describe("demoMagickClient", () => {
     unsubscribe();
     await client.toggleResolved("thread_seed_1");
 
-    const bootstrap = await client.getDocumentBootstrap(
-      "doc_everforest_manifesto",
-    );
-    const thread = bootstrap.threads.find(
+    const threads = await client.getThreads();
+    const thread = threads.find(
       (candidate) => candidate.threadId === "thread_seed_1",
     );
 

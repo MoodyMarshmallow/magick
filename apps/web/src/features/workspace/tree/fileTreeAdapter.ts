@@ -19,7 +19,6 @@ export interface FileTreeDirectoryItemData extends FileTreeItemDataBase {
 export interface FileTreeFileItemData extends FileTreeItemDataBase {
   readonly type: "file";
   readonly documentId: string;
-  readonly threadCount: number;
 }
 
 export type FileTreeItemData = FileTreeDirectoryItemData | FileTreeFileItemData;
@@ -50,7 +49,6 @@ const toFileItemData = (
   name: node.name,
   path: node.path,
   documentId: node.documentId,
-  threadCount: node.threadCount,
 });
 
 export const createFileTreeAdapter = (

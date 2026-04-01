@@ -2,7 +2,6 @@ import { type CommentThread, projectThreadEvent } from "./threadProjector";
 
 const baseThread: CommentThread = {
   threadId: "thread_1",
-  documentId: "doc_1",
   title: "Thread 1",
   status: "open",
   updatedAt: "2026-03-27T10:00:00.000Z",

@@ -137,6 +137,7 @@ const editorToolbarActions: readonly {
 export function AppShell() {
   const editorRef = useRef<EditorSurfaceHandle | null>(null);
   const resizeStateRef = useRef<ResizeState | null>(null);
+  const activeThreadIdRef = useRef<string | null>(null);
   const [markdown, setMarkdown] = useState("");
   const [activeDocumentId, setActiveDocumentId] = useState<string | null>(null);
   const [expandedTreeItemIds, setExpandedTreeItemIds] = useState<string[]>([]);
@@ -151,6 +152,10 @@ export function AppShell() {
   );
   const { activeThreadId, setActiveThreadId, setSelection } =
     useCommentUiStore();
+
+  useEffect(() => {
+    activeThreadIdRef.current = activeThreadId;
+  }, [activeThreadId]);
 
   const bootstrapQuery = useQuery({
     queryKey: ["workspace-bootstrap"],
@@ -192,17 +197,26 @@ export function AppShell() {
   }, [activeDocumentId, bootstrapQuery.data]);
 
   useEffect(() => {
+    if (!bootstrapQuery.data) {
+      return;
+    }
+
+    dispatch({
+      type: "snapshot.loaded",
+      threads: bootstrapQuery.data.threads,
+    });
+    if (!activeThreadIdRef.current) {
+      setActiveThreadId(bootstrapQuery.data.threads[0]?.threadId ?? null);
+    }
+  }, [bootstrapQuery.data, setActiveThreadId]);
+
+  useEffect(() => {
     if (!documentQuery.data) {
       return;
     }
 
     setMarkdown(documentQuery.data.markdown);
-    dispatch({
-      type: "snapshot.loaded",
-      threads: documentQuery.data.threads,
-    });
-    setActiveThreadId(documentQuery.data.threads[0]?.threadId ?? null);
-  }, [documentQuery.data, setActiveThreadId]);
+  }, [documentQuery.data]);
 
   useEffect(() => {
     return workspaceClient.subscribe((event) => {
@@ -270,15 +284,14 @@ export function AppShell() {
     const mappedSelection: SelectionState | null = nextSelection
       ? {
           text: nextSelection.text,
-          threadId: nextSelection.threadId,
+          threadId: null,
         }
       : null;
     setSelection(mappedSelection);
   };
 
-  const handleActivateThread = (threadId: string) => {
+  const handleSelectThread = (threadId: string) => {
     setActiveThreadId(threadId);
-    editorRef.current?.focusThread(threadId);
   };
 
   const clearResizeState = () => {
@@ -404,7 +417,6 @@ export function AppShell() {
                   }
                 }}
                 onSelectionChange={handleSelectionChange}
-                onThreadClick={handleActivateThread}
               />
             </div>
           </div>
@@ -423,7 +435,7 @@ export function AppShell() {
       <CommentSidebar
         threads={threads}
         activeThreadId={activeThreadId}
-        onActivateThread={handleActivateThread}
+        onActivateThread={handleSelectThread}
         onSendReply={async (threadId: string, message: string) => {
           await workspaceClient.sendThreadMessage(threadId, message);
           setActiveThreadId(threadId);

@@ -21,7 +21,7 @@ const createHarness = () => {
 };
 
 describe("LocalWorkspaceService", () => {
-  it("seeds a local workspace with a nested file tree and thread counts", () => {
+  it("seeds a local workspace with a nested file tree and workspace chats", () => {
     const harness = createHarness();
 
     try {
@@ -39,7 +39,6 @@ describe("LocalWorkspaceService", () => {
               name: "evergreen-systems-memo.md",
               path: "codex/evergreen-systems-memo.md",
               documentId: "doc_evergreen",
-              threadCount: 1,
             },
           ],
         },
@@ -61,13 +60,17 @@ describe("LocalWorkspaceService", () => {
                   name: "design-system-field-notes.md",
                   path: "notes/patterns/design-system-field-notes.md",
                   documentId: "doc_field_notes",
-                  threadCount: 1,
                 },
               ],
             },
           ],
         },
       ]);
+      expect(bootstrap.threads.map((thread) => thread.threadId)).toEqual([
+        "thread_seed_2",
+        "thread_seed_1",
+      ]);
+      expect(bootstrap.threads[0]?.title).toBe("Chat 2");
       expect(
         readFileSync(join(harness.root, "workspace", "workspace.json"), "utf8"),
       ).toContain("notes/patterns/design-system-field-notes.md");
@@ -98,7 +101,7 @@ describe("LocalWorkspaceService", () => {
     }
   });
 
-  it("opens a document with local markdown and thread history", () => {
+  it("opens a document with local markdown only", () => {
     const harness = createHarness();
 
     try {
@@ -108,10 +111,6 @@ describe("LocalWorkspaceService", () => {
       expect(document.markdown).toContain(
         "Magick should feel like a calm studio",
       );
-      expect(document.threads[0]).toMatchObject({
-        threadId: "thread_seed_1",
-        title: "Thread 1",
-      });
     } finally {
       harness.cleanup();
     }
@@ -155,8 +154,9 @@ describe("LocalWorkspaceService", () => {
         type: "message.added",
         threadId: "thread_seed_1",
       });
-      const updatedThread =
-        harness.service.openDocument("doc_evergreen").threads[0];
+      const updatedThread = harness.service
+        .getWorkspaceBootstrap()
+        .threads.find((thread) => thread.threadId === "thread_seed_1");
       expect(updatedThread?.messages.at(-2)?.body).toBe(
         "Desktop verification message",
       );

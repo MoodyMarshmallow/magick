@@ -2,11 +2,11 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type {
   LocalDocumentPayload,
-  LocalDocumentThread,
   LocalThreadEvent,
   LocalThreadMessage,
   LocalThreadStatus,
   LocalWorkspaceBootstrap,
+  LocalWorkspaceThread,
 } from "@magick/shared/localWorkspace";
 import { createWorkspaceBootstrap } from "./localWorkspaceTree";
 
@@ -30,7 +30,6 @@ interface StoredWorkspace {
 
 interface StoredThread {
   threadId: string;
-  documentId: string;
   title: string;
   status: LocalThreadStatus;
   updatedAt: string;
@@ -46,7 +45,7 @@ const seedDocuments = [
       "Magick should feel like a calm studio for thinking with AI.\n\nThe best interfaces keep momentum without hiding system state.\n\nUse shared contracts to keep streaming and replay predictable.\n\nWe should treat threads like durable conversations, not disposable UI fragments.",
     thread: {
       id: "thread_seed_1",
-      title: "Thread 1",
+      title: "Chat 1",
       human: "We should preserve the line about replay semantics.",
       ai: "Agreed. It explains why predictable recovery matters more than flashy interaction tricks.",
     },
@@ -59,7 +58,7 @@ const seedDocuments = [
       "Keep the interface flat, direct, and readable.\n\nAvoid decorative layering that competes with the writing surface.\n\nFavor thread chat over annotation theater for now.",
     thread: {
       id: "thread_seed_2",
-      title: "Thread 1",
+      title: "Chat 2",
       human: "This document should stay simpler than the manifesto.",
       ai: "Yes. It works better as a plain local note with a single thread history.",
     },
@@ -88,7 +87,9 @@ export class LocalWorkspaceService {
     const state = this.readWorkspace();
     return createWorkspaceBootstrap({
       documents: state.documents,
-      threads: state.threads,
+      threads: state.threads
+        .map((thread) => ({ ...thread }))
+        .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt)),
       documentsDir: this.documentsDir,
     });
   }
@@ -106,9 +107,6 @@ export class LocalWorkspaceService {
       documentId: document.id,
       title: document.title,
       markdown: readFileSync(document.filePath, "utf8"),
-      threads: state.threads
-        .filter((thread) => thread.documentId === document.id)
-        .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt)),
     };
   }
 
@@ -206,7 +204,6 @@ export class LocalWorkspaceService {
         });
         state.threads.push({
           threadId: document.thread.id,
-          documentId: document.id,
           title: document.thread.title,
           status: "open",
           updatedAt,

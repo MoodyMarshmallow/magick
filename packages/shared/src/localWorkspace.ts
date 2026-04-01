@@ -10,9 +10,8 @@ export interface LocalThreadMessage {
   readonly status: LocalThreadMessageStatus;
 }
 
-export interface LocalDocumentThread {
+export interface LocalWorkspaceThread {
   readonly threadId: string;
-  readonly documentId: string;
   readonly title: string;
   readonly status: LocalThreadStatus;
   readonly updatedAt: string;
@@ -34,7 +33,6 @@ export interface LocalWorkspaceDirectoryNode
 export interface LocalWorkspaceFileNode extends LocalWorkspaceTreeBaseNode {
   readonly type: "file";
   readonly documentId: string;
-  readonly threadCount: number;
 }
 
 export type LocalWorkspaceTreeNode =
@@ -45,21 +43,21 @@ export interface LocalDocumentPayload {
   readonly documentId: string;
   readonly title: string;
   readonly markdown: string;
-  readonly threads: readonly LocalDocumentThread[];
 }
 
 export interface LocalWorkspaceBootstrap {
   readonly tree: readonly LocalWorkspaceTreeNode[];
+  readonly threads: readonly LocalWorkspaceThread[];
 }
 
 export type LocalThreadEvent =
   | {
       readonly type: "snapshot.loaded";
-      readonly threads: readonly LocalDocumentThread[];
+      readonly threads: readonly LocalWorkspaceThread[];
     }
   | {
       readonly type: "thread.created";
-      readonly thread: LocalDocumentThread;
+      readonly thread: LocalWorkspaceThread;
     }
   | {
       readonly type: "thread.statusChanged";

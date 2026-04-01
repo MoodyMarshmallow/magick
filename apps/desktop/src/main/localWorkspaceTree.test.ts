@@ -17,9 +17,13 @@ describe("localWorkspaceTree", () => {
         },
       ],
       threads: [
-        { documentId: "doc_manifesto" },
-        { documentId: "doc_manifesto" },
-        { documentId: "doc_notes" },
+        {
+          threadId: "thread_1",
+          title: "Chat 1",
+          status: "open",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+          messages: [],
+        },
       ],
       documentsDir: "/tmp/workspace/documents",
     });
@@ -37,7 +41,6 @@ describe("localWorkspaceTree", () => {
             name: "manifesto.md",
             path: "codex/manifesto.md",
             documentId: "doc_manifesto",
-            threadCount: 2,
           },
         ],
       },
@@ -59,13 +62,13 @@ describe("localWorkspaceTree", () => {
                 name: "system.md",
                 path: "notes/patterns/system.md",
                 documentId: "doc_notes",
-                threadCount: 1,
               },
             ],
           },
         ],
       },
     ]);
+    expect(bootstrap.threads).toHaveLength(1);
   });
 
   it("returns the first file document id in tree order", () => {
