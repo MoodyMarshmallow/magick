@@ -23,10 +23,12 @@ export function CommentSidebar({
   onToggleResolved,
 }: CommentSidebarProps) {
   const [replyDraft, setReplyDraft] = useState("");
+  const activeThread =
+    threads.find((thread) => thread.threadId === activeThreadId) ?? null;
 
   return (
     <aside className="comment-sidebar">
-      <section className="sidebar-section thread-ledger">
+      <section className="thread-ledger">
         <div className="thread-ledger__items">
           {threads.map((thread) => (
             <article
@@ -36,8 +38,23 @@ export function CommentSidebar({
               }`}
             >
               <button
+                aria-label={
+                  thread.threadId === activeThreadId
+                    ? thread.status === "open"
+                      ? `Resolve ${thread.title}`
+                      : `Reopen ${thread.title}`
+                    : `Open ${thread.title}`
+                }
                 className="thread-entry__summary"
-                onClick={() => onActivateThread(thread.threadId)}
+                onClick={async () => {
+                  if (thread.threadId === activeThreadId) {
+                    onActivateThread(thread.threadId);
+                    await onToggleResolved(thread.threadId);
+                    return;
+                  }
+
+                  onActivateThread(thread.threadId);
+                }}
                 type="button"
               >
                 <div className="thread-entry__sigil">
@@ -51,65 +68,60 @@ export function CommentSidebar({
                   <strong>{thread.title}</strong>
                 </div>
               </button>
-
-              {thread.threadId === activeThreadId ? (
-                <div className="thread-entry__detail">
-                  <div className="thread-record__messages">
-                    {thread.messages.map((message) => (
-                      <article
-                        className={`thread-record__message thread-record__message--${message.author}`}
-                        key={message.id}
-                      >
-                        <header>
-                          <span>
-                            {message.author === "human" ? "you" : "magick"}
-                          </span>
-                          <span>
-                            {new Date(message.createdAt).toLocaleTimeString()}
-                          </span>
-                        </header>
-                        <p>{message.body || "Streaming..."}</p>
-                      </article>
-                    ))}
-                  </div>
-
-                  <div className="thread-record__composer">
-                    <div className="thread-record__response-field">
-                      <textarea
-                        id="thread-response-field"
-                        value={replyDraft}
-                        onChange={(event) => setReplyDraft(event.target.value)}
-                        placeholder="Write a response"
-                        rows={3}
-                      />
-                      <button
-                        aria-label="Send reply"
-                        className="flat-button flat-button--accent"
-                        disabled={!replyDraft.trim()}
-                        onClick={async () => {
-                          await onSendReply(thread.threadId, replyDraft.trim());
-                          setReplyDraft("");
-                        }}
-                        type="button"
-                      >
-                        <CornerDownRight size={15} />
-                      </button>
-                    </div>
-                    <div className="thread-entry__actions">
-                      <button
-                        className="flat-button"
-                        onClick={() => onToggleResolved(thread.threadId)}
-                        type="button"
-                      >
-                        {thread.status === "open" ? "resolve" : "reopen"}
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              ) : null}
             </article>
           ))}
         </div>
+      </section>
+
+      <section className="comment-sidebar__active-thread">
+        {activeThread ? (
+          <>
+            <div className="thread-record__messages">
+              {activeThread.messages.map((message) => (
+                <article
+                  className={`thread-record__message thread-record__message--${message.author}`}
+                  key={message.id}
+                >
+                  <header>
+                    <span>{message.author === "human" ? "you" : "magick"}</span>
+                    <span>
+                      {new Date(message.createdAt).toLocaleTimeString()}
+                    </span>
+                  </header>
+                  <p>{message.body || "Streaming..."}</p>
+                </article>
+              ))}
+            </div>
+
+            <div className="thread-record__composer">
+              <div className="thread-record__response-field">
+                <textarea
+                  id="thread-response-field"
+                  value={replyDraft}
+                  onChange={(event) => setReplyDraft(event.target.value)}
+                  placeholder="Write a response"
+                  rows={3}
+                />
+                <button
+                  aria-label="Send reply"
+                  className="flat-button flat-button--accent"
+                  disabled={!replyDraft.trim()}
+                  onClick={async () => {
+                    await onSendReply(activeThread.threadId, replyDraft.trim());
+                    setReplyDraft("");
+                  }}
+                  type="button"
+                >
+                  <CornerDownRight size={15} />
+                </button>
+              </div>
+            </div>
+          </>
+        ) : (
+          <div className="thread-record__empty">
+            <p>Select a thread to view its messages.</p>
+          </div>
+        )}
       </section>
     </aside>
   );

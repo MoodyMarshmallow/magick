@@ -383,28 +383,30 @@ export function AppShell() {
                 );
               })}
             </div>
-            <div
-              className="workspace__document-title"
-              title={activeDocumentTitle}
-            >
-              {activeDocumentTitle}
+            <div className="workspace__document-scroll">
+              <div
+                className="workspace__document-title"
+                title={activeDocumentTitle}
+              >
+                {activeDocumentTitle}
+              </div>
+              <EditorSurface
+                ref={editorRef}
+                markdown={markdown}
+                onFormatStateChange={setEditorFormatState}
+                onMarkdownChange={(nextMarkdown) => {
+                  setMarkdown(nextMarkdown);
+                  if (activeDocumentId) {
+                    void workspaceClient.saveDocument(
+                      activeDocumentId,
+                      nextMarkdown,
+                    );
+                  }
+                }}
+                onSelectionChange={handleSelectionChange}
+                onThreadClick={handleActivateThread}
+              />
             </div>
-            <EditorSurface
-              ref={editorRef}
-              markdown={markdown}
-              onFormatStateChange={setEditorFormatState}
-              onMarkdownChange={(nextMarkdown) => {
-                setMarkdown(nextMarkdown);
-                if (activeDocumentId) {
-                  void workspaceClient.saveDocument(
-                    activeDocumentId,
-                    nextMarkdown,
-                  );
-                }
-              }}
-              onSelectionChange={handleSelectionChange}
-              onThreadClick={handleActivateThread}
-            />
           </div>
         </section>
       </section>
