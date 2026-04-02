@@ -61,6 +61,7 @@ function FileTreeHarness() {
         expandedIds={expandedIds}
         onExpandedIdsChange={setExpandedIds}
         onOpenDocument={setActiveDocumentId}
+        onStartDragDocument={() => {}}
         tree={sampleTree}
       />
     </>

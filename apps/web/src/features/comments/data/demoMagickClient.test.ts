@@ -68,13 +68,25 @@ describe("demoMagickClient", () => {
   it("persists document markup independently from chat state", async () => {
     const { client } = createHarness();
 
-    client.updateDocumentMarkup("next markdown state");
+    client.updateDocumentMarkup(
+      "doc_everforest_manifesto",
+      "next markdown state",
+    );
 
     const bootstrap = await client.getDocumentBootstrap(
       "doc_everforest_manifesto",
     );
 
     expect(bootstrap.markdown).toBe("next markdown state");
+  });
+
+  it("supports multiple demo documents", async () => {
+    const { client } = createHarness();
+
+    const note = await client.getDocumentBootstrap("doc_systems_note");
+
+    expect(note.title).toBe("Systems Garden Note");
+    expect(note.markdown).toContain("shared draft state");
   });
 
   it("creates a new chat and emits streaming lifecycle events", async () => {

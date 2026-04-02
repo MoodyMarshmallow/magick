@@ -8,7 +8,7 @@ import type {
 } from "@magick/shared/localWorkspace";
 import {
   type DocumentBootstrap,
-  demoDocumentId,
+  demoDocumentIds,
   demoMagickClient,
 } from "./demoMagickClient";
 
@@ -56,7 +56,7 @@ const toLocalThreadEvent = (
 };
 
 const createBrowserWorkspaceTree = (
-  document: DocumentBootstrap,
+  documents: readonly DocumentBootstrap[],
 ): readonly LocalWorkspaceTreeNode[] => [
   {
     id: "directory:notes",
@@ -70,13 +70,19 @@ const createBrowserWorkspaceTree = (
         name: "studio",
         path: "notes/studio",
         children: [
-          {
+          ...documents.map((document, index) => ({
             id: `file:${document.documentId}`,
-            type: "file",
-            name: "evergreen-systems-memo.md",
-            path: "notes/studio/evergreen-systems-memo.md",
+            type: "file" as const,
+            name:
+              index === 0
+                ? "evergreen-systems-memo.md"
+                : "systems-garden-note.md",
+            path:
+              index === 0
+                ? "notes/studio/evergreen-systems-memo.md"
+                : "notes/studio/systems-garden-note.md",
             documentId: document.documentId,
-          },
+          })),
         ],
       },
     ],
@@ -85,11 +91,14 @@ const createBrowserWorkspaceTree = (
 
 const createBrowserWorkspaceClient = (): WorkspaceClient => ({
   async getWorkspaceBootstrap() {
-    const document =
-      await demoMagickClient.getDocumentBootstrap(demoDocumentId);
+    const documents = await Promise.all(
+      demoDocumentIds.map((documentId) =>
+        demoMagickClient.getDocumentBootstrap(documentId),
+      ),
+    );
     const threads = await demoMagickClient.getThreads();
     return {
-      tree: createBrowserWorkspaceTree(document),
+      tree: createBrowserWorkspaceTree(documents),
       threads: threads.map(toLocalWorkspaceThread),
     };
   },
@@ -102,7 +111,7 @@ const createBrowserWorkspaceClient = (): WorkspaceClient => ({
     };
   },
   async saveDocument(_documentId, markdown) {
-    demoMagickClient.updateDocumentMarkup(markdown);
+    demoMagickClient.updateDocumentMarkup(_documentId, markdown);
   },
   async sendThreadMessage(threadId, body) {
     await demoMagickClient.sendReply({ threadId, body });

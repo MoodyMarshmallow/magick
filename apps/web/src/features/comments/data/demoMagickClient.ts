@@ -33,7 +33,7 @@ interface MutableBootstrap {
 }
 
 interface DemoMagickClientState {
-  bootstrap: MutableBootstrap;
+  documents: MutableBootstrap[];
   threads: MutableCommentThread[];
 }
 
@@ -51,7 +51,7 @@ export interface DemoMagickClient {
   ) => Promise<DocumentBootstrap>;
   getThreads: () => Promise<readonly CommentThread[]>;
   subscribe: (listener: (event: CommentThreadEvent) => void) => () => void;
-  updateDocumentMarkup: (markdown: string) => void;
+  updateDocumentMarkup: (documentId: string, markdown: string) => void;
   createCommentThread: (args: {
     title: string;
     initialMessage: string;
@@ -61,17 +61,29 @@ export interface DemoMagickClient {
 }
 
 const defaultDocumentId = "doc_everforest_manifesto";
+export const demoDocumentIds = [
+  "doc_everforest_manifesto",
+  "doc_systems_note",
+] as const;
 
 const createInitialState = (
   documentId: string,
   now: () => string,
 ): DemoMagickClientState => ({
-  bootstrap: {
-    documentId,
-    title: "Evergreen Systems Memo",
-    markdown:
-      "Magick should feel like a calm studio for thinking with AI.\n\nThe best interfaces keep momentum without hiding system state.\n\nUse shared contracts to keep streaming and replay predictable.\n\nWe should treat comments like durable conversations, not disposable UI fragments.",
-  },
+  documents: [
+    {
+      documentId,
+      title: "Evergreen Systems Memo",
+      markdown:
+        "Magick should feel like a calm studio for thinking with AI.\n\nThe best interfaces keep momentum without hiding system state.\n\nUse shared contracts to keep streaming and replay predictable.\n\nWe should treat comments like durable conversations, not disposable UI fragments.",
+    },
+    {
+      documentId: "doc_systems_note",
+      title: "Systems Garden Note",
+      markdown:
+        "Keep duplicate document views synchronized from one shared draft state.\n\nSplits should feel like moving paper around a desk, not launching a new mode.\n\nDrag targets should preview the resulting pane clearly before drop.",
+    },
+  ],
   threads: [
     {
       threadId: "thread_seed_1",
@@ -122,11 +134,22 @@ export const createDemoMagickClient = (
   const state = createInitialState(documentId, now);
   const listeners = new Set<(event: CommentThreadEvent) => void>();
 
-  const toPublicBootstrap = (): DocumentBootstrap => ({
-    documentId: state.bootstrap.documentId,
-    title: state.bootstrap.title,
-    markdown: state.bootstrap.markdown,
-  });
+  const toPublicBootstrap = (
+    requestedDocumentId: string,
+  ): DocumentBootstrap => {
+    const document = state.documents.find(
+      (candidate) => candidate.documentId === requestedDocumentId,
+    );
+    if (!document) {
+      throw new Error(`Document '${requestedDocumentId}' was not found.`);
+    }
+
+    return {
+      documentId: document.documentId,
+      title: document.title,
+      markdown: document.markdown,
+    };
+  };
 
   const getThreadsSnapshot = (): readonly CommentThread[] =>
     state.threads.map(toPublicThread);
@@ -211,11 +234,7 @@ export const createDemoMagickClient = (
 
   return {
     async getDocumentBootstrap(requestedDocumentId: string) {
-      if (requestedDocumentId !== documentId) {
-        throw new Error(`Document '${requestedDocumentId}' was not found.`);
-      }
-
-      return clone(toPublicBootstrap());
+      return clone(toPublicBootstrap(requestedDocumentId));
     },
 
     subscribe(listener) {
@@ -225,8 +244,15 @@ export const createDemoMagickClient = (
       };
     },
 
-    updateDocumentMarkup(markdown) {
-      state.bootstrap.markdown = markdown;
+    updateDocumentMarkup(documentId, markdown) {
+      const document = state.documents.find(
+        (candidate) => candidate.documentId === documentId,
+      );
+      if (!document) {
+        throw new Error(`Document '${documentId}' was not found.`);
+      }
+
+      document.markdown = markdown;
     },
 
     async createCommentThread(args) {

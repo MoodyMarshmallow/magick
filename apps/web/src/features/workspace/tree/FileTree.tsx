@@ -7,7 +7,7 @@ import {
 import { useTree } from "@headless-tree/react";
 import type { LocalWorkspaceTreeNode } from "@magick/shared/localWorkspace";
 import { ChevronRight, FileText, Folder, FolderOpen } from "lucide-react";
-import { type MouseEvent, useMemo } from "react";
+import { type DragEvent, type MouseEvent, useMemo } from "react";
 import {
   type FileTreeDirectoryItemData,
   type FileTreeFileItemData,
@@ -20,6 +20,7 @@ interface FileTreeProps {
   readonly expandedIds: readonly string[];
   readonly onExpandedIdsChange: (updater: Updater<string[]>) => void;
   readonly onOpenDocument: (documentId: string) => void;
+  readonly onStartDragDocument: (documentId: string | null) => void;
 }
 
 interface FileTreeNodeProps {
@@ -83,7 +84,13 @@ function FileTreeFileRow({
   );
 }
 
-function FileTreeNode({ item, activeDocumentId }: FileTreeNodeProps) {
+function FileTreeNode({
+  item,
+  activeDocumentId,
+  onStartDragDocument,
+}: FileTreeNodeProps & {
+  readonly onStartDragDocument: (documentId: string | null) => void;
+}) {
   const itemData = item.getItemData();
   const isFile = itemData.type === "file";
   const isActive = isFile && itemData.documentId === activeDocumentId;
@@ -103,6 +110,18 @@ function FileTreeNode({ item, activeDocumentId }: FileTreeNodeProps) {
       className={`file-tree__row${
         isFile ? " file-tree__row--file" : " file-tree__row--directory"
       }${item.isFocused() ? " is-focused" : ""}${isActive ? " is-active" : ""}`}
+      draggable={isFile}
+      onDragEnd={() => {
+        if (isFile) {
+          onStartDragDocument(null);
+        }
+      }}
+      onDragStart={(event: DragEvent<HTMLButtonElement>) => {
+        if (itemData.type === "file") {
+          event.dataTransfer.effectAllowed = "copyMove";
+          onStartDragDocument(itemData.documentId);
+        }
+      }}
       onClick={handleClick}
       type="button"
     >
@@ -140,6 +159,7 @@ export function FileTree({
   expandedIds,
   onExpandedIdsChange,
   onOpenDocument,
+  onStartDragDocument,
 }: FileTreeProps) {
   const adapter = useMemo(
     () => createFileTreeAdapter(workspaceTree),
@@ -190,6 +210,7 @@ export function FileTree({
           activeDocumentId={activeDocumentId}
           item={item}
           key={item.getId()}
+          onStartDragDocument={onStartDragDocument}
         />
       ))}
     </div>

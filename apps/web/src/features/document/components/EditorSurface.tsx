@@ -114,6 +114,20 @@ export const EditorSurface = forwardRef<
       attributes: {
         class: "editor-surface__prose",
       },
+      handleDOMEvents: {
+        dragenter: (_, event) => {
+          event.preventDefault();
+          return true;
+        },
+        dragover: (_, event) => {
+          event.preventDefault();
+          return true;
+        },
+        drop: (_, event) => {
+          event.preventDefault();
+          return true;
+        },
+      },
     },
     onSelectionUpdate: ({ editor: currentEditor }) => {
       onFormatStateChange(getEditorFormatState(currentEditor));

@@ -1,18 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
 import {
-  Bold,
-  Code2,
-  Heading1,
-  Heading2,
-  Italic,
-  List,
-  ListOrdered,
-  type LucideIcon,
-  Pilcrow,
-  Quote,
-  Strikethrough,
-} from "lucide-react";
-import {
   type CSSProperties,
   type PointerEvent as ReactPointerEvent,
   useEffect,
@@ -22,25 +9,18 @@ import {
 } from "react";
 import { CommentSidebar } from "../features/comments/components/CommentSidebar";
 import { workspaceClient } from "../features/comments/data/workspaceClient";
-import {
-  type SelectionState,
-  useCommentUiStore,
-} from "../features/comments/state/commentUiStore";
+import { useCommentUiStore } from "../features/comments/state/commentUiStore";
 import {
   type CommentThread,
   projectThreadEvent,
 } from "../features/comments/state/threadProjector";
-import {
-  type EditorCommandName,
-  type EditorFormatState,
-  type EditorSelectionState,
-  EditorSurface,
-  type EditorSurfaceHandle,
-} from "../features/document/components/EditorSurface";
+import { WorkspaceSurface } from "../features/workspace/components/WorkspaceSurface";
 import {
   clampLeftSidebarWidth,
   clampRightSidebarWidth,
 } from "../features/workspace/layout/sidebarResize";
+import { useWorkspaceSessionStore } from "../features/workspace/state/workspaceSessionStore";
+import type { WorkspaceDragItem } from "../features/workspace/state/workspaceSessionTypes";
 import { FileTree } from "../features/workspace/tree/FileTree";
 import {
   findFirstWorkspaceDocumentId,
@@ -53,134 +33,39 @@ interface ResizeState {
   readonly side: ResizeSide;
 }
 
-const defaultEditorFormatState: EditorFormatState = {
-  paragraph: true,
-  heading1: false,
-  heading2: false,
-  bulletList: false,
-  orderedList: false,
-  blockquote: false,
-  bold: false,
-  italic: false,
-  strike: false,
-  code: false,
-};
-
-const editorToolbarActions: readonly {
-  readonly label: string;
-  readonly icon: LucideIcon;
-  readonly commandName: EditorCommandName;
-  readonly isActive: (state: EditorFormatState) => boolean;
-}[] = [
-  {
-    label: "Paragraph",
-    icon: Pilcrow,
-    commandName: "setParagraph",
-    isActive: (state) => state.paragraph,
-  },
-  {
-    label: "Heading 1",
-    icon: Heading1,
-    commandName: "toggleHeading1",
-    isActive: (state) => state.heading1,
-  },
-  {
-    label: "Heading 2",
-    icon: Heading2,
-    commandName: "toggleHeading2",
-    isActive: (state) => state.heading2,
-  },
-  {
-    label: "Bold",
-    icon: Bold,
-    commandName: "toggleBold",
-    isActive: (state) => state.bold,
-  },
-  {
-    label: "Italic",
-    icon: Italic,
-    commandName: "toggleItalic",
-    isActive: (state) => state.italic,
-  },
-  {
-    label: "Strike",
-    icon: Strikethrough,
-    commandName: "toggleStrike",
-    isActive: (state) => state.strike,
-  },
-  {
-    label: "Bullet List",
-    icon: List,
-    commandName: "toggleBulletList",
-    isActive: (state) => state.bulletList,
-  },
-  {
-    label: "Ordered List",
-    icon: ListOrdered,
-    commandName: "toggleOrderedList",
-    isActive: (state) => state.orderedList,
-  },
-  {
-    label: "Quote",
-    icon: Quote,
-    commandName: "toggleBlockquote",
-    isActive: (state) => state.blockquote,
-  },
-  {
-    label: "Inline Code",
-    icon: Code2,
-    commandName: "toggleCode",
-    isActive: (state) => state.code,
-  },
-];
-
 export function AppShell() {
-  const editorRef = useRef<EditorSurfaceHandle | null>(null);
   const resizeStateRef = useRef<ResizeState | null>(null);
   const activeThreadIdRef = useRef<string | null>(null);
-  const [markdown, setMarkdown] = useState("");
-  const [activeDocumentId, setActiveDocumentId] = useState<string | null>(null);
+  const [dragItem, setDragItem] = useState<WorkspaceDragItem | null>(null);
   const [expandedTreeItemIds, setExpandedTreeItemIds] = useState<string[]>([]);
-  const [editorFormatState, setEditorFormatState] = useState<EditorFormatState>(
-    defaultEditorFormatState,
-  );
   const [leftRailWidth, setLeftRailWidth] = useState(272);
   const [rightRailWidth, setRightRailWidth] = useState(384);
   const [threads, dispatch] = useReducer(
     projectThreadEvent,
     [] as readonly CommentThread[],
   );
-  const { activeThreadId, setActiveThreadId, setSelection } =
-    useCommentUiStore();
-
+  const { activeThreadId, setActiveThreadId } = useCommentUiStore();
+  const focusedDocumentId = useWorkspaceSessionStore((state) =>
+    state.focusedTabId
+      ? (state.tabsById[state.focusedTabId]?.documentId ?? null)
+      : null,
+  );
   useEffect(() => {
     activeThreadIdRef.current = activeThreadId;
   }, [activeThreadId]);
+
+  useEffect(() => {
+    document.body.classList.toggle("is-workspace-dragging", dragItem !== null);
+
+    return () => {
+      document.body.classList.remove("is-workspace-dragging");
+    };
+  }, [dragItem]);
 
   const bootstrapQuery = useQuery({
     queryKey: ["workspace-bootstrap"],
     queryFn: () => workspaceClient.getWorkspaceBootstrap(),
   });
-
-  const documentQuery = useQuery({
-    enabled: activeDocumentId !== null,
-    queryKey: ["document", activeDocumentId],
-    queryFn: async () => {
-      if (!activeDocumentId) {
-        throw new Error("No active document selected.");
-      }
-
-      return workspaceClient.openDocument(activeDocumentId);
-    },
-  });
-
-  useEffect(() => {
-    if (!bootstrapQuery.data || activeDocumentId) {
-      return;
-    }
-
-    setActiveDocumentId(findFirstWorkspaceDocumentId(bootstrapQuery.data.tree));
-  }, [activeDocumentId, bootstrapQuery.data]);
 
   useEffect(() => {
     if (!bootstrapQuery.data) {
@@ -191,10 +76,10 @@ export function AppShell() {
       ...reconcileExpandedDirectoryIds({
         tree: bootstrapQuery.data.tree,
         expandedIds: currentExpandedIds,
-        activeDocumentId,
+        activeDocumentId: focusedDocumentId,
       }),
     ]);
-  }, [activeDocumentId, bootstrapQuery.data]);
+  }, [bootstrapQuery.data, focusedDocumentId]);
 
   useEffect(() => {
     if (!bootstrapQuery.data) {
@@ -209,14 +94,6 @@ export function AppShell() {
       setActiveThreadId(bootstrapQuery.data.threads[0]?.threadId ?? null);
     }
   }, [bootstrapQuery.data, setActiveThreadId]);
-
-  useEffect(() => {
-    if (!documentQuery.data) {
-      return;
-    }
-
-    setMarkdown(documentQuery.data.markdown);
-  }, [documentQuery.data]);
 
   useEffect(() => {
     return workspaceClient.subscribe((event) => {
@@ -276,20 +153,6 @@ export function AppShell() {
     };
   }, [leftRailWidth, rightRailWidth]);
 
-  const activeDocumentTitle = documentQuery.data?.title ?? "Loading document";
-
-  const handleSelectionChange = (
-    nextSelection: EditorSelectionState | null,
-  ) => {
-    const mappedSelection: SelectionState | null = nextSelection
-      ? {
-          text: nextSelection.text,
-          threadId: null,
-        }
-      : null;
-    setSelection(mappedSelection);
-  };
-
   const handleSelectThread = (threadId: string) => {
     setActiveThreadId(threadId);
   };
@@ -308,16 +171,13 @@ export function AppShell() {
     event.currentTarget.setPointerCapture(event.pointerId);
   };
 
-  if (
-    bootstrapQuery.isLoading ||
-    (activeDocumentId !== null && documentQuery.isLoading)
-  ) {
+  if (bootstrapQuery.isLoading) {
     return (
       <div className="app-shell app-shell--loading">Loading Magick...</div>
     );
   }
 
-  if (bootstrapQuery.isError || !bootstrapQuery.data || documentQuery.isError) {
+  if (bootstrapQuery.isError || !bootstrapQuery.data) {
     return (
       <div className="app-shell app-shell--loading">
         Failed to load the document workspace.
@@ -351,10 +211,17 @@ export function AppShell() {
 
         <section className="sidebar-section rail-section">
           <FileTree
-            activeDocumentId={activeDocumentId}
+            activeDocumentId={focusedDocumentId}
             expandedIds={expandedTreeItemIds}
             onExpandedIdsChange={setExpandedTreeItemIds}
-            onOpenDocument={setActiveDocumentId}
+            onOpenDocument={(documentId) => {
+              useWorkspaceSessionStore
+                .getState()
+                .openDocument(documentId, { paneId: null, duplicate: false });
+            }}
+            onStartDragDocument={(documentId) => {
+              setDragItem(documentId ? { type: "document", documentId } : null);
+            }}
             tree={bootstrapQuery.data.tree}
           />
         </section>
@@ -370,57 +237,13 @@ export function AppShell() {
       />
 
       <section className="workspace">
-        <section className="workspace__canvas">
-          <div className="workspace__frame">
-            <div
-              className="workspace__toolbar"
-              role="toolbar"
-              aria-label="Text editing options"
-            >
-              {editorToolbarActions.map((action) => {
-                const Icon = action.icon;
-                return (
-                  <button
-                    aria-label={action.label}
-                    className={`workspace__toolbar-button${
-                      action.isActive(editorFormatState) ? " is-active" : ""
-                    }`}
-                    key={action.commandName}
-                    onClick={() =>
-                      editorRef.current?.runCommand(action.commandName)
-                    }
-                    type="button"
-                  >
-                    <Icon size={15} />
-                  </button>
-                );
-              })}
-            </div>
-            <div className="workspace__document-scroll">
-              <div
-                className="workspace__document-title"
-                title={activeDocumentTitle}
-              >
-                {activeDocumentTitle}
-              </div>
-              <EditorSurface
-                ref={editorRef}
-                markdown={markdown}
-                onFormatStateChange={setEditorFormatState}
-                onMarkdownChange={(nextMarkdown) => {
-                  setMarkdown(nextMarkdown);
-                  if (activeDocumentId) {
-                    void workspaceClient.saveDocument(
-                      activeDocumentId,
-                      nextMarkdown,
-                    );
-                  }
-                }}
-                onSelectionChange={handleSelectionChange}
-              />
-            </div>
-          </div>
-        </section>
+        <WorkspaceSurface
+          dragItem={dragItem}
+          initialDocumentId={findFirstWorkspaceDocumentId(
+            bootstrapQuery.data.tree,
+          )}
+          onDragItemChange={setDragItem}
+        />
       </section>
 
       <div
