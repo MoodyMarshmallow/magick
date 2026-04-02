@@ -52,6 +52,7 @@ export interface WorkspaceSessionState {
 export interface WorkspaceDocumentOpenTarget {
   readonly paneId: WorkspacePaneId | null;
   readonly duplicate: boolean;
+  readonly targetIndex?: number;
 }
 
 export interface WorkspaceTreeDragItem {

@@ -57,37 +57,60 @@ const toLocalThreadEvent = (
 
 const createBrowserWorkspaceTree = (
   documents: readonly DocumentBootstrap[],
-): readonly LocalWorkspaceTreeNode[] => [
-  {
-    id: "directory:notes",
-    type: "directory",
-    name: "notes",
-    path: "notes",
-    children: [
-      {
-        id: "directory:notes/studio",
-        type: "directory",
-        name: "studio",
-        path: "notes/studio",
-        children: [
-          ...documents.map((document, index) => ({
-            id: `file:${document.documentId}`,
-            type: "file" as const,
-            name:
-              index === 0
-                ? "evergreen-systems-memo.md"
-                : "systems-garden-note.md",
-            path:
-              index === 0
-                ? "notes/studio/evergreen-systems-memo.md"
-                : "notes/studio/systems-garden-note.md",
-            documentId: document.documentId,
-          })),
-        ],
-      },
-    ],
-  },
-];
+): readonly LocalWorkspaceTreeNode[] => {
+  const toFileName = (title: string): string =>
+    `${title
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")}.md`;
+
+  const createFiles = (
+    pathPrefix: string,
+    slice: readonly DocumentBootstrap[],
+  ): readonly LocalWorkspaceTreeNode[] =>
+    slice.map((document) => {
+      const name = toFileName(document.title);
+      return {
+        id: `file:${document.documentId}`,
+        type: "file" as const,
+        name,
+        path: `${pathPrefix}/${name}`,
+        documentId: document.documentId,
+      };
+    });
+
+  return [
+    {
+      id: "directory:notes",
+      type: "directory",
+      name: "notes",
+      path: "notes",
+      children: [
+        {
+          id: "directory:notes/studio",
+          type: "directory",
+          name: "studio",
+          path: "notes/studio",
+          children: createFiles("notes/studio", documents.slice(0, 4)),
+        },
+        {
+          id: "directory:notes/research",
+          type: "directory",
+          name: "research",
+          path: "notes/research",
+          children: createFiles("notes/research", documents.slice(4, 8)),
+        },
+        {
+          id: "directory:notes/archive",
+          type: "directory",
+          name: "archive",
+          path: "notes/archive",
+          children: createFiles("notes/archive", documents.slice(8)),
+        },
+      ],
+    },
+  ];
+};
 
 const createBrowserWorkspaceClient = (): WorkspaceClient => ({
   async getWorkspaceBootstrap() {

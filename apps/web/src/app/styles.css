@@ -29,9 +29,9 @@
   --anchor: rgba(219, 188, 127, 0.22);
   --scrollbar-size: 10px;
   --scrollbar-border: 2px;
-  --scrollbar-thumb: var(--bg-muted);
-  --scrollbar-thumb-hover: color-mix(in srgb, var(--aqua) 24%, var(--bg-muted));
-  --scrollbar-thumb-active: color-mix(in srgb, var(--aqua) 38%, var(--bg-muted));
+  --scrollbar-thumb: transparent;
+  --scrollbar-thumb-hover: color-mix(in srgb, var(--aqua) 26%, transparent);
+  --scrollbar-thumb-active: color-mix(in srgb, var(--aqua) 38%, transparent);
   --scrollbar-track: transparent;
 }
 
@@ -58,6 +58,22 @@ body {
   * {
     scrollbar-width: thin;
     scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+  }
+
+  .workspace-pane:hover .workspace__document-scroll,
+  .workspace-pane:hover .workspace-pane__tabs,
+  .workspace-pane:focus-within .workspace__document-scroll,
+  .workspace-pane:focus-within .workspace-pane__tabs {
+    scrollbar-color: var(--scrollbar-thumb-hover) var(--scrollbar-track);
+  }
+
+  .rail-section:hover,
+  .rail-section:focus-within,
+  .thread-ledger:hover .thread-ledger__items,
+  .thread-ledger:focus-within .thread-ledger__items,
+  .comment-sidebar__active-thread:hover .thread-record__messages,
+  .comment-sidebar__active-thread:focus-within .thread-record__messages {
+    scrollbar-color: var(--scrollbar-thumb-hover) var(--scrollbar-track);
   }
 }
 
@@ -97,6 +113,47 @@ body {
   }
 
   *::-webkit-scrollbar-thumb:active {
+    background: var(--scrollbar-thumb-active);
+  }
+
+  .workspace-pane:hover .workspace__document-scroll::-webkit-scrollbar-thumb,
+  .workspace-pane:hover .workspace-pane__tabs::-webkit-scrollbar-thumb,
+  .workspace-pane:focus-within
+    .workspace__document-scroll::-webkit-scrollbar-thumb,
+  .workspace-pane:focus-within .workspace-pane__tabs::-webkit-scrollbar-thumb {
+    background: var(--scrollbar-thumb-hover);
+  }
+
+  .rail-section:hover::-webkit-scrollbar-thumb,
+  .rail-section:focus-within::-webkit-scrollbar-thumb,
+  .thread-ledger:hover .thread-ledger__items::-webkit-scrollbar-thumb,
+  .thread-ledger:focus-within .thread-ledger__items::-webkit-scrollbar-thumb,
+  .comment-sidebar__active-thread:hover
+    .thread-record__messages::-webkit-scrollbar-thumb,
+  .comment-sidebar__active-thread:focus-within
+    .thread-record__messages::-webkit-scrollbar-thumb {
+    background: var(--scrollbar-thumb-hover);
+  }
+
+  .workspace-pane:hover
+    .workspace__document-scroll::-webkit-scrollbar-thumb:active,
+  .workspace-pane:hover .workspace-pane__tabs::-webkit-scrollbar-thumb:active,
+  .workspace-pane:focus-within
+    .workspace__document-scroll::-webkit-scrollbar-thumb:active,
+  .workspace-pane:focus-within
+    .workspace-pane__tabs::-webkit-scrollbar-thumb:active {
+    background: var(--scrollbar-thumb-active);
+  }
+
+  .rail-section:hover::-webkit-scrollbar-thumb:active,
+  .rail-section:focus-within::-webkit-scrollbar-thumb:active,
+  .thread-ledger:hover .thread-ledger__items::-webkit-scrollbar-thumb:active,
+  .thread-ledger:focus-within
+    .thread-ledger__items::-webkit-scrollbar-thumb:active,
+  .comment-sidebar__active-thread:hover
+    .thread-record__messages::-webkit-scrollbar-thumb:active,
+  .comment-sidebar__active-thread:focus-within
+    .thread-record__messages::-webkit-scrollbar-thumb:active {
     background: var(--scrollbar-thumb-active);
   }
 
@@ -164,6 +221,7 @@ button:disabled {
   height: 100vh;
   display: grid;
   grid-template-columns: 17rem minmax(0, 1fr) 24rem;
+  grid-template-rows: minmax(0, 1fr);
   gap: 0;
 }
 
@@ -198,7 +256,7 @@ button:disabled {
   gap: 1rem;
   background: var(--bg-ink);
   font-family: "Departure Mono", monospace;
-  overflow: auto;
+  overflow: hidden;
 }
 
 .comment-sidebar {
@@ -287,6 +345,8 @@ button:disabled {
 
 .rail-section {
   border-top: 0;
+  min-height: 0;
+  overflow: auto;
 }
 
 .auth-line__header,
@@ -560,6 +620,8 @@ button:disabled {
 
 .workspace__canvas {
   min-height: 0;
+  min-width: 0;
+  height: 100%;
   padding: 0;
   overflow: hidden;
   display: grid;
@@ -568,6 +630,8 @@ button:disabled {
 
 .workspace__frame {
   --workspace-pane-padding-inline: clamp(1.25rem, 2vw, 2rem);
+  min-width: 0;
+  min-height: 0;
   height: 100%;
   display: grid;
   grid-template-rows: minmax(0, 1fr);
@@ -628,7 +692,10 @@ button:disabled {
 
 .workspace__document-scroll {
   min-height: 0;
-  overflow: auto;
+  height: 100%;
+  overflow-x: auto;
+  overflow-y: scroll;
+  scrollbar-gutter: stable;
   padding: 0;
 }
 
@@ -694,8 +761,24 @@ button:disabled {
   gap: 0;
   min-width: 0;
   overflow: auto hidden;
+  scrollbar-width: none;
   padding: 0;
   background: var(--bg-ink);
+}
+
+@supports selector(::-webkit-scrollbar) {
+  .workspace-pane__tabs::-webkit-scrollbar,
+  .workspace-pane__tabs::-webkit-scrollbar-track,
+  .workspace-pane__tabs::-webkit-scrollbar-track-piece,
+  .workspace-pane__tabs::-webkit-scrollbar-thumb,
+  .workspace-pane__tabs::-webkit-scrollbar-corner,
+  .workspace-pane__tabs::-webkit-scrollbar-button {
+    display: none;
+    width: 0;
+    height: 0;
+    background: transparent;
+    border: 0;
+  }
 }
 
 .workspace-tab {
@@ -768,6 +851,8 @@ button:disabled {
   min-width: 0;
   min-height: 0;
   position: relative;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr);
   overflow: hidden;
 }
 

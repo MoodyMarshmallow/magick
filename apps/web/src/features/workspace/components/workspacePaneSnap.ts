@@ -11,23 +11,106 @@ export interface PaneSnapCandidate {
   readonly insertionIndex?: number;
 }
 
-export interface TabStripSnapResult {
+export interface WorkspacePaneSnapResult {
   readonly type: "split" | "insert";
   readonly position: WorkspaceDropPosition;
   readonly markerLeft?: number;
   readonly insertionIndex?: number;
 }
 
-export const resolveBodySplitPosition = (args: {
+const compareCandidates = (
+  left: PaneSnapCandidate,
+  right: PaneSnapCandidate,
+): number => left.distance - right.distance;
+
+const resolveInsertionCandidate = (args: {
+  pointerX: number;
+  stripScrollLeft: number;
+  tabRects: readonly { left: number; right: number }[];
+}): PaneSnapCandidate => {
+  if (args.tabRects.length === 0) {
+    return {
+      type: "insert",
+      position: "center",
+      distance: args.pointerX,
+      markerLeft: args.stripScrollLeft,
+      insertionIndex: 0,
+    };
+  }
+
+  const candidates: PaneSnapCandidate[] = [];
+  args.tabRects.forEach((rect, index) => {
+    candidates.push({
+      type: "insert",
+      position: "center",
+      distance: Math.abs(args.pointerX - rect.left),
+      markerLeft: rect.left + args.stripScrollLeft,
+      insertionIndex: index,
+    });
+
+    if (index === args.tabRects.length - 1) {
+      candidates.push({
+        type: "insert",
+        position: "center",
+        distance: Math.abs(args.pointerX - rect.right),
+        markerLeft: rect.right + args.stripScrollLeft,
+        insertionIndex: args.tabRects.length,
+      });
+    }
+  });
+
+  candidates.sort(compareCandidates);
+  return (
+    candidates[0] ?? {
+      type: "insert",
+      position: "center",
+      distance: 0,
+      markerLeft: args.stripScrollLeft,
+      insertionIndex: 0,
+    }
+  );
+};
+
+const toSnapResult = (
+  candidate: PaneSnapCandidate,
+  stripScrollLeft: number,
+): WorkspacePaneSnapResult => {
+  if (candidate.type === "split") {
+    return { type: "split", position: candidate.position };
+  }
+
+  return {
+    type: "insert",
+    position: "center",
+    markerLeft: candidate.markerLeft ?? stripScrollLeft,
+    insertionIndex: candidate.insertionIndex ?? 0,
+  };
+};
+
+export const resolveBodyPaneSnap = (args: {
   rect: { width: number; height: number };
   pointerX: number;
   pointerY: number;
-}): WorkspaceDropPosition => {
+  stripScrollLeft: number;
+  tabRects: readonly { left: number; right: number }[];
+}): WorkspacePaneSnapResult => {
   const edgeBandX = args.rect.width * paneEdgeSnapRatio;
   const edgeBandY = args.rect.height * paneEdgeSnapRatio;
-  const candidates: PaneSnapCandidate[] = [];
+  const inLeftEdge = args.pointerX <= edgeBandX;
+  const inRightEdge = args.pointerX >= args.rect.width - edgeBandX;
+  const inBottomEdge = args.pointerY >= args.rect.height - edgeBandY;
+  const insertionCandidate = resolveInsertionCandidate({
+    pointerX: args.pointerX,
+    stripScrollLeft: args.stripScrollLeft,
+    tabRects: args.tabRects,
+  });
 
-  if (args.pointerX <= edgeBandX) {
+  if (!inLeftEdge && !inRightEdge && !inBottomEdge) {
+    return toSnapResult(insertionCandidate, args.stripScrollLeft);
+  }
+
+  const candidates: PaneSnapCandidate[] = [];
+  if (inLeftEdge) {
     candidates.push({
       type: "split",
       position: "left",
@@ -35,7 +118,7 @@ export const resolveBodySplitPosition = (args: {
     });
   }
 
-  if (args.pointerX >= args.rect.width - edgeBandX) {
+  if (inRightEdge) {
     candidates.push({
       type: "split",
       position: "right",
@@ -43,7 +126,7 @@ export const resolveBodySplitPosition = (args: {
     });
   }
 
-  if (args.pointerY >= args.rect.height - edgeBandY) {
+  if (inBottomEdge) {
     candidates.push({
       type: "split",
       position: "bottom",
@@ -51,12 +134,18 @@ export const resolveBodySplitPosition = (args: {
     });
   }
 
-  if (candidates.length === 0) {
-    return "center";
+  if (inLeftEdge || inRightEdge || !inBottomEdge) {
+    candidates.push({
+      ...insertionCandidate,
+      distance: args.pointerY,
+    });
   }
 
-  candidates.sort((left, right) => left.distance - right.distance);
-  return candidates[0]?.position ?? "center";
+  candidates.sort(compareCandidates);
+  return toSnapResult(
+    candidates[0] ?? insertionCandidate,
+    args.stripScrollLeft,
+  );
 };
 
 export const resolveTabStripSnap = (args: {
@@ -65,7 +154,7 @@ export const resolveTabStripSnap = (args: {
   pointerY: number;
   stripScrollLeft: number;
   tabRects: readonly { left: number; right: number }[];
-}): TabStripSnapResult => {
+}): WorkspacePaneSnapResult => {
   if (args.pointerY <= args.rect.height * tabStripTopBandRatio) {
     return { type: "split", position: "top" };
   }
@@ -98,55 +187,22 @@ export const resolveTabStripSnap = (args: {
     });
   }
 
-  if (args.tabRects.length === 0) {
-    candidates.push({
-      type: "insert",
-      position: "center",
-      distance: Number.POSITIVE_INFINITY,
-      markerLeft: args.stripScrollLeft,
-      insertionIndex: 0,
-    });
-  } else {
-    args.tabRects.forEach((rect, index) => {
-      const markerLeft = rect.left + args.stripScrollLeft;
-      candidates.push({
-        type: "insert",
-        position: "center",
-        distance: Math.abs(args.pointerX - rect.left),
-        markerLeft,
-        insertionIndex: index,
-      });
+  candidates.push(
+    resolveInsertionCandidate({
+      pointerX: args.pointerX,
+      stripScrollLeft: args.stripScrollLeft,
+      tabRects: args.tabRects,
+    }),
+  );
 
-      if (index === args.tabRects.length - 1) {
-        candidates.push({
-          type: "insert",
-          position: "center",
-          distance: Math.abs(args.pointerX - rect.right),
-          markerLeft: rect.right + args.stripScrollLeft,
-          insertionIndex: args.tabRects.length,
-        });
-      }
-    });
-  }
-
-  candidates.sort((left, right) => left.distance - right.distance);
-  const winner = candidates[0];
-  if (!winner) {
-    return {
-      type: "insert",
-      position: "center",
-      markerLeft: args.stripScrollLeft,
-    };
-  }
-
-  if (winner.type === "split") {
-    return { type: "split", position: winner.position };
-  }
-
-  return {
-    type: "insert",
-    position: "center",
-    markerLeft: winner.markerLeft ?? args.stripScrollLeft,
-    insertionIndex: winner.insertionIndex ?? 0,
-  };
+  candidates.sort(compareCandidates);
+  return toSnapResult(
+    candidates[0] ??
+      resolveInsertionCandidate({
+        pointerX: args.pointerX,
+        stripScrollLeft: args.stripScrollLeft,
+        tabRects: args.tabRects,
+      }),
+    args.stripScrollLeft,
+  );
 };

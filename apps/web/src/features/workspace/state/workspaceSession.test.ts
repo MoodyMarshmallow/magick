@@ -153,6 +153,36 @@ describe("workspaceSession", () => {
     });
   });
 
+  it("opens a dragged document at the requested insertion index", () => {
+    const ids = createIds();
+    const initial = createWorkspaceSessionWithDocument({
+      documentId: "doc_1",
+      ids,
+    });
+    const withSecondDoc = openDocumentInWorkspace({
+      state: initial,
+      documentId: "doc_2",
+      target: { paneId: initial.focusedPaneId, duplicate: false },
+      ids,
+    });
+
+    const opened = openDocumentInWorkspace({
+      state: withSecondDoc,
+      documentId: "doc_3",
+      target: {
+        paneId: initial.focusedPaneId,
+        duplicate: false,
+        targetIndex: 1,
+      },
+      ids,
+    });
+
+    expect(opened.rootPane).toMatchObject({
+      type: "leaf",
+      tabIds: ["tab_1", "tab_3", "tab_2"],
+    });
+  });
+
   it("moves a dragged tab into a new split without duplicating it", () => {
     const ids = createIds();
     const initial = createWorkspaceSessionWithDocument({

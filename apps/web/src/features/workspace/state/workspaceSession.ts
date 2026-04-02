@@ -306,6 +306,11 @@ export const openDocumentInWorkspace = (args: {
     return state;
   }
 
+  const targetIndex =
+    pane && target.targetIndex !== undefined
+      ? Math.min(Math.max(target.targetIndex, 0), pane.tabIds.length)
+      : undefined;
+
   const nextState = {
     ...state,
     tabsById: {
@@ -319,7 +324,14 @@ export const openDocumentInWorkspace = (args: {
     ),
     rootPane: mapLeafPane(state.rootPane, resolvedPaneId, (currentPane) => ({
       ...currentPane,
-      tabIds: [...currentPane.tabIds, tabId],
+      tabIds:
+        targetIndex === undefined
+          ? [...currentPane.tabIds, tabId]
+          : [
+              ...currentPane.tabIds.slice(0, targetIndex),
+              tabId,
+              ...currentPane.tabIds.slice(targetIndex),
+            ],
       activeTabId: tabId,
     })),
   };

@@ -84,9 +84,20 @@ describe("demoMagickClient", () => {
     const { client } = createHarness();
 
     const note = await client.getDocumentBootstrap("doc_systems_note");
+    const threads = await client.getThreads();
 
     expect(note.title).toBe("Systems Garden Note");
     expect(note.markdown).toContain("shared draft state");
+    expect(threads.length).toBeGreaterThan(10);
+    expect(
+      threads.find((thread) => thread.threadId === "thread_seed_long")?.messages
+        .length,
+    ).toBeGreaterThan(20);
+    expect(
+      await client.getDocumentBootstrap("doc_scroll_test_beta"),
+    ).toMatchObject({
+      title: "Scroll Test Beta",
+    });
   });
 
   it("creates a new chat and emits streaming lifecycle events", async () => {

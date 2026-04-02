@@ -4,6 +4,7 @@ import {
   type CSSProperties,
   type DragEvent,
   type PointerEvent,
+  type WheelEvent,
   useEffect,
   useRef,
   useState,
@@ -29,10 +30,7 @@ import type {
   WorkspaceSplitPane,
   WorkspaceTabId,
 } from "../state/workspaceSessionTypes";
-import {
-  resolveBodySplitPosition,
-  resolveTabStripSnap,
-} from "./workspacePaneSnap";
+import { resolveBodyPaneSnap, resolveTabStripSnap } from "./workspacePaneSnap";
 import { isNoopTabInsertion } from "./workspaceTabInsertion";
 import {
   defaultEditorFormatState,
@@ -245,6 +243,7 @@ function WorkspaceLeafPaneView({
     : null;
   const [dropPosition, setDropPosition] =
     useState<WorkspaceDropPosition | null>(null);
+  const tabStripRef = useRef<HTMLDivElement | null>(null);
 
   const getTabStripMetrics = (element: HTMLDivElement) => {
     const rect = element.getBoundingClientRect();
@@ -277,9 +276,62 @@ function WorkspaceLeafPaneView({
     return position;
   };
 
+  const resolveTabInsertionOverlay = (args: {
+    dragItem: WorkspaceDragItem;
+    insertionIndex: number | undefined;
+    markerLeft: number | undefined;
+    tabStripElement: HTMLDivElement;
+    tabStripRect: DOMRect;
+  }): WorkspaceOverlayRect | null => {
+    if (args.insertionIndex === undefined || args.markerLeft === undefined) {
+      return null;
+    }
+
+    if (
+      args.dragItem.type === "tab" &&
+      isNoopTabInsertion({
+        tabIds: pane.tabIds,
+        draggedTabId: args.dragItem.tabId,
+        insertionIndex: args.insertionIndex,
+      })
+    ) {
+      const currentTabElement = args.tabStripElement.querySelector<HTMLElement>(
+        `.workspace-tab[data-tab-id="${args.dragItem.tabId}"]`,
+      );
+      const currentTabRect = currentTabElement?.getBoundingClientRect();
+      if (!currentTabRect) {
+        return null;
+      }
+
+      return {
+        left:
+          args.insertionIndex === pane.tabIds.indexOf(args.dragItem.tabId)
+            ? currentTabRect.left - 4
+            : currentTabRect.right - 4,
+        top:
+          args.tabStripRect.top +
+          (args.tabStripRect.height - args.tabStripRect.height * 1.1) / 2,
+        width: 8,
+        height: args.tabStripRect.height * 1.1,
+        variant: "tab-insert",
+      };
+    }
+
+    return {
+      left: args.tabStripRect.left + args.markerLeft - 4,
+      top:
+        args.tabStripRect.top +
+        (args.tabStripRect.height - args.tabStripRect.height * 1.1) / 2,
+      width: 8,
+      height: args.tabStripRect.height * 1.1,
+      variant: "tab-insert",
+    };
+  };
+
   const commitPaneDrop = (
     item: WorkspaceDragItem,
     position: WorkspaceDropPosition,
+    insertionIndex?: number,
   ) => {
     const allowedPosition = getAllowedDropPosition(item, position);
     if (!allowedPosition) {
@@ -291,7 +343,13 @@ function WorkspaceLeafPaneView({
     if (item.type === "document") {
       onTabInsertionOverlayChange(null);
       if (allowedPosition === "center") {
-        openDocument(item.documentId, { paneId: pane.id, duplicate: true });
+        openDocument(item.documentId, {
+          paneId: pane.id,
+          duplicate: false,
+          ...(insertionIndex === undefined
+            ? {}
+            : { targetIndex: insertionIndex }),
+        });
       } else {
         splitWithDocument(item.documentId, pane.id, allowedPosition);
       }
@@ -308,12 +366,32 @@ function WorkspaceLeafPaneView({
     onDragItemChange(null);
   };
 
+  const handleTabStripWheel = (event: WheelEvent<HTMLDivElement>) => {
+    const element = event.currentTarget;
+    if (element.scrollWidth <= element.clientWidth) {
+      return;
+    }
+
+    const horizontalDelta =
+      Math.abs(event.deltaX) > Math.abs(event.deltaY)
+        ? event.deltaX
+        : event.deltaY;
+    if (horizontalDelta === 0) {
+      return;
+    }
+
+    event.preventDefault();
+    element.scrollLeft += horizontalDelta;
+  };
+
   return (
     <section
       className={`workspace-pane${dropPosition ? ` is-drop-${dropPosition}` : ""}`}
     >
       <div
         className="workspace-pane__tabs"
+        ref={tabStripRef}
+        onWheel={handleTabStripWheel}
         onDragLeave={(event) => {
           if (isLeavingForChild(event)) {
             return;
@@ -351,64 +429,20 @@ function WorkspaceLeafPaneView({
             return;
           }
 
-          if (
-            snap.type !== "insert" ||
-            allowedPosition !== "center" ||
-            dragItem.type !== "tab"
-          ) {
+          if (snap.type !== "insert" || allowedPosition !== "center") {
             onTabInsertionOverlayChange(null);
             return;
           }
 
-          if (snap.markerLeft === undefined) {
-            onTabInsertionOverlayChange(null);
-            return;
-          }
-
-          const insertionIndex = snap.insertionIndex;
-
-          if (insertionIndex === undefined) {
-            onTabInsertionOverlayChange(null);
-            return;
-          }
-
-          if (
-            isNoopTabInsertion({
-              tabIds: pane.tabIds,
-              draggedTabId: dragItem.tabId,
-              insertionIndex,
-            })
-          ) {
-            const currentTabElement =
-              event.currentTarget.querySelector<HTMLElement>(
-                `.workspace-tab[data-tab-id="${dragItem.tabId}"]`,
-              );
-            const currentTabRect = currentTabElement?.getBoundingClientRect();
-            if (!currentTabRect) {
-              onTabInsertionOverlayChange(null);
-              return;
-            }
-
-            onTabInsertionOverlayChange({
-              left:
-                insertionIndex === pane.tabIds.indexOf(dragItem.tabId)
-                  ? currentTabRect.left - 4
-                  : currentTabRect.right - 4,
-              top: rect.top + (rect.height - rect.height * 1.1) / 2,
-              width: 8,
-              height: rect.height * 1.1,
-              variant: "tab-insert",
-            });
-            return;
-          }
-
-          onTabInsertionOverlayChange({
-            left: rect.left + snap.markerLeft - 4,
-            top: rect.top + (rect.height - rect.height * 1.1) / 2,
-            width: 8,
-            height: rect.height * 1.1,
-            variant: "tab-insert",
-          });
+          onTabInsertionOverlayChange(
+            resolveTabInsertionOverlay({
+              dragItem,
+              insertionIndex: snap.insertionIndex,
+              markerLeft: snap.markerLeft,
+              tabStripElement: event.currentTarget,
+              tabStripRect: rect,
+            }),
+          );
         }}
         onDrop={(event) => {
           event.preventDefault();
@@ -467,7 +501,7 @@ function WorkspaceLeafPaneView({
             return;
           }
 
-          commitPaneDrop(dragItem, allowedPosition);
+          commitPaneDrop(dragItem, allowedPosition, snap.insertionIndex);
           setDropPosition(null);
           onTabInsertionOverlayChange(null);
         }}
@@ -543,30 +577,102 @@ function WorkspaceLeafPaneView({
           if (!dragItem) {
             return;
           }
-          onTabInsertionOverlayChange(null);
+          const tabStripElement = tabStripRef.current;
+          const tabStripMetrics = tabStripElement
+            ? getTabStripMetrics(tabStripElement)
+            : null;
+          if (!tabStripElement || !tabStripMetrics) {
+            onTabInsertionOverlayChange(null);
+            return;
+          }
+
           const rect = event.currentTarget.getBoundingClientRect();
-          const position = resolveBodySplitPosition({
+          const snap = resolveBodyPaneSnap({
             rect: { width: rect.width, height: rect.height },
-            pointerX: event.clientX - rect.left,
+            pointerX: event.clientX - tabStripMetrics.rect.left,
             pointerY: event.clientY - rect.top,
+            stripScrollLeft: tabStripElement.scrollLeft,
+            tabRects: tabStripMetrics.tabRects,
           });
-          setDropPosition(getAllowedDropPosition(dragItem, position));
+          const allowedPosition = getAllowedDropPosition(
+            dragItem,
+            snap.position,
+          );
+          setDropPosition(allowedPosition);
+
+          if (snap.type !== "insert" || allowedPosition !== "center") {
+            onTabInsertionOverlayChange(null);
+            return;
+          }
+
+          onTabInsertionOverlayChange(
+            resolveTabInsertionOverlay({
+              dragItem,
+              insertionIndex: snap.insertionIndex,
+              markerLeft: snap.markerLeft,
+              tabStripElement,
+              tabStripRect: tabStripMetrics.rect,
+            }),
+          );
         }}
         onDrop={(event) => {
           event.preventDefault();
           if (!dragItem) {
             return;
           }
-          onTabInsertionOverlayChange(null);
+          const tabStripElement = tabStripRef.current;
+          const tabStripMetrics = tabStripElement
+            ? getTabStripMetrics(tabStripElement)
+            : null;
+          if (!tabStripElement || !tabStripMetrics) {
+            onTabInsertionOverlayChange(null);
+            onDragItemChange(null);
+            setDropPosition(null);
+            return;
+          }
+
           const rect = event.currentTarget.getBoundingClientRect();
-          commitPaneDrop(
+          const snap = resolveBodyPaneSnap({
+            rect: { width: rect.width, height: rect.height },
+            pointerX: event.clientX - tabStripMetrics.rect.left,
+            pointerY: event.clientY - rect.top,
+            stripScrollLeft: tabStripElement.scrollLeft,
+            tabRects: tabStripMetrics.tabRects,
+          });
+          const allowedPosition = getAllowedDropPosition(
             dragItem,
-            resolveBodySplitPosition({
-              rect: { width: rect.width, height: rect.height },
-              pointerX: event.clientX - rect.left,
-              pointerY: event.clientY - rect.top,
-            }),
+            snap.position,
           );
+
+          onTabInsertionOverlayChange(null);
+          if (!allowedPosition) {
+            onDragItemChange(null);
+            setDropPosition(null);
+            return;
+          }
+
+          if (
+            snap.type === "insert" &&
+            allowedPosition === "center" &&
+            dragItem.type === "tab"
+          ) {
+            const insertionIndex = snap.insertionIndex;
+            if (
+              insertionIndex !== undefined &&
+              !isNoopTabInsertion({
+                tabIds: pane.tabIds,
+                draggedTabId: dragItem.tabId,
+                insertionIndex,
+              })
+            ) {
+              moveTab(dragItem.tabId, pane.id, insertionIndex);
+            }
+            onDragItemChange(null);
+            setDropPosition(null);
+            return;
+          }
+
+          commitPaneDrop(dragItem, allowedPosition, snap.insertionIndex);
           setDropPosition(null);
         }}
         onMouseDown={() => {
