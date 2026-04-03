@@ -8,6 +8,7 @@ import { useTree } from "@headless-tree/react";
 import type { LocalWorkspaceTreeNode } from "@magick/shared/localWorkspace";
 import { ChevronRight, FileText, Folder, FolderOpen } from "lucide-react";
 import { type DragEvent, type MouseEvent, useMemo } from "react";
+import { appIconSize } from "../../../app/appIconSize";
 import {
   type FileTreeDirectoryItemData,
   type FileTreeFileItemData,
@@ -28,10 +29,9 @@ interface FileTreeNodeProps {
   readonly activeDocumentId: string | null;
 }
 
-const fileTreeIconSize = 17;
 const fileTreeIndentStepRem = 0.9;
 const fileTreeRowPaddingStartRem = 0.45;
-const fileTreeChevronCenterOffsetPx = fileTreeIconSize / 2;
+const fileTreeChevronCenterOffsetPx = appIconSize / 2;
 
 function FileTreeDirectoryRow({
   item,
@@ -46,14 +46,14 @@ function FileTreeDirectoryRow({
         <span className="file-tree__icon-slot">
           <ChevronRight
             className={`file-tree__chevron${item.isExpanded() ? " is-expanded" : ""}`}
-            size={fileTreeIconSize}
+            size={appIconSize}
           />
         </span>
         <span className="file-tree__icon-slot">
           {item.isExpanded() ? (
-            <FolderOpen size={fileTreeIconSize} />
+            <FolderOpen size={appIconSize} />
           ) : (
-            <Folder size={fileTreeIconSize} />
+            <Folder size={appIconSize} />
           )}
         </span>
       </span>
@@ -74,7 +74,7 @@ function FileTreeFileRow({
       <span className="file-tree__sigil" aria-hidden="true">
         <span className="file-tree__icon-slot" />
         <span className="file-tree__icon-slot">
-          <FileText size={fileTreeIconSize} />
+          <FileText size={appIconSize} />
         </span>
       </span>
       <span className="file-tree__body">

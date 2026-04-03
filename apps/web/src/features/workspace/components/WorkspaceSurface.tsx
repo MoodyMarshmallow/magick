@@ -9,6 +9,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { appIconSize } from "../../../app/appIconSize";
 import { workspaceClient } from "../../comments/data/workspaceClient";
 import {
   type SelectionState,
@@ -556,7 +557,7 @@ function WorkspaceLeafPaneView({
                 }}
                 type="button"
               >
-                <X size={12} />
+                <X size={appIconSize} />
               </button>
             </div>
           );
@@ -867,7 +868,7 @@ export function WorkspaceSurface({
                   }
                   type="button"
                 >
-                  <Icon size={15} />
+                  <Icon size={appIconSize} />
                 </button>
               );
             },

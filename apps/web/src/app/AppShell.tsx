@@ -90,8 +90,13 @@ export function AppShell() {
       type: "snapshot.loaded",
       threads: bootstrapQuery.data.threads,
     });
-    if (!activeThreadIdRef.current) {
-      setActiveThreadId(bootstrapQuery.data.threads[0]?.threadId ?? null);
+    if (
+      activeThreadIdRef.current &&
+      !bootstrapQuery.data.threads.some(
+        (thread) => thread.threadId === activeThreadIdRef.current,
+      )
+    ) {
+      setActiveThreadId(null);
     }
   }, [bootstrapQuery.data, setActiveThreadId]);
 
@@ -259,6 +264,7 @@ export function AppShell() {
         threads={threads}
         activeThreadId={activeThreadId}
         onActivateThread={handleSelectThread}
+        onShowLedger={() => setActiveThreadId(null)}
         onSendReply={async (threadId: string, message: string) => {
           await workspaceClient.sendThreadMessage(threadId, message);
           setActiveThreadId(threadId);
