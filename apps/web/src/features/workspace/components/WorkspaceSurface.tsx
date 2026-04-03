@@ -18,6 +18,7 @@ import {
 import {
   type EditorCommandName,
   type EditorFormatState,
+  type EditorHeadingLevel,
   type EditorSelectionState,
   EditorSurface,
   type EditorSurfaceHandle,
@@ -31,6 +32,7 @@ import type {
   WorkspaceSplitPane,
   WorkspaceTabId,
 } from "../state/workspaceSessionTypes";
+import { WorkspaceHeadingControl } from "./WorkspaceHeadingControl";
 import { resolveBodyPaneSnap, resolveTabStripSnap } from "./workspacePaneSnap";
 import { isNoopTabInsertion } from "./workspaceTabInsertion";
 import {
@@ -837,18 +839,33 @@ export function WorkspaceSurface({
     setFormatByPaneId((current) => ({ ...current, [paneId]: state }));
   };
 
+  const runFocusedEditorCommand = (
+    commandName: EditorCommandName,
+    options?: { readonly level?: EditorHeadingLevel },
+  ) => {
+    if (!focusedPaneId) {
+      return;
+    }
+
+    editorRefs.current.get(focusedPaneId)?.runCommand(commandName, options);
+  };
+
   if (!rootPane) {
     return <div className="workspace-pane__loading">Open a file to start.</div>;
   }
 
   return (
     <section className="workspace__canvas">
-      <div className="workspace__frame workspace__frame--multi">
+      <div className="workspace__frame workspace__frame--multi workspace__frame--toolbar">
         <div
           className="workspace__toolbar"
           role="toolbar"
           aria-label="Text editing options"
         >
+          <WorkspaceHeadingControl
+            activeHeadingLevel={activeFormatState.headingLevel}
+            onCommand={runFocusedEditorCommand}
+          />
           {editorToolbarActions.map(
             (action: (typeof editorToolbarActions)[number]) => {
               const Icon = action.icon;
@@ -859,13 +876,7 @@ export function WorkspaceSurface({
                     action.isActive(activeFormatState) ? " is-active" : ""
                   }`}
                   key={action.commandName}
-                  onClick={() =>
-                    focusedPaneId
-                      ? editorRefs.current
-                          .get(focusedPaneId)
-                          ?.runCommand(action.commandName)
-                      : undefined
-                  }
+                  onClick={() => runFocusedEditorCommand(action.commandName)}
                   type="button"
                 >
                   <Icon size={appIconSize} />

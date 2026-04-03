@@ -35,6 +35,9 @@ Long term maintainability is a core priority. If you add new functionality, firs
 - Keep tests close to the logic they verify, and structure them so a future contributor can understand the intended behavior from the test file alone.
 - Avoid shallow tests that only assert implementation details. Focus on observable behavior, invariants, and contract guarantees.
 - If you add a new bug fix, add or update a regression test that would have failed before the fix.
+- If a change affects UI, always verify it with Playwright against the running app, not just unit tests.
+- For UI verification with Playwright, inspect the result both structurally and visually: read extracted DOM/text state with Playwright code or snapshots, and capture a targeted screenshot of the changed area.
+- Store Playwright screenshots and named snapshot artifacts under `.playwright-cli/` instead of the repo root, for example `.playwright-cli/feature-name.png` and `.playwright-cli/feature-name.yaml`.
 
 ## Effect vs Promise Guidance
 

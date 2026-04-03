@@ -12,8 +12,7 @@ export interface EditorSelectionState {
 
 export interface EditorFormatState {
   readonly paragraph: boolean;
-  readonly heading1: boolean;
-  readonly heading2: boolean;
+  readonly headingLevel: EditorHeadingLevel | null;
   readonly bulletList: boolean;
   readonly orderedList: boolean;
   readonly blockquote: boolean;
@@ -23,10 +22,12 @@ export interface EditorFormatState {
   readonly code: boolean;
 }
 
+export type EditorHeadingLevel = 1 | 2 | 3 | 4 | 5 | 6;
+
 export type EditorCommandName =
   | "setParagraph"
-  | "toggleHeading1"
-  | "toggleHeading2"
+  | "setHeading"
+  | "toggleHeading"
   | "toggleBulletList"
   | "toggleOrderedList"
   | "toggleBlockquote"
@@ -35,8 +36,15 @@ export type EditorCommandName =
   | "toggleStrike"
   | "toggleCode";
 
+interface EditorCommandOptions {
+  readonly level?: EditorHeadingLevel;
+}
+
 export interface EditorSurfaceHandle {
-  runCommand: (commandName: EditorCommandName) => void;
+  runCommand: (
+    commandName: EditorCommandName,
+    options?: EditorCommandOptions,
+  ) => void;
 }
 
 interface EditorSurfaceProps {
@@ -50,8 +58,10 @@ const getEditorFormatState = (
   editor: NonNullable<ReturnType<typeof useEditor>>,
 ): EditorFormatState => ({
   paragraph: editor.isActive("paragraph"),
-  heading1: editor.isActive("heading", { level: 1 }),
-  heading2: editor.isActive("heading", { level: 2 }),
+  headingLevel:
+    ([1, 2, 3, 4, 5, 6] as const).find((level) =>
+      editor.isActive("heading", { level }),
+    ) ?? null,
   bulletList: editor.isActive("bulletList"),
   orderedList: editor.isActive("orderedList"),
   blockquote: editor.isActive("blockquote"),
@@ -64,16 +74,25 @@ const getEditorFormatState = (
 const runEditorCommand = (
   editor: NonNullable<ReturnType<typeof useEditor>>,
   commandName: EditorCommandName,
+  options?: EditorCommandOptions,
 ) => {
   switch (commandName) {
     case "setParagraph":
       editor.chain().focus().setParagraph().run();
       break;
-    case "toggleHeading1":
-      editor.chain().focus().toggleHeading({ level: 1 }).run();
+    case "toggleHeading":
+      editor
+        .chain()
+        .focus()
+        .toggleHeading({ level: options?.level ?? 1 })
+        .run();
       break;
-    case "toggleHeading2":
-      editor.chain().focus().toggleHeading({ level: 2 }).run();
+    case "setHeading":
+      editor
+        .chain()
+        .focus()
+        .setHeading({ level: options?.level ?? 1 })
+        .run();
       break;
     case "toggleBulletList":
       editor.chain().focus().toggleBulletList().run();
@@ -161,12 +180,12 @@ export const EditorSurface = forwardRef<
   }, [editor, markdown]);
 
   useImperativeHandle(ref, () => ({
-    runCommand(commandName) {
+    runCommand(commandName, options) {
       if (!editor) {
         return;
       }
 
-      runEditorCommand(editor, commandName);
+      runEditorCommand(editor, commandName, options);
       onFormatStateChange(getEditorFormatState(editor));
     },
   }));

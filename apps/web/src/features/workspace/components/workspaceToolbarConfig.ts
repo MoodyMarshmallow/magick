@@ -1,13 +1,10 @@
 import {
   Bold,
   Code2,
-  Heading1,
-  Heading2,
   Italic,
   List,
   ListOrdered,
   type LucideIcon,
-  Pilcrow,
   Quote,
   Strikethrough,
 } from "lucide-react";
@@ -18,8 +15,7 @@ import type {
 
 export const defaultEditorFormatState: EditorFormatState = {
   paragraph: true,
-  heading1: false,
-  heading2: false,
+  headingLevel: null,
   bulletList: false,
   orderedList: false,
   blockquote: false,
@@ -35,24 +31,6 @@ export const editorToolbarActions: readonly {
   readonly commandName: EditorCommandName;
   readonly isActive: (state: EditorFormatState) => boolean;
 }[] = [
-  {
-    label: "Paragraph",
-    icon: Pilcrow,
-    commandName: "setParagraph",
-    isActive: (state) => state.paragraph,
-  },
-  {
-    label: "Heading 1",
-    icon: Heading1,
-    commandName: "toggleHeading1",
-    isActive: (state) => state.heading1,
-  },
-  {
-    label: "Heading 2",
-    icon: Heading2,
-    commandName: "toggleHeading2",
-    isActive: (state) => state.heading2,
-  },
   {
     label: "Bold",
     icon: Bold,

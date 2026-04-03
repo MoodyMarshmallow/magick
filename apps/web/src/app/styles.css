@@ -483,15 +483,13 @@ button:disabled {
 }
 
 .thread-entry {
-  display: grid;
-  grid-template-columns: 1rem minmax(0, 1fr);
-  column-gap: 0.75rem;
-  align-items: stretch;
+  position: relative;
+  display: block;
   width: 100%;
   margin: 0;
   border: 1px solid var(--line);
   background: var(--bg-ink);
-  padding: 0 0.75rem;
+  padding: 0;
   box-sizing: border-box;
 }
 
@@ -499,22 +497,28 @@ button:disabled {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   align-items: center;
+  width: 100%;
   height: 2.5rem;
-  padding: 0.5rem 0;
+  padding: 0.5rem 0.75rem 0.5rem 2.5rem;
   background: var(--bg-ink);
   font-weight: 400;
   box-sizing: border-box;
 }
 
 .thread-entry__toggle {
+  position: absolute;
+  left: 0.75rem;
+  top: 50%;
   width: 1rem;
-  height: 2.5rem;
+  height: 1rem;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   padding: 0;
   color: var(--fg-dim);
   box-sizing: border-box;
+  transform: translateY(-50%);
+  z-index: 1;
 }
 
 .document-entry__icon,
@@ -704,6 +708,12 @@ button:disabled {
   overflow: hidden;
 }
 
+.workspace__frame--toolbar {
+  overflow: visible;
+  position: relative;
+  z-index: 1;
+}
+
 .workspace__toolbar {
   display: flex;
   flex-direction: column;
@@ -713,6 +723,11 @@ button:disabled {
   border-right: 1px solid var(--line);
   align-items: center;
   width: 2.6rem;
+  overflow: visible;
+}
+
+.workspace__toolbar-heading {
+  position: relative;
 }
 
 .workspace__toolbar-button {
@@ -736,6 +751,47 @@ button:disabled {
 .workspace__toolbar-button.is-active {
   background: rgba(167, 192, 128, 0.12);
   color: var(--green);
+}
+
+.workspace__toolbar-heading-picker {
+  position: fixed;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 2rem;
+  padding: 0.2rem 0;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  z-index: 10000;
+}
+
+.workspace__toolbar-heading-step {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--fg-dim);
+  width: 100%;
+  height: 1.6rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+
+.workspace__toolbar-heading-step:hover {
+  background: var(--hover);
+  color: var(--fg-soft);
+}
+
+.workspace__toolbar-heading-value {
+  width: 100%;
+  height: 1.7rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--fg);
+  font-size: var(--text-size-body);
+  line-height: 1;
 }
 
 .workspace__document-title {
