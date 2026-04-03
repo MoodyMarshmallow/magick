@@ -103,6 +103,27 @@ describe("CommentSidebar", () => {
     expect(screen.getByLabelText("Show open chats")).toBeTruthy();
   });
 
+  it("allows resolving a thread directly from the ledger", async () => {
+    const handleToggleResolved = vi.fn(async () => undefined);
+
+    render(
+      <CommentSidebar
+        activeThreadId={null}
+        onActivateThread={vi.fn()}
+        onSendReply={vi.fn(async () => undefined)}
+        onShowLedger={vi.fn()}
+        onToggleResolved={handleToggleResolved}
+        threads={threads}
+      />,
+    );
+
+    fireEvent.click(screen.getByLabelText("Resolve Chat 1"));
+
+    await waitFor(() => {
+      expect(handleToggleResolved).toHaveBeenCalledWith("thread_1");
+    });
+  });
+
   it("sends replies on Enter without requiring a send button", async () => {
     const handleSendReply = vi.fn(async () => undefined);
 

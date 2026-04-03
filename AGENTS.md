@@ -66,6 +66,24 @@ Specific guidance for this repo:
 - `packages/contracts`: Shared effect/Schema schemas and TypeScript contracts for provider events, WebSocket protocol, and model/session types. Keep this package schema-only — no runtime logic.
 - `packages/shared`: Shared runtime utilities consumed by both server and web. Uses explicit subpath exports (e.g. `@magick/shared`) — no barrel index.
 
+## Frontend Design Guidelines
+
+The frontend Magick should feel like digital magick expressed through a restrained TUI-esquq interface. The UI should feel simplistic and slightly playful, but not ornamental.
+
+- You can think of the central design philosophy of Magick as 'digital-magick,' combining elements of TUIs and magick, with a touch of retro game design feel.
+- Lean into TUI aesthetics: strong panel divisions, clear rows, mono-forward typography, flat surfaces, and obvious information hierarchy.
+- Keep controls visually minimal. Buttons should be borderless by default and rely on hover, active, focus, and selection states rather than persistent outlines or filled pills.
+- Corners should stay sharp. Avoid rounded corners unless directed.
+- Prefer flat fills over gradients, glass, shadows, or soft depth effects.
+- Use color sparingly and intentionally. Aqua, yellow, green, and red should read as signals, not decoration.
+- Default toward icon + text pairings that are austere and legible. Icons should feel barebones and utilitarian, not friendly or over-detailed.
+- Keep layout simple. The interface should feel clean, and only surface the most important information to the user.
+- Titles and labels should be short, plain, and operational. Avoid marketing-style copy in product UI.
+- Hover states should feel crisp and understated. Selection and active states should be stronger than hover, but still minimal.
+- Scrollbars, dividers, and overlays are part of the visual language. Treat them as deliberate interface elements rather than browser defaults.
+- When adding new UI, match the existing workspace/sidebar/tab chrome instead of introducing a separate visual system.
+- If a design choice is between “clean but slightly severe” and “soft and friendly,” prefer the cleaner, more severe option.
+
 ## Codex Integration (Important)
 
 Magick is Codex-first and now owns Codex auth and transport directly inside Magick rather than relying on `codex app-server` as the integration surface.

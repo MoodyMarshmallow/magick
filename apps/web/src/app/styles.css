@@ -30,7 +30,8 @@
   --scrollbar-size: 10px;
   --scrollbar-border: 2px;
   --scrollbar-thumb: transparent;
-  --scrollbar-thumb-hover: color-mix(in srgb, var(--aqua) 26%, transparent);
+  --scrollbar-thumb-visible: color-mix(in srgb, var(--aqua) 20%, transparent);
+  --scrollbar-thumb-hover: color-mix(in srgb, var(--aqua) 28%, transparent);
   --scrollbar-thumb-active: color-mix(in srgb, var(--aqua) 38%, transparent);
   --scrollbar-track: transparent;
   --icon-size: 17px;
@@ -66,19 +67,14 @@ body {
   }
 
   .workspace-pane:hover .workspace__document-scroll,
-  .workspace-pane:hover .workspace-pane__tabs,
-  .workspace-pane:focus-within .workspace__document-scroll,
-  .workspace-pane:focus-within .workspace-pane__tabs {
-    scrollbar-color: var(--scrollbar-thumb-hover) var(--scrollbar-track);
+  .workspace-pane:hover .workspace-pane__tabs {
+    scrollbar-color: var(--scrollbar-thumb-visible) var(--scrollbar-track);
   }
 
   .rail-section:hover,
-  .rail-section:focus-within,
   .thread-ledger:hover .thread-ledger__items,
-  .thread-ledger:focus-within .thread-ledger__items,
-  .comment-sidebar__active-thread:hover .thread-record__messages,
-  .comment-sidebar__active-thread:focus-within .thread-record__messages {
-    scrollbar-color: var(--scrollbar-thumb-hover) var(--scrollbar-track);
+  .comment-sidebar__active-thread:hover .thread-record__messages {
+    scrollbar-color: var(--scrollbar-thumb-visible) var(--scrollbar-track);
   }
 }
 
@@ -122,42 +118,39 @@ body {
   }
 
   .workspace-pane:hover .workspace__document-scroll::-webkit-scrollbar-thumb,
-  .workspace-pane:hover .workspace-pane__tabs::-webkit-scrollbar-thumb,
-  .workspace-pane:focus-within
-    .workspace__document-scroll::-webkit-scrollbar-thumb,
-  .workspace-pane:focus-within .workspace-pane__tabs::-webkit-scrollbar-thumb {
-    background: var(--scrollbar-thumb-hover);
+  .workspace-pane:hover .workspace-pane__tabs::-webkit-scrollbar-thumb {
+    background: var(--scrollbar-thumb-visible);
   }
 
   .rail-section:hover::-webkit-scrollbar-thumb,
-  .rail-section:focus-within::-webkit-scrollbar-thumb,
   .thread-ledger:hover .thread-ledger__items::-webkit-scrollbar-thumb,
-  .thread-ledger:focus-within .thread-ledger__items::-webkit-scrollbar-thumb,
   .comment-sidebar__active-thread:hover
-    .thread-record__messages::-webkit-scrollbar-thumb,
-  .comment-sidebar__active-thread:focus-within
     .thread-record__messages::-webkit-scrollbar-thumb {
+    background: var(--scrollbar-thumb-visible);
+  }
+
+  .workspace-pane:hover
+    .workspace__document-scroll::-webkit-scrollbar-thumb:hover,
+  .workspace-pane:hover .workspace-pane__tabs::-webkit-scrollbar-thumb:hover {
+    background: var(--scrollbar-thumb-hover);
+  }
+
+  .rail-section:hover::-webkit-scrollbar-thumb:hover,
+  .thread-ledger:hover .thread-ledger__items::-webkit-scrollbar-thumb:hover,
+  .comment-sidebar__active-thread:hover
+    .thread-record__messages::-webkit-scrollbar-thumb:hover {
     background: var(--scrollbar-thumb-hover);
   }
 
   .workspace-pane:hover
     .workspace__document-scroll::-webkit-scrollbar-thumb:active,
-  .workspace-pane:hover .workspace-pane__tabs::-webkit-scrollbar-thumb:active,
-  .workspace-pane:focus-within
-    .workspace__document-scroll::-webkit-scrollbar-thumb:active,
-  .workspace-pane:focus-within
-    .workspace-pane__tabs::-webkit-scrollbar-thumb:active {
+  .workspace-pane:hover .workspace-pane__tabs::-webkit-scrollbar-thumb:active {
     background: var(--scrollbar-thumb-active);
   }
 
   .rail-section:hover::-webkit-scrollbar-thumb:active,
-  .rail-section:focus-within::-webkit-scrollbar-thumb:active,
   .thread-ledger:hover .thread-ledger__items::-webkit-scrollbar-thumb:active,
-  .thread-ledger:focus-within
-    .thread-ledger__items::-webkit-scrollbar-thumb:active,
   .comment-sidebar__active-thread:hover
-    .thread-record__messages::-webkit-scrollbar-thumb:active,
-  .comment-sidebar__active-thread:focus-within
     .thread-record__messages::-webkit-scrollbar-thumb:active {
     background: var(--scrollbar-thumb-active);
   }
@@ -285,24 +278,25 @@ button:disabled {
 
 .comment-sidebar {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
   overflow: hidden;
   background: var(--bg-ink);
 }
 
-.comment-sidebar__header {
+.comment-sidebar__footer,
+.thread-record__footer {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 0.75rem;
   height: 2.5rem;
   padding: 0.65rem 0.75rem;
-  border-bottom: 1px solid var(--line);
-  background: var(--bg-ink);
+  border-top: 1px solid var(--line);
+  background: var(--bg);
   box-sizing: border-box;
 }
 
-.comment-sidebar__header strong {
+.comment-sidebar__footer strong {
   color: var(--fg);
   font-family: "Departure Mono", monospace;
   font-size: var(--text-size-body);
@@ -489,21 +483,38 @@ button:disabled {
 }
 
 .thread-entry {
-  display: block;
+  display: grid;
+  grid-template-columns: 1rem minmax(0, 1fr);
+  column-gap: 0.75rem;
+  align-items: stretch;
   width: 100%;
   margin: 0;
   border: 1px solid var(--line);
   background: var(--bg-ink);
+  padding: 0 0.75rem;
+  box-sizing: border-box;
 }
 
 .thread-entry__summary {
   display: grid;
-  grid-template-columns: 1rem minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   align-items: center;
-  column-gap: 0.75rem;
-  padding-block: 0.5rem;
+  height: 2.5rem;
+  padding: 0.5rem 0;
   background: var(--bg-ink);
   font-weight: 400;
+  box-sizing: border-box;
+}
+
+.thread-entry__toggle {
+  width: 1rem;
+  height: 2.5rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  color: var(--fg-dim);
+  box-sizing: border-box;
 }
 
 .document-entry__icon,
@@ -512,13 +523,6 @@ button:disabled {
   display: inline-flex;
   align-items: start;
   color: var(--yellow);
-}
-
-.thread-entry__sigil {
-  color: var(--fg-dim);
-  align-items: center;
-  justify-content: center;
-  align-self: center;
 }
 
 .thread-entry__content {
@@ -1054,8 +1058,10 @@ textarea {
 
 .thread-ledger {
   min-height: 0;
+  height: 100%;
   padding: 0;
   background: var(--bg-ink);
+  grid-template-rows: minmax(0, 1fr) auto;
   gap: 0;
 }
 
@@ -1083,18 +1089,10 @@ textarea {
   min-height: 0;
   height: 100%;
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-rows: minmax(0, 1fr) auto auto;
   grid-row: 1 / -1;
   gap: 0;
   overflow: hidden;
-}
-
-.thread-record__header {
-  height: 2.5rem;
-  padding: 0.65rem 0.75rem;
-  border-bottom: 1px solid var(--line);
-  background: var(--bg-ink);
-  box-sizing: border-box;
 }
 
 .thread-record__header-main {
@@ -1165,7 +1163,6 @@ textarea {
   padding: 0.85rem 1rem 1rem;
   border-top: 1px solid var(--line);
   background: var(--bg-ink);
-  margin-top: auto;
 }
 
 .thread-record__composer-label {
