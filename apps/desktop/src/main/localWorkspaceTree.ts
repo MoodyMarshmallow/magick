@@ -3,12 +3,12 @@ import type {
   LocalWorkspaceBootstrap,
   LocalWorkspaceDirectoryNode,
   LocalWorkspaceFileNode,
+  LocalWorkspaceFilesBootstrap,
   LocalWorkspaceThread,
   LocalWorkspaceTreeNode,
 } from "@magick/shared/localWorkspace";
 
 export interface LocalWorkspaceTreeDocument {
-  readonly id: string;
   readonly filePath: string;
 }
 
@@ -96,11 +96,11 @@ export const createWorkspaceTree = (args: {
     }
 
     const fileNode: LocalWorkspaceFileNode = {
-      id: `file:${document.id}`,
+      id: `file:${relativePath}`,
       type: "file",
       name: fileName,
       path: relativePath,
-      documentId: document.id,
+      filePath: relativePath,
     };
     parentChildren.push(fileNode);
   }
@@ -111,26 +111,37 @@ export const createWorkspaceTree = (args: {
 export const createWorkspaceBootstrap = (args: {
   documents: readonly LocalWorkspaceTreeDocument[];
   threads: readonly LocalWorkspaceThread[];
-  documentsDir: string;
+  workspaceRoot: string;
 }): LocalWorkspaceBootstrap => ({
   tree: createWorkspaceTree({
     documents: args.documents,
-    documentsDir: args.documentsDir,
+    documentsDir: args.workspaceRoot,
   }),
   threads: args.threads,
 });
 
-export const findFirstDocumentIdInTree = (
+export const createWorkspaceFilesBootstrap = (args: {
+  documents: readonly LocalWorkspaceTreeDocument[];
+  workspaceRoot: string;
+}): LocalWorkspaceFilesBootstrap => ({
+  workspaceRoot: args.workspaceRoot,
+  tree: createWorkspaceTree({
+    documents: args.documents,
+    documentsDir: args.workspaceRoot,
+  }),
+});
+
+export const findFirstFilePathInTree = (
   tree: readonly LocalWorkspaceTreeNode[],
 ): string | null => {
   for (const node of tree) {
     if (node.type === "file") {
-      return node.documentId;
+      return node.filePath;
     }
 
-    const nestedDocumentId = findFirstDocumentIdInTree(node.children);
-    if (nestedDocumentId) {
-      return nestedDocumentId;
+    const nestedFilePath = findFirstFilePathInTree(node.children);
+    if (nestedFilePath) {
+      return nestedFilePath;
     }
   }
 

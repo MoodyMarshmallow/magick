@@ -1,7 +1,7 @@
 import type { LocalWorkspaceTreeNode } from "@magick/shared/localWorkspace";
 import {
   createFileTreeAdapter,
-  getDocumentAncestorDirectoryIds,
+  getFileAncestorDirectoryIds,
   workspaceRootItemId,
 } from "./fileTreeAdapter";
 
@@ -13,11 +13,11 @@ const sampleTree: readonly LocalWorkspaceTreeNode[] = [
     path: "codex",
     children: [
       {
-        id: "file:doc_manifesto",
+        id: "file:codex/manifesto.md",
         type: "file",
         name: "manifesto.md",
         path: "codex/manifesto.md",
-        documentId: "doc_manifesto",
+        filePath: "codex/manifesto.md",
       },
     ],
   },
@@ -34,11 +34,11 @@ const sampleTree: readonly LocalWorkspaceTreeNode[] = [
         path: "notes/patterns",
         children: [
           {
-            id: "file:doc_field_notes",
+            id: "file:notes/patterns/field-notes.md",
             type: "file",
             name: "field-notes.md",
             path: "notes/patterns/field-notes.md",
-            documentId: "doc_field_notes",
+            filePath: "notes/patterns/field-notes.md",
           },
         ],
       },
@@ -57,19 +57,19 @@ describe("fileTreeAdapter", () => {
     expect(adapter.childrenByParentId.get("directory:notes")).toEqual([
       "directory:notes/patterns",
     ]);
-    expect(adapter.fileItemIdByDocumentId.get("doc_field_notes")).toBe(
-      "file:doc_field_notes",
-    );
+    expect(
+      adapter.fileItemIdByFilePath.get("notes/patterns/field-notes.md"),
+    ).toBe("file:notes/patterns/field-notes.md");
     expect(adapter.directoryIds.has("directory:notes/patterns")).toBe(true);
   });
 
-  it("returns ancestor directory ids for the active document", () => {
+  it("returns ancestor directory ids for the active file", () => {
     const adapter = createFileTreeAdapter(sampleTree);
 
-    expect(getDocumentAncestorDirectoryIds(adapter, "doc_field_notes")).toEqual(
-      ["directory:notes", "directory:notes/patterns"],
-    );
-    expect(getDocumentAncestorDirectoryIds(adapter, "missing")).toEqual([]);
-    expect(getDocumentAncestorDirectoryIds(adapter, null)).toEqual([]);
+    expect(
+      getFileAncestorDirectoryIds(adapter, "notes/patterns/field-notes.md"),
+    ).toEqual(["directory:notes", "directory:notes/patterns"]);
+    expect(getFileAncestorDirectoryIds(adapter, "missing")).toEqual([]);
+    expect(getFileAncestorDirectoryIds(adapter, null)).toEqual([]);
   });
 });

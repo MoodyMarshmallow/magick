@@ -32,7 +32,7 @@ export interface LocalWorkspaceDirectoryNode
 
 export interface LocalWorkspaceFileNode extends LocalWorkspaceTreeBaseNode {
   readonly type: "file";
-  readonly documentId: string;
+  readonly filePath: string;
 }
 
 export type LocalWorkspaceTreeNode =
@@ -43,6 +43,31 @@ export interface LocalDocumentPayload {
   readonly documentId: string;
   readonly title: string;
   readonly markdown: string;
+}
+
+export interface LocalFilePayload {
+  readonly filePath: string;
+  readonly title: string;
+  readonly markdown: string;
+}
+
+export interface LocalWorkspaceFilesBootstrap {
+  readonly workspaceRoot: string;
+  readonly tree: readonly LocalWorkspaceTreeNode[];
+}
+
+export interface LocalWorkspaceFileEvent {
+  readonly type: "workspace.files.changed";
+  readonly filePaths: readonly string[];
+}
+
+export interface MagickDesktopFileApi {
+  getFileWorkspaceBootstrap: () => Promise<LocalWorkspaceFilesBootstrap>;
+  openFile: (filePath: string) => Promise<LocalFilePayload>;
+  saveFile: (filePath: string, markdown: string) => Promise<void>;
+  onWorkspaceEvent: (
+    listener: (event: LocalWorkspaceFileEvent) => void,
+  ) => () => void;
 }
 
 export interface LocalWorkspaceBootstrap {

@@ -1,6 +1,6 @@
 import {
   createWorkspaceBootstrap,
-  findFirstDocumentIdInTree,
+  findFirstFilePathInTree,
 } from "./localWorkspaceTree";
 
 describe("localWorkspaceTree", () => {
@@ -8,12 +8,10 @@ describe("localWorkspaceTree", () => {
     const bootstrap = createWorkspaceBootstrap({
       documents: [
         {
-          id: "doc_manifesto",
-          filePath: "/tmp/workspace/documents/codex/manifesto.md",
+          filePath: "/tmp/workspace/codex/manifesto.md",
         },
         {
-          id: "doc_notes",
-          filePath: "/tmp/workspace/documents/notes/patterns/system.md",
+          filePath: "/tmp/workspace/notes/patterns/system.md",
         },
       ],
       threads: [
@@ -25,7 +23,7 @@ describe("localWorkspaceTree", () => {
           messages: [],
         },
       ],
-      documentsDir: "/tmp/workspace/documents",
+      workspaceRoot: "/tmp/workspace",
     });
 
     expect(bootstrap.tree).toEqual([
@@ -36,11 +34,11 @@ describe("localWorkspaceTree", () => {
         path: "codex",
         children: [
           {
-            id: "file:doc_manifesto",
+            id: "file:codex/manifesto.md",
             type: "file",
             name: "manifesto.md",
             path: "codex/manifesto.md",
-            documentId: "doc_manifesto",
+            filePath: "codex/manifesto.md",
           },
         ],
       },
@@ -57,11 +55,11 @@ describe("localWorkspaceTree", () => {
             path: "notes/patterns",
             children: [
               {
-                id: "file:doc_notes",
+                id: "file:notes/patterns/system.md",
                 type: "file",
                 name: "system.md",
                 path: "notes/patterns/system.md",
-                documentId: "doc_notes",
+                filePath: "notes/patterns/system.md",
               },
             ],
           },
@@ -71,22 +69,20 @@ describe("localWorkspaceTree", () => {
     expect(bootstrap.threads).toHaveLength(1);
   });
 
-  it("returns the first file document id in tree order", () => {
+  it("returns the first file path in tree order", () => {
     const bootstrap = createWorkspaceBootstrap({
       documents: [
         {
-          id: "doc_b",
-          filePath: "/tmp/workspace/documents/zeta/last.md",
+          filePath: "/tmp/workspace/zeta/last.md",
         },
         {
-          id: "doc_a",
-          filePath: "/tmp/workspace/documents/alpha/first.md",
+          filePath: "/tmp/workspace/alpha/first.md",
         },
       ],
       threads: [],
-      documentsDir: "/tmp/workspace/documents",
+      workspaceRoot: "/tmp/workspace",
     });
 
-    expect(findFirstDocumentIdInTree(bootstrap.tree)).toBe("doc_a");
+    expect(findFirstFilePathInTree(bootstrap.tree)).toBe("alpha/first.md");
   });
 });

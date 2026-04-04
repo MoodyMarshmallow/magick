@@ -14,11 +14,11 @@ const sampleTree: readonly LocalWorkspaceTreeNode[] = [
     path: "codex",
     children: [
       {
-        id: "file:doc_manifesto",
+        id: "file:codex/manifesto.md",
         type: "file",
         name: "manifesto.md",
         path: "codex/manifesto.md",
-        documentId: "doc_manifesto",
+        filePath: "codex/manifesto.md",
       },
     ],
   },
@@ -35,11 +35,11 @@ const sampleTree: readonly LocalWorkspaceTreeNode[] = [
         path: "notes/patterns",
         children: [
           {
-            id: "file:doc_field_notes",
+            id: "file:notes/patterns/field-notes.md",
             type: "file",
             name: "field-notes.md",
             path: "notes/patterns/field-notes.md",
-            documentId: "doc_field_notes",
+            filePath: "notes/patterns/field-notes.md",
           },
         ],
       },
@@ -48,20 +48,20 @@ const sampleTree: readonly LocalWorkspaceTreeNode[] = [
 ];
 
 function FileTreeHarness() {
-  const [activeDocumentId, setActiveDocumentId] = useState<string | null>(
-    "doc_manifesto",
+  const [activeFilePath, setActiveFilePath] = useState<string | null>(
+    "codex/manifesto.md",
   );
   const [expandedIds, setExpandedIds] = useState<string[]>(["directory:codex"]);
 
   return (
     <>
-      <div data-testid="active-document">{activeDocumentId ?? "none"}</div>
+      <div data-testid="active-file">{activeFilePath ?? "none"}</div>
       <FileTree
-        activeDocumentId={activeDocumentId}
+        activeFilePath={activeFilePath}
         expandedIds={expandedIds}
         onExpandedIdsChange={setExpandedIds}
-        onOpenDocument={setActiveDocumentId}
-        onStartDragDocument={() => {}}
+        onOpenFile={setActiveFilePath}
+        onStartDragFile={() => {}}
         tree={sampleTree}
       />
     </>
@@ -79,8 +79,8 @@ describe("FileTree", () => {
     await user.click(screen.getByRole("treeitem", { name: /patterns/i }));
     await user.click(screen.getByRole("treeitem", { name: /field-notes.md/i }));
 
-    expect(screen.getByTestId("active-document").textContent).toContain(
-      "doc_field_notes",
+    expect(screen.getByTestId("active-file").textContent).toContain(
+      "notes/patterns/field-notes.md",
     );
     expect(
       screen
@@ -107,8 +107,8 @@ describe("FileTree", () => {
     expect(
       screen.getByRole("treeitem", { name: /field-notes.md/i }),
     ).toBeTruthy();
-    expect(screen.getByTestId("active-document").textContent).toContain(
-      "doc_manifesto",
+    expect(screen.getByTestId("active-file").textContent).toContain(
+      "codex/manifesto.md",
     );
   });
 });

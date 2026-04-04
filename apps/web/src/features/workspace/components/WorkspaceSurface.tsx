@@ -10,7 +10,6 @@ import {
   useState,
 } from "react";
 import { appIconSize } from "../../../app/appIconSize";
-import { workspaceClient } from "../../comments/data/workspaceClient";
 import {
   type SelectionState,
   useCommentUiStore,
@@ -23,6 +22,7 @@ import {
   EditorSurface,
   type EditorSurfaceHandle,
 } from "../../document/components/EditorSurface";
+import { localWorkspaceFileClient } from "../data/localWorkspaceFileClient";
 import { useWorkspaceSessionStore } from "../state/workspaceSessionStore";
 import type {
   WorkspaceDragItem,
@@ -91,7 +91,14 @@ function DocumentEditorHost({
 
   const documentQuery = useQuery({
     queryKey: ["document", documentId],
-    queryFn: () => workspaceClient.openDocument(documentId),
+    queryFn: () => localWorkspaceFileClient.openFile(documentId),
+    retry: false,
+    refetchInterval:
+      draft && draft.markdown !== draft.savedMarkdown
+        ? false
+        : localWorkspaceFileClient.supportsPushWorkspaceEvents
+          ? false
+          : 2000,
   });
 
   useEffect(() => {
@@ -121,7 +128,12 @@ function DocumentEditorHost({
 
   if (documentQuery.isError) {
     return (
-      <div className="workspace-pane__loading">Failed to load document.</div>
+      <div className="workspace-pane__loading">
+        {documentQuery.error instanceof Error &&
+        documentQuery.error.message.includes("not found")
+          ? "This file is no longer available in the workspace."
+          : "Failed to load document."}
+      </div>
     );
   }
 
@@ -139,9 +151,15 @@ function DocumentEditorHost({
         }
 
         updateDraft(documentId, nextMarkdown);
-        void workspaceClient.saveDocument(documentId, nextMarkdown).then(() => {
-          markSaved(documentId, nextMarkdown);
-        });
+        void localWorkspaceFileClient
+          .saveFile(documentId, nextMarkdown)
+          .then(() => {
+            markSaved(documentId, nextMarkdown);
+            void documentQuery.refetch();
+          })
+          .catch((error) => {
+            console.error("Failed to save workspace file", error);
+          });
       }}
       onSelectionChange={(nextSelection: EditorSelectionState | null) => {
         const mappedSelection: SelectionState | null = nextSelection
@@ -810,10 +828,10 @@ export function WorkspaceSurface({
     useState<WorkspaceOverlayRect | null>(null);
 
   useEffect(() => {
-    if (initialDocumentId) {
+    if (!rootPane && initialDocumentId) {
       initialize(initialDocumentId);
     }
-  }, [initialDocumentId, initialize]);
+  }, [initialDocumentId, initialize, rootPane]);
 
   const focusedDocumentId = focusedTabId
     ? tabsById[focusedTabId]?.documentId

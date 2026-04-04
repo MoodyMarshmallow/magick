@@ -71,11 +71,11 @@ const createBrowserWorkspaceTree = (
     slice.map((document) => {
       const name = toFileName(document.title);
       return {
-        id: `file:${document.documentId}`,
+        id: `file:${pathPrefix}/${name}`,
         type: "file" as const,
         name,
         path: `${pathPrefix}/${name}`,
-        documentId: document.documentId,
+        filePath: `${pathPrefix}/${name}`,
       };
     });
 

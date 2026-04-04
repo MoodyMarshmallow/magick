@@ -1,31 +1,61 @@
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { LocalWorkspaceService } from "./localWorkspaceService";
 
 const createHarness = () => {
   const root = mkdtempSync(join(tmpdir(), "magick-desktop-"));
-  let tick = 0;
-  let idCounter = 0;
-  const service = new LocalWorkspaceService({
-    workspaceDir: join(root, "workspace"),
-    now: () => `2026-03-29T10:00:${String(tick++).padStart(2, "0")}.000Z`,
-    createId: () => `${++idCounter}`.padStart(4, "0"),
-  });
+  const workspaceDir = join(root, "workspace");
+
+  mkdirSync(join(workspaceDir, "notes", "patterns"), { recursive: true });
+  mkdirSync(join(workspaceDir, "codex"), { recursive: true });
+  mkdirSync(join(workspaceDir, "node_modules", "ignored"), { recursive: true });
+
+  writeFileSync(
+    join(workspaceDir, "codex", "evergreen-systems-memo.md"),
+    "Magick should feel like a calm studio for thinking with AI.",
+    "utf8",
+  );
+  writeFileSync(
+    join(workspaceDir, "notes", "patterns", "design-system-field-notes.md"),
+    "Keep the interface flat, direct, and readable.",
+    "utf8",
+  );
+  writeFileSync(
+    join(workspaceDir, "notes", "scratch.txt"),
+    "Plain text is also supported in the first pass.",
+    "utf8",
+  );
+  writeFileSync(
+    join(workspaceDir, "node_modules", "ignored", "package.md"),
+    "This file should be ignored.",
+    "utf8",
+  );
+
+  const service = new LocalWorkspaceService({ workspaceDir });
 
   return {
     root,
+    workspaceDir,
     service,
     cleanup: () => rmSync(root, { force: true, recursive: true }),
   };
 };
 
 describe("LocalWorkspaceService", () => {
-  it("seeds a local workspace with a nested file tree and workspace chats", () => {
+  it("builds a workspace tree from real local files", () => {
     const harness = createHarness();
 
     try {
-      const bootstrap = harness.service.getWorkspaceBootstrap();
+      const bootstrap = harness.service.getFileWorkspaceBootstrap();
+
+      expect(bootstrap.workspaceRoot).toBe(harness.workspaceDir);
       expect(bootstrap.tree).toEqual([
         {
           id: "directory:codex",
@@ -34,11 +64,11 @@ describe("LocalWorkspaceService", () => {
           path: "codex",
           children: [
             {
-              id: "file:doc_evergreen",
+              id: "file:codex/evergreen-systems-memo.md",
               type: "file",
               name: "evergreen-systems-memo.md",
               path: "codex/evergreen-systems-memo.md",
-              documentId: "doc_evergreen",
+              filePath: "codex/evergreen-systems-memo.md",
             },
           ],
         },
@@ -55,79 +85,55 @@ describe("LocalWorkspaceService", () => {
               path: "notes/patterns",
               children: [
                 {
-                  id: "file:doc_field_notes",
+                  id: "file:notes/patterns/design-system-field-notes.md",
                   type: "file",
                   name: "design-system-field-notes.md",
                   path: "notes/patterns/design-system-field-notes.md",
-                  documentId: "doc_field_notes",
+                  filePath: "notes/patterns/design-system-field-notes.md",
                 },
               ],
+            },
+            {
+              id: "file:notes/scratch.txt",
+              type: "file",
+              name: "scratch.txt",
+              path: "notes/scratch.txt",
+              filePath: "notes/scratch.txt",
             },
           ],
         },
       ]);
-      expect(bootstrap.threads.map((thread) => thread.threadId)).toEqual([
-        "thread_seed_2",
-        "thread_seed_1",
-      ]);
-      expect(bootstrap.threads[0]?.title).toBe("Chat 2");
-      expect(
-        readFileSync(join(harness.root, "workspace", "workspace.json"), "utf8"),
-      ).toContain("notes/patterns/design-system-field-notes.md");
     } finally {
       harness.cleanup();
     }
   });
 
-  it("persists seeded markdown files inside nested folders", () => {
+  it("opens a file by workspace-relative path", () => {
     const harness = createHarness();
 
     try {
-      expect(
-        readFileSync(
-          join(
-            harness.root,
-            "workspace",
-            "documents",
-            "notes",
-            "patterns",
-            "design-system-field-notes.md",
-          ),
-          "utf8",
-        ),
-      ).toContain("Keep the interface flat");
+      const file = harness.service.openFile("codex/evergreen-systems-memo.md");
+
+      expect(file.title).toBe("Evergreen Systems Memo");
+      expect(file.markdown).toContain("Magick should feel like a calm studio");
     } finally {
       harness.cleanup();
     }
   });
 
-  it("opens a document with local markdown only", () => {
+  it("persists file saves to disk", () => {
     const harness = createHarness();
 
     try {
-      const document = harness.service.openDocument("doc_evergreen");
-
-      expect(document.title).toBe("Evergreen Systems Memo");
-      expect(document.markdown).toContain(
-        "Magick should feel like a calm studio",
+      harness.service.saveFile(
+        "notes/patterns/design-system-field-notes.md",
+        "Fresh local markdown",
       );
-    } finally {
-      harness.cleanup();
-    }
-  });
 
-  it("persists document saves to disk", () => {
-    const harness = createHarness();
-
-    try {
-      const document = harness.service.openDocument("doc_field_notes");
-      harness.service.saveDocument(document.documentId, "Fresh local markdown");
       expect(
         readFileSync(
           join(
-            harness.root,
-            "workspace",
-            "documents",
+            harness.workspaceDir,
             "notes",
             "patterns",
             "design-system-field-notes.md",
@@ -140,43 +146,118 @@ describe("LocalWorkspaceService", () => {
     }
   });
 
-  it("appends local user and assistant messages when sending to a thread", () => {
+  it("rejects file paths that escape the workspace root", () => {
     const harness = createHarness();
 
     try {
-      const events = harness.service.sendThreadMessage(
-        "thread_seed_1",
-        "Desktop verification message",
+      expect(() => harness.service.openFile("../outside.md")).toThrow(
+        "outside the workspace root",
       );
-
-      expect(events).toHaveLength(2);
-      expect(events[0]).toMatchObject({
-        type: "message.added",
-        threadId: "thread_seed_1",
-      });
-      const updatedThread = harness.service
-        .getWorkspaceBootstrap()
-        .threads.find((thread) => thread.threadId === "thread_seed_1");
-      expect(updatedThread?.messages.at(-2)?.body).toBe(
-        "Desktop verification message",
-      );
-      expect(updatedThread?.messages.at(-1)?.author).toBe("ai");
     } finally {
       harness.cleanup();
     }
   });
 
-  it("toggles thread status locally", () => {
+  it("loads legacy thread history from workspace.json", () => {
     const harness = createHarness();
 
     try {
-      const resolvedEvent =
-        harness.service.toggleThreadResolved("thread_seed_1");
-      const reopenedEvent =
-        harness.service.toggleThreadResolved("thread_seed_1");
+      writeFileSync(
+        join(harness.workspaceDir, "workspace.json"),
+        JSON.stringify({
+          threads: [
+            {
+              threadId: "thread_legacy",
+              title: "Legacy Chat",
+              status: "open",
+              updatedAt: "2026-04-04T00:00:00.000Z",
+              messages: [],
+            },
+          ],
+        }),
+        "utf8",
+      );
 
-      expect(resolvedEvent).toMatchObject({ status: "resolved" });
-      expect(reopenedEvent).toMatchObject({ status: "open" });
+      const service = new LocalWorkspaceService({
+        workspaceDir: harness.workspaceDir,
+      });
+
+      expect(service.getWorkspaceBootstrap().threads).toEqual([
+        {
+          threadId: "thread_legacy",
+          title: "Legacy Chat",
+          status: "open",
+          updatedAt: "2026-04-04T00:00:00.000Z",
+          messages: [],
+        },
+      ]);
+    } finally {
+      harness.cleanup();
+    }
+  });
+
+  it("persists local thread replies and emits a completed assistant reply sequence", () => {
+    const harness = createHarness();
+
+    try {
+      const events = harness.service.sendThreadMessage(
+        "thread_seed_1",
+        "Follow up from desktop",
+      );
+
+      expect(events.map((event) => event.type)).toEqual([
+        "message.added",
+        "message.added",
+        ...events.slice(2, -1).map((event) => event.type),
+        "message.completed",
+      ]);
+
+      const persistedThreads = JSON.parse(
+        readFileSync(
+          join(harness.workspaceDir, ".magick", "workspace.json"),
+          "utf8",
+        ),
+      ) as {
+        threads: Array<{
+          threadId: string;
+          messages: Array<{ body: string; status: string }>;
+        }>;
+      };
+      const persistedThread = persistedThreads.threads.find(
+        (thread) => thread.threadId === "thread_seed_1",
+      );
+
+      expect(persistedThread?.messages.at(-2)?.body).toBe(
+        "Follow up from desktop",
+      );
+      expect(persistedThread?.messages.at(-1)?.status).toBe("complete");
+      expect(persistedThread?.messages.at(-1)?.body).toContain("chat durable");
+    } finally {
+      harness.cleanup();
+    }
+  });
+
+  it("persists resolved state changes for local threads", () => {
+    const harness = createHarness();
+
+    try {
+      const event = harness.service.toggleThreadResolved("thread_seed_1");
+
+      expect(event.type).toBe("thread.statusChanged");
+      if (event.type !== "thread.statusChanged") {
+        throw new Error("Expected a thread status change event.");
+      }
+      expect(event.status).toBe("resolved");
+
+      const reloadedService = new LocalWorkspaceService({
+        workspaceDir: harness.workspaceDir,
+      });
+      expect(
+        reloadedService
+          .getWorkspaceBootstrap()
+          .threads.find((thread) => thread.threadId === "thread_seed_1")
+          ?.status,
+      ).toBe("resolved");
     } finally {
       harness.cleanup();
     }

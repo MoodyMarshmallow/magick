@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   type CSSProperties,
   type PointerEvent as ReactPointerEvent,
@@ -15,6 +15,8 @@ import {
   projectThreadEvent,
 } from "../features/comments/state/threadProjector";
 import { WorkspaceSurface } from "../features/workspace/components/WorkspaceSurface";
+import { localWorkspaceFileClient } from "../features/workspace/data/localWorkspaceFileClient";
+import { applyWorkspaceFileEvent } from "../features/workspace/data/workspaceFileEvents";
 import {
   clampLeftSidebarWidth,
   clampRightSidebarWidth,
@@ -23,7 +25,8 @@ import { useWorkspaceSessionStore } from "../features/workspace/state/workspaceS
 import type { WorkspaceDragItem } from "../features/workspace/state/workspaceSessionTypes";
 import { FileTree } from "../features/workspace/tree/FileTree";
 import {
-  findFirstWorkspaceDocumentId,
+  collectWorkspaceFilePaths,
+  findFirstWorkspaceFilePath,
   reconcileExpandedDirectoryIds,
 } from "../features/workspace/tree/fileTreeState";
 
@@ -34,6 +37,7 @@ interface ResizeState {
 }
 
 export function AppShell() {
+  const queryClient = useQueryClient();
   const resizeStateRef = useRef<ResizeState | null>(null);
   const activeThreadIdRef = useRef<string | null>(null);
   const [dragItem, setDragItem] = useState<WorkspaceDragItem | null>(null);
@@ -62,43 +66,73 @@ export function AppShell() {
     };
   }, [dragItem]);
 
-  const bootstrapQuery = useQuery({
-    queryKey: ["workspace-bootstrap"],
+  const fileBootstrapQuery = useQuery({
+    queryKey: ["workspace-files-bootstrap"],
+    queryFn: () => localWorkspaceFileClient.getWorkspaceBootstrap(),
+    refetchInterval: localWorkspaceFileClient.supportsPushWorkspaceEvents
+      ? false
+      : 2000,
+  });
+
+  const threadBootstrapQuery = useQuery({
+    queryKey: ["workspace-thread-bootstrap"],
     queryFn: () => workspaceClient.getWorkspaceBootstrap(),
   });
 
   useEffect(() => {
-    if (!bootstrapQuery.data) {
+    if (!fileBootstrapQuery.data) {
       return;
     }
 
     setExpandedTreeItemIds((currentExpandedIds) => [
       ...reconcileExpandedDirectoryIds({
-        tree: bootstrapQuery.data.tree,
+        tree: fileBootstrapQuery.data.tree,
         expandedIds: currentExpandedIds,
-        activeDocumentId: focusedDocumentId,
+        activeFilePath: focusedDocumentId,
       }),
     ]);
-  }, [bootstrapQuery.data, focusedDocumentId]);
+  }, [fileBootstrapQuery.data, focusedDocumentId]);
 
   useEffect(() => {
-    if (!bootstrapQuery.data) {
+    if (!fileBootstrapQuery.data) {
+      return;
+    }
+
+    const activeFilePaths = new Set(
+      collectWorkspaceFilePaths(fileBootstrapQuery.data.tree),
+    );
+    const workspaceState = useWorkspaceSessionStore.getState();
+    for (const [tabId, tab] of Object.entries(workspaceState.tabsById)) {
+      if (!activeFilePaths.has(tab.documentId)) {
+        workspaceState.closeTab(tabId);
+      }
+    }
+  }, [fileBootstrapQuery.data]);
+
+  useEffect(() => {
+    return localWorkspaceFileClient.onWorkspaceEvent((event) => {
+      void applyWorkspaceFileEvent(queryClient, event);
+    });
+  }, [queryClient]);
+
+  useEffect(() => {
+    if (!threadBootstrapQuery.data) {
       return;
     }
 
     dispatch({
       type: "snapshot.loaded",
-      threads: bootstrapQuery.data.threads,
+      threads: threadBootstrapQuery.data.threads,
     });
     if (
       activeThreadIdRef.current &&
-      !bootstrapQuery.data.threads.some(
+      !threadBootstrapQuery.data.threads.some(
         (thread) => thread.threadId === activeThreadIdRef.current,
       )
     ) {
       setActiveThreadId(null);
     }
-  }, [bootstrapQuery.data, setActiveThreadId]);
+  }, [threadBootstrapQuery.data, setActiveThreadId]);
 
   useEffect(() => {
     return workspaceClient.subscribe((event) => {
@@ -176,13 +210,18 @@ export function AppShell() {
     event.currentTarget.setPointerCapture(event.pointerId);
   };
 
-  if (bootstrapQuery.isLoading) {
+  if (fileBootstrapQuery.isLoading || threadBootstrapQuery.isLoading) {
     return (
       <div className="app-shell app-shell--loading">Loading Magick...</div>
     );
   }
 
-  if (bootstrapQuery.isError || !bootstrapQuery.data) {
+  if (
+    fileBootstrapQuery.isError ||
+    !fileBootstrapQuery.data ||
+    threadBootstrapQuery.isError ||
+    !threadBootstrapQuery.data
+  ) {
     return (
       <div className="app-shell app-shell--loading">
         Failed to load the document workspace.
@@ -216,18 +255,18 @@ export function AppShell() {
 
         <section className="sidebar-section rail-section">
           <FileTree
-            activeDocumentId={focusedDocumentId}
+            activeFilePath={focusedDocumentId}
             expandedIds={expandedTreeItemIds}
             onExpandedIdsChange={setExpandedTreeItemIds}
-            onOpenDocument={(documentId) => {
+            onOpenFile={(documentId) => {
               useWorkspaceSessionStore
                 .getState()
                 .openDocument(documentId, { paneId: null, duplicate: false });
             }}
-            onStartDragDocument={(documentId) => {
+            onStartDragFile={(documentId) => {
               setDragItem(documentId ? { type: "document", documentId } : null);
             }}
-            tree={bootstrapQuery.data.tree}
+            tree={fileBootstrapQuery.data.tree}
           />
         </section>
       </aside>
@@ -244,8 +283,8 @@ export function AppShell() {
       <section className="workspace">
         <WorkspaceSurface
           dragItem={dragItem}
-          initialDocumentId={findFirstWorkspaceDocumentId(
-            bootstrapQuery.data.tree,
+          initialDocumentId={findFirstWorkspaceFilePath(
+            fileBootstrapQuery.data.tree,
           )}
           onDragItemChange={setDragItem}
         />

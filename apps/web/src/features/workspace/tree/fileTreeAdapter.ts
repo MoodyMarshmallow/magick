@@ -18,7 +18,7 @@ export interface FileTreeDirectoryItemData extends FileTreeItemDataBase {
 
 export interface FileTreeFileItemData extends FileTreeItemDataBase {
   readonly type: "file";
-  readonly documentId: string;
+  readonly filePath: string;
 }
 
 export type FileTreeItemData = FileTreeDirectoryItemData | FileTreeFileItemData;
@@ -29,7 +29,7 @@ export interface FileTreeAdapter {
   readonly childrenByParentId: ReadonlyMap<string, readonly string[]>;
   readonly parentById: ReadonlyMap<string, string | null>;
   readonly directoryIds: ReadonlySet<string>;
-  readonly fileItemIdByDocumentId: ReadonlyMap<string, string>;
+  readonly fileItemIdByFilePath: ReadonlyMap<string, string>;
 }
 
 const toDirectoryItemData = (
@@ -48,7 +48,7 @@ const toFileItemData = (
   type: "file",
   name: node.name,
   path: node.path,
-  documentId: node.documentId,
+  filePath: node.filePath,
 });
 
 export const createFileTreeAdapter = (
@@ -58,7 +58,7 @@ export const createFileTreeAdapter = (
   const childrenByParentId = new Map<string, readonly string[]>();
   const parentById = new Map<string, string | null>();
   const directoryIds = new Set<string>();
-  const fileItemIdByDocumentId = new Map<string, string>();
+  const fileItemIdByFilePath = new Map<string, string>();
 
   itemById.set(workspaceRootItemId, {
     id: workspaceRootItemId,
@@ -88,7 +88,7 @@ export const createFileTreeAdapter = (
 
       itemById.set(node.id, toFileItemData(node));
       childrenByParentId.set(node.id, []);
-      fileItemIdByDocumentId.set(node.documentId, node.id);
+      fileItemIdByFilePath.set(node.filePath, node.id);
     }
   };
 
@@ -100,19 +100,19 @@ export const createFileTreeAdapter = (
     childrenByParentId,
     parentById,
     directoryIds,
-    fileItemIdByDocumentId,
+    fileItemIdByFilePath,
   };
 };
 
-export const getDocumentAncestorDirectoryIds = (
+export const getFileAncestorDirectoryIds = (
   adapter: FileTreeAdapter,
-  documentId: string | null,
+  filePath: string | null,
 ): readonly string[] => {
-  if (!documentId) {
+  if (!filePath) {
     return [];
   }
 
-  const fileItemId = adapter.fileItemIdByDocumentId.get(documentId);
+  const fileItemId = adapter.fileItemIdByFilePath.get(filePath);
   if (!fileItemId) {
     return [];
   }

@@ -17,16 +17,16 @@ import {
 
 interface FileTreeProps {
   readonly tree: readonly LocalWorkspaceTreeNode[];
-  readonly activeDocumentId: string | null;
+  readonly activeFilePath: string | null;
   readonly expandedIds: readonly string[];
   readonly onExpandedIdsChange: (updater: Updater<string[]>) => void;
-  readonly onOpenDocument: (documentId: string) => void;
-  readonly onStartDragDocument: (documentId: string | null) => void;
+  readonly onOpenFile: (filePath: string) => void;
+  readonly onStartDragFile: (filePath: string | null) => void;
 }
 
 interface FileTreeNodeProps {
   readonly item: ItemInstance<FileTreeFileItemData | FileTreeDirectoryItemData>;
-  readonly activeDocumentId: string | null;
+  readonly activeFilePath: string | null;
 }
 
 const fileTreeIndentStepRem = 0.9;
@@ -86,14 +86,14 @@ function FileTreeFileRow({
 
 function FileTreeNode({
   item,
-  activeDocumentId,
-  onStartDragDocument,
+  activeFilePath,
+  onStartDragFile,
 }: FileTreeNodeProps & {
-  readonly onStartDragDocument: (documentId: string | null) => void;
+  readonly onStartDragFile: (filePath: string | null) => void;
 }) {
   const itemData = item.getItemData();
   const isFile = itemData.type === "file";
-  const isActive = isFile && itemData.documentId === activeDocumentId;
+  const isActive = isFile && itemData.filePath === activeFilePath;
   const itemProps = item.getProps();
   const level = item.getItemMeta().level;
   const guides = Array.from({ length: level }, (_, index) => index);
@@ -113,13 +113,13 @@ function FileTreeNode({
       draggable={isFile}
       onDragEnd={() => {
         if (isFile) {
-          onStartDragDocument(null);
+          onStartDragFile(null);
         }
       }}
       onDragStart={(event: DragEvent<HTMLButtonElement>) => {
         if (itemData.type === "file") {
           event.dataTransfer.effectAllowed = "copyMove";
-          onStartDragDocument(itemData.documentId);
+          onStartDragFile(itemData.filePath);
         }
       }}
       onClick={handleClick}
@@ -155,11 +155,11 @@ function FileTreeNode({
 
 export function FileTree({
   tree: workspaceTree,
-  activeDocumentId,
+  activeFilePath,
   expandedIds,
   onExpandedIdsChange,
-  onOpenDocument,
-  onStartDragDocument,
+  onOpenFile,
+  onStartDragFile,
 }: FileTreeProps) {
   const adapter = useMemo(
     () => createFileTreeAdapter(workspaceTree),
@@ -185,7 +185,7 @@ export function FileTree({
         return;
       }
 
-      onOpenDocument(itemData.documentId);
+      onOpenFile(itemData.filePath);
     },
     dataLoader: {
       getItem: (itemId) => {
@@ -207,10 +207,10 @@ export function FileTree({
     <div {...tree.getContainerProps("Workspace files")} className="file-tree">
       {tree.getItems().map((item) => (
         <FileTreeNode
-          activeDocumentId={activeDocumentId}
+          activeFilePath={activeFilePath}
           item={item}
           key={item.getId()}
-          onStartDragDocument={onStartDragDocument}
+          onStartDragFile={onStartDragFile}
         />
       ))}
     </div>

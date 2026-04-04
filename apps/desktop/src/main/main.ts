@@ -1,22 +1,34 @@
 import { join } from "node:path";
 import { BrowserWindow, app, ipcMain } from "electron";
 import { LocalWorkspaceService } from "./localWorkspaceService";
+import { LocalWorkspaceWatcher } from "./localWorkspaceWatcher";
 
 const eventChannel = "magick-desktop:thread-event";
+const fileEventChannel = "magick-desktop:file-event";
 
-const createWorkspaceService = () => {
-  const userDataPath = app.getPath("userData");
-  return new LocalWorkspaceService({
-    workspaceDir: join(userDataPath, "workspace"),
+const createWorkspaceService = () =>
+  new LocalWorkspaceService({
+    workspaceDir: process.env.MAGICK_WORKSPACE_DIR ?? process.cwd(),
   });
-};
 
 const registerIpc = (
   window: BrowserWindow,
   workspaceService: LocalWorkspaceService,
 ): void => {
+  ipcMain.removeHandler("magick-desktop:getWorkspaceBootstrap");
+  ipcMain.removeHandler("magick-desktop:getFileWorkspaceBootstrap");
+  ipcMain.removeHandler("magick-desktop:openDocument");
+  ipcMain.removeHandler("magick-desktop:openFile");
+  ipcMain.removeHandler("magick-desktop:saveDocument");
+  ipcMain.removeHandler("magick-desktop:saveFile");
+  ipcMain.removeHandler("magick-desktop:sendThreadMessage");
+  ipcMain.removeHandler("magick-desktop:toggleThreadResolved");
+
   ipcMain.handle("magick-desktop:getWorkspaceBootstrap", async () => {
     return workspaceService.getWorkspaceBootstrap();
+  });
+  ipcMain.handle("magick-desktop:getFileWorkspaceBootstrap", async () => {
+    return workspaceService.getFileWorkspaceBootstrap();
   });
   ipcMain.handle(
     "magick-desktop:openDocument",
@@ -25,9 +37,21 @@ const registerIpc = (
     },
   );
   ipcMain.handle(
+    "magick-desktop:openFile",
+    async (_event, filePath: string) => {
+      return workspaceService.openFile(filePath);
+    },
+  );
+  ipcMain.handle(
     "magick-desktop:saveDocument",
     async (_event, documentId: string, markdown: string) => {
       workspaceService.saveDocument(documentId, markdown);
+    },
+  );
+  ipcMain.handle(
+    "magick-desktop:saveFile",
+    async (_event, filePath: string, markdown: string) => {
+      workspaceService.saveFile(filePath, markdown);
     },
   );
   ipcMain.handle(
@@ -64,7 +88,21 @@ const createWindow = async (): Promise<void> => {
     },
   });
 
-  registerIpc(window, createWorkspaceService());
+  const workspaceService = createWorkspaceService();
+  registerIpc(window, workspaceService);
+
+  const workspaceWatcher = new LocalWorkspaceWatcher({
+    workspaceDir: process.env.MAGICK_WORKSPACE_DIR ?? process.cwd(),
+    onEvent: (event) => {
+      if (!window.isDestroyed()) {
+        window.webContents.send(fileEventChannel, event);
+      }
+    },
+  });
+  workspaceWatcher.start();
+  window.on("closed", () => {
+    workspaceWatcher.stop();
+  });
 
   if (process.env.MAGICK_RENDERER_URL) {
     await window.loadURL(process.env.MAGICK_RENDERER_URL);

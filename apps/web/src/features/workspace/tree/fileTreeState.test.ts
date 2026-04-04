@@ -1,6 +1,6 @@
 import type { LocalWorkspaceTreeNode } from "@magick/shared/localWorkspace";
 import {
-  findFirstWorkspaceDocumentId,
+  findFirstWorkspaceFilePath,
   reconcileExpandedDirectoryIds,
 } from "./fileTreeState";
 
@@ -12,11 +12,11 @@ const sampleTree: readonly LocalWorkspaceTreeNode[] = [
     path: "codex",
     children: [
       {
-        id: "file:doc_manifesto",
+        id: "file:codex/manifesto.md",
         type: "file",
         name: "manifesto.md",
         path: "codex/manifesto.md",
-        documentId: "doc_manifesto",
+        filePath: "codex/manifesto.md",
       },
     ],
   },
@@ -33,11 +33,11 @@ const sampleTree: readonly LocalWorkspaceTreeNode[] = [
         path: "notes/patterns",
         children: [
           {
-            id: "file:doc_field_notes",
+            id: "file:notes/patterns/field-notes.md",
             type: "file",
             name: "field-notes.md",
             path: "notes/patterns/field-notes.md",
-            documentId: "doc_field_notes",
+            filePath: "notes/patterns/field-notes.md",
           },
         ],
       },
@@ -46,9 +46,9 @@ const sampleTree: readonly LocalWorkspaceTreeNode[] = [
 ];
 
 describe("fileTreeState", () => {
-  it("finds the first document id in render order", () => {
-    expect(findFirstWorkspaceDocumentId(sampleTree)).toBe("doc_manifesto");
-    expect(findFirstWorkspaceDocumentId([])).toBeNull();
+  it("finds the first file path in render order", () => {
+    expect(findFirstWorkspaceFilePath(sampleTree)).toBe("codex/manifesto.md");
+    expect(findFirstWorkspaceFilePath([])).toBeNull();
   });
 
   it("preserves valid expanded ids and opens ancestors of the active file", () => {
@@ -56,7 +56,7 @@ describe("fileTreeState", () => {
       reconcileExpandedDirectoryIds({
         tree: sampleTree,
         expandedIds: ["directory:codex", "directory:missing"],
-        activeDocumentId: "doc_field_notes",
+        activeFilePath: "notes/patterns/field-notes.md",
       }),
     ).toEqual([
       "directory:codex",

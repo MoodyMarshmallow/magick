@@ -1,7 +1,11 @@
-import type { MagickDesktopApi } from "@magick/shared/localWorkspace";
+import type {
+  MagickDesktopApi,
+  MagickDesktopFileApi,
+} from "@magick/shared/localWorkspace";
 import { contextBridge, ipcRenderer } from "electron";
 
 const eventChannel = "magick-desktop:thread-event";
+const fileEventChannel = "magick-desktop:file-event";
 
 const api: MagickDesktopApi = {
   getWorkspaceBootstrap: () =>
@@ -28,4 +32,26 @@ const api: MagickDesktopApi = {
   },
 };
 
+const fileApi: MagickDesktopFileApi = {
+  getFileWorkspaceBootstrap: () =>
+    ipcRenderer.invoke("magick-desktop:getFileWorkspaceBootstrap"),
+  openFile: (filePath) =>
+    ipcRenderer.invoke("magick-desktop:openFile", filePath),
+  saveFile: (filePath, markdown) =>
+    ipcRenderer.invoke("magick-desktop:saveFile", filePath, markdown),
+  onWorkspaceEvent: (listener) => {
+    const wrapped = (
+      _event: Electron.IpcRendererEvent,
+      payload: Parameters<typeof listener>[0],
+    ) => {
+      listener(payload);
+    };
+    ipcRenderer.on(fileEventChannel, wrapped);
+    return () => {
+      ipcRenderer.off(fileEventChannel, wrapped);
+    };
+  },
+};
+
 contextBridge.exposeInMainWorld("magickDesktop", api);
+contextBridge.exposeInMainWorld("magickDesktopFiles", fileApi);
