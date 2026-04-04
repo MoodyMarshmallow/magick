@@ -165,4 +165,41 @@ describe("CommentSidebar", () => {
       expect(handleSendReply).not.toHaveBeenCalled();
     });
   });
+
+  it("renders markdown formatting and LaTeX in active thread messages", () => {
+    const markdownThreads: readonly CommentThread[] = [
+      {
+        threadId: "thread_math",
+        title: "Math chat",
+        status: "open",
+        runtimeState: "idle",
+        updatedAt: "2026-04-02T10:00:00.000Z",
+        messages: [
+          {
+            id: "message_math",
+            author: "ai",
+            body: "**bold**\n\n- item one\n- item two\n\n`inline code` and [link](https://example.com) and $E = mc^2$",
+            createdAt: "2026-04-02T10:00:00.000Z",
+            status: "complete",
+          },
+        ],
+      },
+    ];
+
+    const { container } = render(
+      <CommentSidebar
+        {...baseProps}
+        activeThreadId="thread_math"
+        threads={markdownThreads}
+      />,
+    );
+
+    expect(screen.getByText("bold").tagName).toBe("STRONG");
+    expect(container.querySelector("ul li")?.textContent).toBe("item one");
+    expect(screen.getByText("inline code").tagName).toBe("CODE");
+    expect(
+      screen.getByRole("link", { name: "link" }).getAttribute("href"),
+    ).toBe("https://example.com");
+    expect(container.querySelector(".katex")).toBeTruthy();
+  });
 });

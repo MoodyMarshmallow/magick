@@ -1,6 +1,7 @@
 import { Archive, ArrowLeft, Circle, CircleCheckBig, Plus } from "lucide-react";
 import { type KeyboardEvent, useState } from "react";
 import { appIconSize } from "../../../app/appIconSize";
+import { RenderedMarkdown } from "../../document/components/RenderedMarkdown";
 import type { CommentThread } from "../state/threadProjector";
 
 interface CommentSidebarProps {
@@ -90,7 +91,13 @@ export function CommentSidebar({
                     {new Date(message.createdAt).toLocaleTimeString()}
                   </span>
                 </header>
-                <p>{message.body || "Streaming..."}</p>
+                <div className="thread-record__message-body">
+                  {message.body ? (
+                    <RenderedMarkdown content={message.body} />
+                  ) : (
+                    <p>Streaming...</p>
+                  )}
+                </div>
               </article>
             ))}
           </div>

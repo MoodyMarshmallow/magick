@@ -1,4 +1,5 @@
 @import url("https://fonts.googleapis.com/css2?family=Alegreya:wght@500;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap");
+@import "katex/dist/katex.min.css";
 
 @font-face {
   font-family: "Departure Mono";
@@ -702,8 +703,133 @@ button:disabled {
   font-weight: 500;
 }
 
-.thread-record__message p {
+.rendered-markdown,
+.thread-record__message-body,
+.editor-surface__prose {
   font-family: "IBM Plex Mono", monospace;
+}
+
+.rendered-markdown > :first-child,
+.thread-record__message-body > :first-child {
+  margin-top: 0;
+}
+
+.rendered-markdown > :last-child,
+.thread-record__message-body > :last-child {
+  margin-bottom: 0;
+}
+
+.rendered-markdown p,
+.rendered-markdown ul,
+.rendered-markdown ol,
+.rendered-markdown pre,
+.rendered-markdown blockquote,
+.editor-surface__prose p,
+.editor-surface__prose ul,
+.editor-surface__prose ol,
+.editor-surface__prose pre,
+.editor-surface__prose blockquote {
+  margin: 0.2rem 0 0;
+  line-height: 1.65;
+  color: var(--fg);
+}
+
+.rendered-markdown ul,
+.rendered-markdown ol,
+.editor-surface__prose ul,
+.editor-surface__prose ol {
+  padding-left: 1.2rem;
+}
+
+.rendered-markdown :not(pre) > code,
+.editor-surface__prose :not(pre) > code {
+  display: inline-block;
+  padding: 0.05rem 0.35rem;
+  border: 1px solid var(--line);
+  background: var(--bg-soft);
+  color: var(--yellow);
+  line-height: 1.45;
+}
+
+.rendered-markdown pre,
+.editor-surface__prose pre {
+  overflow-x: auto;
+  padding: 0.75rem 0.9rem;
+  border: 1px solid var(--line);
+  background: var(--bg-soft);
+}
+
+.rendered-markdown pre code,
+.editor-surface__prose pre code {
+  display: block;
+  min-width: max-content;
+  font-family: inherit;
+  color: var(--fg);
+  line-height: 1.7;
+}
+
+.rendered-markdown a,
+.thread-record__message-body a,
+.editor-surface__prose a {
+  color: var(--aqua);
+}
+
+.rendered-markdown strong,
+.editor-surface__prose strong {
+  color: var(--fg);
+}
+
+.rendered-markdown blockquote,
+.editor-surface__prose blockquote {
+  width: 100%;
+  border: 1px solid var(--line);
+  background: var(--bg-soft);
+  padding: 0.75rem 0.9rem;
+}
+
+.rendered-markdown .hljs-comment,
+.rendered-markdown .hljs-quote {
+  color: var(--fg-dim);
+}
+
+.rendered-markdown .hljs-keyword,
+.rendered-markdown .hljs-selector-tag,
+.rendered-markdown .hljs-literal,
+.rendered-markdown .hljs-name,
+.rendered-markdown .hljs-built_in,
+.rendered-markdown .hljs-type,
+.rendered-markdown .hljs-attr {
+  color: var(--aqua);
+}
+
+.rendered-markdown .hljs-string,
+.rendered-markdown .hljs-regexp,
+.rendered-markdown .hljs-addition,
+.rendered-markdown .hljs-symbol,
+.rendered-markdown .hljs-bullet {
+  color: var(--green);
+}
+
+.rendered-markdown .hljs-title,
+.rendered-markdown .hljs-section,
+.rendered-markdown .hljs-variable,
+.rendered-markdown .hljs-template-variable {
+  color: var(--yellow);
+}
+
+.rendered-markdown .hljs-number,
+.rendered-markdown .hljs-link,
+.rendered-markdown .hljs-deletion {
+  color: var(--orange);
+}
+
+.rendered-markdown .hljs-emphasis {
+  font-style: italic;
+}
+
+.rendered-markdown .hljs-strong {
+  font-weight: 700;
+  color: var(--aqua);
 }
 
 .workspace__footer {
@@ -1090,23 +1216,20 @@ button:disabled {
   color: var(--fg-soft);
 }
 
-.editor-surface__prose p {
-  margin: 0 0 1.15rem;
+.editor-surface__prose > :first-child {
+  margin-top: 0;
 }
 
-blockquote,
+.editor-surface__prose > :last-child {
+  margin-bottom: 0;
+}
+
 textarea {
   width: 100%;
   border: 1px solid var(--line);
   border-radius: 0;
   background: var(--bg-soft);
   color: var(--fg);
-}
-
-blockquote {
-  margin: 0;
-  padding: 0.75rem 0.9rem;
-  line-height: 1.7;
 }
 
 textarea {
@@ -1232,12 +1355,6 @@ textarea {
   padding: 0.75rem 0.85rem;
   background: var(--bg);
   border: 1px solid var(--line);
-}
-
-.thread-record__message p {
-  margin: 0.2rem 0 0;
-  line-height: 1.65;
-  color: var(--fg);
 }
 
 .thread-record__composer {

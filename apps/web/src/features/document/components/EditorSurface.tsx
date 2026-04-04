@@ -1,6 +1,12 @@
 import { EditorContent, useEditor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
-import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
+import {
+  type MouseEvent,
+  forwardRef,
+  useEffect,
+  useImperativeHandle,
+  useRef,
+} from "react";
 import {
   editorJsonToMarkdown,
   markdownToEditorHtml,
@@ -190,8 +196,23 @@ export const EditorSurface = forwardRef<
     },
   }));
 
+  const handleSurfaceMouseDown = (event: MouseEvent<HTMLDivElement>) => {
+    if (!editor) {
+      return;
+    }
+
+    if (
+      event.target !== event.currentTarget &&
+      event.target !== editor.view.dom
+    ) {
+      return;
+    }
+
+    editor.commands.focus("end");
+  };
+
   return (
-    <div className="editor-surface">
+    <div className="editor-surface" onMouseDown={handleSurfaceMouseDown}>
       <EditorContent editor={editor} />
     </div>
   );
