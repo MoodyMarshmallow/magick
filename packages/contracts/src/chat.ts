@@ -2,7 +2,9 @@
 
 import type { ProviderKey, ResumeStrategy } from "./provider";
 
-export type ThreadStatus = "idle" | "running" | "interrupted" | "failed";
+export type ThreadRuntimeState = "idle" | "running" | "interrupted" | "failed";
+
+export type ThreadResolutionState = "open" | "resolved";
 
 export interface ThreadRecord {
   readonly id: string;
@@ -10,6 +12,7 @@ export interface ThreadRecord {
   readonly providerKey: ProviderKey;
   readonly providerSessionId: string;
   readonly title: string;
+  readonly resolutionState: ThreadResolutionState;
   readonly createdAt: string;
   readonly updatedAt: string;
 }
@@ -18,6 +21,7 @@ export interface TranscriptMessage {
   readonly id: string;
   readonly role: "user" | "assistant";
   readonly content: string;
+  readonly createdAt: string;
   readonly status: "streaming" | "complete" | "interrupted" | "failed";
 }
 
@@ -27,13 +31,15 @@ export interface ThreadViewModel {
   readonly providerKey: ProviderKey;
   readonly providerSessionId: string;
   readonly title: string;
-  readonly status: ThreadStatus;
+  readonly resolutionState: ThreadResolutionState;
+  readonly runtimeState: ThreadRuntimeState;
   readonly messages: readonly TranscriptMessage[];
   readonly activeTurnId: string | null;
   readonly latestSequence: number;
   readonly lastError: string | null;
   readonly lastUserMessageAt: string | null;
   readonly lastAssistantMessageAt: string | null;
+  readonly latestActivityAt: string;
   readonly updatedAt: string;
 }
 
@@ -42,8 +48,10 @@ export interface ThreadSummary {
   readonly workspaceId: string;
   readonly providerKey: ProviderKey;
   readonly title: string;
-  readonly status: ThreadStatus;
+  readonly resolutionState: ThreadResolutionState;
+  readonly runtimeState: ThreadRuntimeState;
   readonly latestSequence: number;
+  readonly latestActivityAt: string;
   readonly updatedAt: string;
 }
 
@@ -79,7 +87,9 @@ export type DomainEvent =
     >
   | EventBase<"turn.completed", { turnId: string; messageId: string }>
   | EventBase<"turn.interrupted", { turnId: string; reason: string }>
-  | EventBase<"turn.failed", { turnId: string; error: string }>;
+  | EventBase<"turn.failed", { turnId: string; error: string }>
+  | EventBase<"thread.resolved", Record<string, never>>
+  | EventBase<"thread.reopened", Record<string, never>>;
 
 export type ClientCommand =
   | {
@@ -105,6 +115,14 @@ export type ClientCommand =
   | {
       readonly type: "thread.sendMessage";
       readonly payload: { threadId: string; content: string };
+    }
+  | {
+      readonly type: "thread.resolve";
+      readonly payload: { threadId: string };
+    }
+  | {
+      readonly type: "thread.reopen";
+      readonly payload: { threadId: string };
     }
   | {
       readonly type: "thread.stopTurn";

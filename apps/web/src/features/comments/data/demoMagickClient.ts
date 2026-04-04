@@ -22,6 +22,7 @@ interface MutableCommentThread {
   threadId: string;
   title: string;
   status: CommentThread["status"];
+  runtimeState: CommentThread["runtimeState"];
   updatedAt: string;
   messages: MutableCommentMessage[];
 }
@@ -202,6 +203,7 @@ const createSeedThreads = (now: () => string): MutableCommentThread[] => {
       threadId: "thread_seed_1",
       title: "Chat 1",
       status: "open",
+      runtimeState: "idle",
       updatedAt: now(),
       messages: [
         createMessage({
@@ -220,6 +222,7 @@ const createSeedThreads = (now: () => string): MutableCommentThread[] => {
       threadId: "thread_seed_long",
       title: "Long Scroll Thread",
       status: "open",
+      runtimeState: "idle",
       updatedAt: now(),
       messages: longThreadMessages.map((message) => ({
         ...message,
@@ -230,6 +233,7 @@ const createSeedThreads = (now: () => string): MutableCommentThread[] => {
       threadId: `thread_seed_${index + 2}`,
       title: `Chat ${index + 2}`,
       status: index % 5 === 4 ? ("resolved" as const) : ("open" as const),
+      runtimeState: "idle" as const,
       updatedAt: now(),
       messages: [
         createMessage({
@@ -412,6 +416,7 @@ export const createDemoMagickClient = (
         threadId: `thread_${createId()}`,
         title: args.title,
         status: "open",
+        runtimeState: "idle",
         updatedAt: timestamp,
         messages: [
           {

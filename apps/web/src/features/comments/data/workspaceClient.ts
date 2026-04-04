@@ -1,11 +1,13 @@
 import type {
   LocalDocumentPayload,
   LocalThreadEvent,
+  LocalThreadMessage,
   LocalWorkspaceBootstrap,
   LocalWorkspaceThread,
   LocalWorkspaceTreeNode,
   MagickDesktopApi,
 } from "@magick/shared/localWorkspace";
+import type { CommentThread } from "../state/threadProjector";
 import {
   type DocumentBootstrap,
   demoDocumentIds,
@@ -22,13 +24,16 @@ export interface WorkspaceClient {
 }
 
 const toLocalWorkspaceThread = (
-  thread: Awaited<ReturnType<typeof demoMagickClient.getThreads>>[number],
+  thread: CommentThread,
 ): LocalWorkspaceThread => ({
   threadId: thread.threadId,
   title: thread.title,
   status: thread.status,
   updatedAt: thread.updatedAt,
-  messages: thread.messages,
+  messages: thread.messages.map((message) => ({
+    ...message,
+    status: message.status === "interrupted" ? "failed" : message.status,
+  })),
 });
 
 const toLocalThreadEvent = (
@@ -41,7 +46,13 @@ const toLocalThreadEvent = (
   if (event.type === "snapshot.loaded") {
     return {
       type: event.type,
-      threads: event.threads.map(toLocalWorkspaceThread),
+      threads: event.threads.map((thread) => ({
+        threadId: thread.threadId,
+        title: thread.title,
+        status: thread.resolutionState,
+        updatedAt: thread.updatedAt,
+        messages: [],
+      })),
     };
   }
 
@@ -52,7 +63,28 @@ const toLocalThreadEvent = (
     };
   }
 
-  return event;
+  if (event.type === "message.added") {
+    return {
+      ...event,
+      message: {
+        ...event.message,
+        status:
+          event.message.status === "interrupted"
+            ? "failed"
+            : (event.message.status as LocalThreadMessage["status"]),
+      },
+    };
+  }
+
+  if (event.type === "message.delta" || event.type === "message.completed") {
+    return event;
+  }
+
+  if (event.type === "thread.statusChanged") {
+    return event;
+  }
+
+  throw new Error(`Unsupported local thread event '${event.type}'.`);
 };
 
 const createBrowserWorkspaceTree = (

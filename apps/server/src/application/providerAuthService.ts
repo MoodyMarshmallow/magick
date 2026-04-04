@@ -34,6 +34,9 @@ export interface ProviderAuthServiceApi {
     loginId: string,
   ) => Promise<void>;
   readonly logout: (providerKey: ProviderKey) => Promise<void>;
+  readonly subscribe: (
+    listener: (auth: ProviderAuthState) => void | Promise<void>,
+  ) => () => void;
 }
 
 export interface ProviderAuthServiceOptions {
@@ -54,6 +57,9 @@ export class ProviderAuthService implements ProviderAuthServiceApi {
       readonly providerKey: ProviderKey;
       readonly login: CodexOAuthLogin;
     }
+  >();
+  readonly #listeners = new Set<
+    (auth: ProviderAuthState) => void | Promise<void>
   >();
 
   constructor(options: ProviderAuthServiceOptions) {
@@ -91,6 +97,13 @@ export class ProviderAuthService implements ProviderAuthServiceApi {
     if (providerKey !== "codex") {
       throw new ProviderUnavailableError({ providerKey: String(providerKey) });
     }
+  }
+
+  async #emit(providerKey: ProviderKey): Promise<void> {
+    const auth = await this.read(providerKey);
+    await Promise.allSettled(
+      [...this.#listeners].map((listener) => Promise.resolve(listener(auth))),
+    );
   }
 
   #persistTokens(tokens: {
@@ -147,8 +160,18 @@ export class ProviderAuthService implements ProviderAuthServiceApi {
       return refreshed;
     } catch {
       this.#authRepository.delete("codex");
+      void this.#emit("codex");
       return null;
     }
+  }
+
+  subscribe(
+    listener: (auth: ProviderAuthState) => void | Promise<void>,
+  ): () => void {
+    this.#listeners.add(listener);
+    return () => {
+      this.#listeners.delete(listener);
+    };
   }
 
   async read(
@@ -193,6 +216,7 @@ export class ProviderAuthService implements ProviderAuthServiceApi {
 
     const login = await this.#oauthHarness.startLogin();
     this.#activeLogins.set(login.loginId, { providerKey, login });
+    await this.#emit(providerKey);
 
     void (async () => {
       try {
@@ -207,6 +231,7 @@ export class ProviderAuthService implements ProviderAuthServiceApi {
         // Browser login failure only affects the active flow; callers can observe it through state.
       } finally {
         this.#activeLogins.delete(login.loginId);
+        await this.#emit(providerKey);
       }
     })();
 
@@ -237,6 +262,7 @@ export class ProviderAuthService implements ProviderAuthServiceApi {
     }
 
     this.#activeLogins.delete(loginId);
+    await this.#emit(providerKey);
   }
 
   async logout(providerKey: ProviderKey): Promise<void> {
@@ -251,5 +277,6 @@ export class ProviderAuthService implements ProviderAuthServiceApi {
     }
 
     this.#authRepository.delete(providerKey);
+    await this.#emit(providerKey);
   }
 }

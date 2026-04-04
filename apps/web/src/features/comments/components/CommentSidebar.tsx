@@ -1,4 +1,4 @@
-import { Archive, ArrowLeft, Circle, CircleCheckBig } from "lucide-react";
+import { Archive, ArrowLeft, Circle, CircleCheckBig, Plus } from "lucide-react";
 import { type KeyboardEvent, useState } from "react";
 import { appIconSize } from "../../../app/appIconSize";
 import type { CommentThread } from "../state/threadProjector";
@@ -6,7 +6,11 @@ import type { CommentThread } from "../state/threadProjector";
 interface CommentSidebarProps {
   readonly threads: readonly CommentThread[];
   readonly activeThreadId: string | null;
+  readonly isLoggedIn: boolean;
+  readonly isLoginPending: boolean;
   readonly onActivateThread: (threadId: string) => void;
+  readonly onCreateThread: () => Promise<void>;
+  readonly onLogin: () => Promise<void>;
   readonly onShowLedger: () => void;
   readonly onSendReply: (threadId: string, message: string) => Promise<void>;
   readonly onToggleResolved: (threadId: string) => Promise<void>;
@@ -15,7 +19,11 @@ interface CommentSidebarProps {
 export function CommentSidebar({
   threads,
   activeThreadId,
+  isLoggedIn,
+  isLoginPending,
   onActivateThread,
+  onCreateThread,
+  onLogin,
   onShowLedger,
   onSendReply,
   onToggleResolved,
@@ -56,6 +64,18 @@ export function CommentSidebar({
 
   return (
     <aside className="comment-sidebar">
+      <header className="comment-sidebar__header">
+        <button
+          className="flat-button comment-sidebar__login"
+          disabled={isLoggedIn || isLoginPending}
+          onClick={async () => {
+            await onLogin();
+          }}
+          type="button"
+        >
+          {isLoggedIn ? "logged in" : "log in"}
+        </button>
+      </header>
       {activeThread ? (
         <section className="comment-sidebar__active-thread">
           <div className="thread-record__messages">
@@ -171,7 +191,19 @@ export function CommentSidebar({
             ) : null}
           </div>
           <footer className="comment-sidebar__footer">
-            <strong>Chats</strong>
+            <div className="comment-sidebar__footer-main">
+              <button
+                aria-label="Create new chat"
+                className="flat-button comment-sidebar__create"
+                onClick={async () => {
+                  await onCreateThread();
+                }}
+                type="button"
+              >
+                <Plus size={appIconSize} />
+              </button>
+              <strong>Chats</strong>
+            </div>
             <button
               aria-label={
                 showResolvedOnly ? "Show open chats" : "Show resolved chats"

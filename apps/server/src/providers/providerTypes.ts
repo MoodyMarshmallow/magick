@@ -102,4 +102,5 @@ export interface ProviderSessionRuntime {
 
 export interface ProviderRegistryService {
   readonly get: (providerKey: ProviderKey) => ProviderAdapter;
+  readonly list: () => readonly ProviderAdapter[];
 }

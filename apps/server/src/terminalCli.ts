@@ -132,10 +132,12 @@ const printResponse = (
   switch (data.kind) {
     case "bootstrap":
       output.write(`bootstrapped workspace '${state.workspaceId}'\n`);
-      output.write(`threads: ${data.threadSummaries.length}\n`);
-      if (data.activeThread) {
-        state.activeThreadId = data.activeThread.threadId;
-        output.write(`active thread: ${data.activeThread.threadId}\n`);
+      output.write(`threads: ${data.bootstrap.threadSummaries.length}\n`);
+      if (data.bootstrap.activeThread) {
+        state.activeThreadId = data.bootstrap.activeThread.threadId;
+        output.write(
+          `active thread: ${data.bootstrap.activeThread.threadId}\n`,
+        );
       }
       return;
     case "threadList":
@@ -145,14 +147,14 @@ const printResponse = (
       }
       for (const summary of data.threadSummaries) {
         output.write(
-          `${summary.threadId} | ${summary.status} | ${summary.title} | ${summary.providerKey}\n`,
+          `${summary.threadId} | ${summary.resolutionState}/${summary.runtimeState} | ${summary.title} | ${summary.providerKey}\n`,
         );
       }
       return;
     case "threadState":
       state.activeThreadId = data.thread.threadId;
       output.write(
-        `thread ${data.thread.threadId} | ${data.thread.status} | messages=${data.thread.messages.length}\n`,
+        `thread ${data.thread.threadId} | ${data.thread.resolutionState}/${data.thread.runtimeState} | messages=${data.thread.messages.length}\n`,
       );
       if (data.replayedEvents && data.replayedEvents.length > 0) {
         output.write(`replayed ${data.replayedEvents.length} event(s)\n`);

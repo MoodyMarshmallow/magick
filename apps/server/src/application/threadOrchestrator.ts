@@ -1,10 +1,11 @@
 // Coordinates thread lifecycle, provider execution, persistence, and event projection.
 
-import { Effect, Stream } from "effect";
+import { Cause, Effect, Exit, Option, Stream } from "effect";
 
 import type {
   DomainEvent,
   ThreadRecord,
+  ThreadResolutionState,
   ThreadSummary,
   ThreadViewModel,
 } from "@magick/contracts/chat";
@@ -46,15 +47,11 @@ export interface CreateThreadInput {
 }
 
 export interface ThreadOrchestratorApi {
-  readonly createThread: (
-    input: CreateThreadInput,
-  ) => Effect.Effect<ThreadViewModel, BackendError>;
+  readonly createThread: (input: CreateThreadInput) => Promise<ThreadViewModel>;
   readonly listThreads: (
     workspaceId: string,
-  ) => Effect.Effect<readonly ThreadSummary[], BackendError>;
-  readonly openThread: (
-    threadId: string,
-  ) => Effect.Effect<ThreadViewModel, BackendError>;
+  ) => Promise<readonly ThreadSummary[]>;
+  readonly openThread: (threadId: string) => Promise<ThreadViewModel>;
   readonly sendMessage: (
     threadId: string,
     content: string,
@@ -62,12 +59,12 @@ export interface ThreadOrchestratorApi {
   readonly stopTurn: (
     threadId: string,
   ) => Effect.Effect<ThreadViewModel, BackendError>;
+  readonly resolveThread: (threadId: string) => Promise<ThreadViewModel>;
+  readonly reopenThread: (threadId: string) => Promise<ThreadViewModel>;
   readonly retryTurn: (
     threadId: string,
   ) => Effect.Effect<ThreadViewModel, BackendError>;
-  readonly ensureSession: (
-    threadId: string,
-  ) => Effect.Effect<ThreadViewModel, BackendError>;
+  readonly ensureSession: (threadId: string) => Promise<ThreadViewModel>;
 }
 
 const toBackendError = (error: unknown): BackendError => {
@@ -132,6 +129,20 @@ export class ThreadOrchestrator implements ThreadOrchestratorApi {
     this.#idGenerator = args.idGenerator;
   }
 
+  readonly #run = <A>(effect: Effect.Effect<A, BackendError>): Promise<A> =>
+    Effect.runPromiseExit(effect).then((exit) => {
+      if (Exit.isSuccess(exit)) {
+        return exit.value;
+      }
+
+      const failure = Cause.failureOption(exit.cause);
+      if (Option.isSome(failure)) {
+        throw failure.value;
+      }
+
+      throw new Error("Unhandled backend effect failure");
+    });
+
   readonly #requireThread = (threadId: string) =>
     Effect.gen(
       function* (this: ThreadOrchestrator) {
@@ -148,7 +159,7 @@ export class ThreadOrchestrator implements ThreadOrchestratorApi {
       }.bind(this),
     );
 
-  readonly openThread = (threadId: string) =>
+  readonly #openThreadEffect = (threadId: string) =>
     Effect.gen(
       function* (this: ThreadOrchestrator) {
         const snapshot = yield* fromSync(() =>
@@ -163,6 +174,9 @@ export class ThreadOrchestrator implements ThreadOrchestratorApi {
         return snapshot;
       }.bind(this),
     );
+
+  readonly openThread = (threadId: string) =>
+    this.#run(this.#openThreadEffect(threadId));
 
   readonly #buildContextMessages = (
     thread: ThreadViewModel,
@@ -365,7 +379,7 @@ export class ThreadOrchestrator implements ThreadOrchestratorApi {
       }.bind(this),
     );
 
-  readonly createThread = (input: CreateThreadInput) =>
+  readonly #createThreadEffect = (input: CreateThreadInput) =>
     Effect.gen(
       function* (this: ThreadOrchestrator) {
         const adapter = yield* fromSync(() =>
@@ -396,6 +410,7 @@ export class ThreadOrchestrator implements ThreadOrchestratorApi {
           providerKey: input.providerKey,
           providerSessionId,
           title: input.title ?? "New chat",
+          resolutionState: "open",
           createdAt: now,
           updatedAt: now,
         };
@@ -431,11 +446,14 @@ export class ThreadOrchestrator implements ThreadOrchestratorApi {
       }.bind(this),
     );
 
+  readonly createThread = (input: CreateThreadInput) =>
+    this.#run(this.#createThreadEffect(input));
+
   readonly sendMessage = (threadId: string, content: string) =>
     Effect.gen(
       function* (this: ThreadOrchestrator) {
         const thread = yield* this.#requireThread(threadId);
-        const snapshot = yield* this.openThread(threadId);
+        const snapshot = yield* fromPromise(() => this.openThread(threadId));
 
         const activeTurn = this.#runtimeState.getActiveTurn(threadId);
         if (snapshot.activeTurnId || activeTurn) {
@@ -517,7 +535,7 @@ export class ThreadOrchestrator implements ThreadOrchestratorApi {
           ),
         );
 
-        return yield* this.openThread(threadId);
+        return yield* fromPromise(() => this.openThread(threadId));
       }.bind(this),
     );
 
@@ -526,7 +544,7 @@ export class ThreadOrchestrator implements ThreadOrchestratorApi {
       function* (this: ThreadOrchestrator) {
         const activeTurn = this.#runtimeState.getActiveTurn(threadId);
         if (!activeTurn) {
-          return yield* this.openThread(threadId);
+          return yield* fromPromise(() => this.openThread(threadId));
         }
 
         const runtime = this.#runtimeState.getSessionRuntime(
@@ -559,14 +577,59 @@ export class ThreadOrchestrator implements ThreadOrchestratorApi {
           },
         ]);
         this.#runtimeState.clearActiveTurn(threadId);
-        return yield* this.openThread(threadId);
+        return yield* fromPromise(() => this.openThread(threadId));
       }.bind(this),
     );
+
+  readonly #setThreadResolutionState = (
+    threadId: string,
+    resolutionState: ThreadResolutionState,
+  ) =>
+    Effect.gen(
+      function* (this: ThreadOrchestrator) {
+        const thread = yield* fromPromise(() => this.openThread(threadId));
+        if (thread.resolutionState === resolutionState) {
+          return thread;
+        }
+
+        const occurredAt = this.#clock.now();
+        const record = yield* this.#requireThread(threadId);
+        yield* fromSync(() =>
+          this.#threadRepository.updateResolutionState(
+            threadId,
+            resolutionState,
+            occurredAt,
+          ),
+        );
+
+        const projected = yield* this.#persistAndProject(threadId, [
+          {
+            eventId: this.#idGenerator.next("event"),
+            threadId,
+            providerSessionId: record.providerSessionId,
+            occurredAt,
+            type:
+              resolutionState === "resolved"
+                ? "thread.resolved"
+                : "thread.reopened",
+            payload: {},
+          },
+        ]);
+
+        return projected.thread;
+      }.bind(this),
+    );
+
+  readonly resolveThread = (threadId: string) =>
+    this.#run(this.#setThreadResolutionState(threadId, "resolved"));
+
+  readonly reopenThread = (threadId: string) =>
+    this.#run(this.#setThreadResolutionState(threadId, "open"));
 
   readonly retryTurn = (threadId: string) =>
     Effect.gen(
       function* (this: ThreadOrchestrator) {
-        const thread = yield* this.openThread(threadId);
+        const thread = yield* fromPromise(() => this.openThread(threadId));
         const lastUserMessage = [...thread.messages]
           .reverse()
           .find((message) => message.role === "user");
@@ -584,15 +647,18 @@ export class ThreadOrchestrator implements ThreadOrchestratorApi {
       }.bind(this),
     );
 
-  readonly ensureSession = (threadId: string) =>
+  readonly #ensureSessionEffect = (threadId: string) =>
     Effect.gen(
       function* (this: ThreadOrchestrator) {
         const thread = yield* this.#requireThread(threadId);
         yield* this.#getOrCreateSessionRuntime(thread);
-        return yield* this.openThread(threadId);
+        return yield* fromPromise(() => this.openThread(threadId));
       }.bind(this),
     );
 
-  readonly listThreads = (workspaceId: string) =>
-    fromSync(() => this.#threadRepository.listByWorkspace(workspaceId));
+  readonly ensureSession = (threadId: string) =>
+    this.#run(this.#ensureSessionEffect(threadId));
+
+  readonly listThreads = async (workspaceId: string) =>
+    this.#threadRepository.listByWorkspace(workspaceId);
 }

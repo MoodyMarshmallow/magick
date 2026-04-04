@@ -23,4 +23,8 @@ export class ProviderRegistry implements ProviderRegistryService {
 
     return adapter;
   }
+
+  list(): readonly ProviderAdapter[] {
+    return [...this.#providers.values()];
+  }
 }

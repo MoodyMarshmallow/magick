@@ -121,6 +121,7 @@ export const attachWebSocketServer = (
   return new WebSocketCommandServer({
     httpServer,
     providerAuth: services.providerAuthService,
+    providerRegistry: services.providerRegistry,
     replayService: services.replayService,
     threadOrchestrator: services.threadOrchestrator,
     connections: services.connections,

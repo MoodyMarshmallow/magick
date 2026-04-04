@@ -42,13 +42,15 @@ const cloneThread = (thread: ThreadViewModel): MutableThreadViewModel => {
     providerKey: thread.providerKey,
     providerSessionId: thread.providerSessionId,
     title: thread.title,
-    status: thread.status,
+    resolutionState: thread.resolutionState,
+    runtimeState: thread.runtimeState,
     messages: [...thread.messages],
     activeTurnId: thread.activeTurnId,
     latestSequence: thread.latestSequence,
     lastError: thread.lastError,
     lastUserMessageAt: thread.lastUserMessageAt,
     lastAssistantMessageAt: thread.lastAssistantMessageAt,
+    latestActivityAt: thread.latestActivityAt,
     updatedAt: thread.updatedAt,
   };
 };
@@ -77,13 +79,15 @@ export const projectThreadEvents = (
         providerKey: event.payload.providerKey,
         providerSessionId: event.providerSessionId,
         title: event.payload.title,
-        status: "idle",
+        resolutionState: "open",
+        runtimeState: "idle",
         messages: [],
         activeTurnId: null,
         latestSequence: event.sequence,
         lastError: null,
         lastUserMessageAt: null,
         lastAssistantMessageAt: null,
+        latestActivityAt: event.occurredAt,
         updatedAt: event.occurredAt,
       };
       continue;
@@ -93,17 +97,32 @@ export const projectThreadEvents = (
       case "thread.created":
         state.title = event.payload.title;
         state.latestSequence = event.sequence;
+        state.latestActivityAt = event.occurredAt;
+        state.updatedAt = event.occurredAt;
+        break;
+      case "thread.resolved":
+        state.resolutionState = "resolved";
+        state.latestSequence = event.sequence;
+        state.latestActivityAt = event.occurredAt;
+        state.updatedAt = event.occurredAt;
+        break;
+      case "thread.reopened":
+        state.resolutionState = "open";
+        state.latestSequence = event.sequence;
+        state.latestActivityAt = event.occurredAt;
         state.updatedAt = event.occurredAt;
         break;
       case "provider.session.started":
       case "provider.session.recovered":
         state.providerSessionId = event.providerSessionId;
         state.latestSequence = event.sequence;
+        state.latestActivityAt = event.occurredAt;
         state.updatedAt = event.occurredAt;
         break;
       case "provider.session.disconnected":
-        state.status = state.activeTurnId ? "failed" : state.status;
+        state.runtimeState = state.activeTurnId ? "failed" : state.runtimeState;
         state.latestSequence = event.sequence;
+        state.latestActivityAt = event.occurredAt;
         state.updatedAt = event.occurredAt;
         state.lastError = event.payload.reason;
         break;
@@ -114,18 +133,21 @@ export const projectThreadEvents = (
             id: event.payload.messageId,
             role: "user",
             content: event.payload.content,
+            createdAt: event.occurredAt,
             status: "complete",
           },
         ];
         state.latestSequence = event.sequence;
+        state.latestActivityAt = event.occurredAt;
         state.updatedAt = event.occurredAt;
         state.lastUserMessageAt = event.occurredAt;
         state.lastError = null;
         break;
       case "turn.started":
-        state.status = "running";
+        state.runtimeState = "running";
         state.activeTurnId = event.payload.turnId;
         state.latestSequence = event.sequence;
+        state.latestActivityAt = event.occurredAt;
         state.updatedAt = event.occurredAt;
         state.lastError = null;
         break;
@@ -138,9 +160,11 @@ export const projectThreadEvents = (
           id: `${event.payload.turnId}:assistant`,
           role: "assistant",
           content: `${existing?.content ?? ""}${event.payload.delta}`,
+          createdAt: existing?.createdAt ?? event.occurredAt,
           status: "streaming",
         });
         state.latestSequence = event.sequence;
+        state.latestActivityAt = event.occurredAt;
         state.updatedAt = event.occurredAt;
         state.lastAssistantMessageAt = event.occurredAt;
         break;
@@ -150,7 +174,7 @@ export const projectThreadEvents = (
           state,
           event.payload.turnId,
         );
-        state.status = "idle";
+        state.runtimeState = "idle";
         state.activeTurnId = null;
         if (existing) {
           state.messages = upsertMessage(state.messages, {
@@ -159,6 +183,7 @@ export const projectThreadEvents = (
           });
         }
         state.latestSequence = event.sequence;
+        state.latestActivityAt = event.occurredAt;
         state.updatedAt = event.occurredAt;
         state.lastAssistantMessageAt = event.occurredAt;
         break;
@@ -168,7 +193,7 @@ export const projectThreadEvents = (
           state,
           event.payload.turnId,
         );
-        state.status = "interrupted";
+        state.runtimeState = "interrupted";
         state.activeTurnId = null;
         if (existing) {
           state.messages = upsertMessage(state.messages, {
@@ -177,6 +202,7 @@ export const projectThreadEvents = (
           });
         }
         state.latestSequence = event.sequence;
+        state.latestActivityAt = event.occurredAt;
         state.updatedAt = event.occurredAt;
         state.lastError = event.payload.reason;
         break;
@@ -186,7 +212,7 @@ export const projectThreadEvents = (
           state,
           event.payload.turnId,
         );
-        state.status = "failed";
+        state.runtimeState = "failed";
         state.activeTurnId = null;
         if (existing) {
           state.messages = upsertMessage(state.messages, {
@@ -195,6 +221,7 @@ export const projectThreadEvents = (
           });
         }
         state.latestSequence = event.sequence;
+        state.latestActivityAt = event.occurredAt;
         state.updatedAt = event.occurredAt;
         state.lastError = event.payload.error;
         break;
@@ -215,8 +242,10 @@ export const toThreadSummary = (thread: ThreadViewModel): ThreadSummary => {
     workspaceId: thread.workspaceId,
     providerKey: thread.providerKey,
     title: thread.title,
-    status: thread.status,
+    resolutionState: thread.resolutionState,
+    runtimeState: thread.runtimeState,
     latestSequence: thread.latestSequence,
+    latestActivityAt: thread.latestActivityAt,
     updatedAt: thread.updatedAt,
   };
 };

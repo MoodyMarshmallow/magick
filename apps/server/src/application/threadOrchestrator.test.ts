@@ -79,18 +79,16 @@ describe("ThreadOrchestrator", () => {
     });
     const { orchestrator, publishedEvents } = createTestContext(adapter);
 
-    const thread = await run(
-      orchestrator.createThread({
-        workspaceId: "workspace_1",
-        providerKey: adapter.key,
-        title: "Primary chat",
-      }),
-    );
+    const thread = await orchestrator.createThread({
+      workspaceId: "workspace_1",
+      providerKey: adapter.key,
+      title: "Primary chat",
+    });
     const updatedThread = await run(
       orchestrator.sendMessage(thread.threadId, "Hello there"),
     );
 
-    expect(updatedThread.status).toBe("idle");
+    expect(updatedThread.runtimeState).toBe("idle");
     expect(updatedThread.messages.at(-1)).toMatchObject({
       role: "assistant",
       status: "complete",
@@ -107,12 +105,10 @@ describe("ThreadOrchestrator", () => {
     const { orchestrator, providerSessionRepository } =
       createTestContext(adapter);
 
-    const thread = await run(
-      orchestrator.createThread({
-        workspaceId: "workspace_1",
-        providerKey: adapter.key,
-      }),
-    );
+    const thread = await orchestrator.createThread({
+      workspaceId: "workspace_1",
+      providerKey: adapter.key,
+    });
 
     await run(orchestrator.sendMessage(thread.threadId, "First"));
     await run(orchestrator.sendMessage(thread.threadId, "Second"));
@@ -139,12 +135,10 @@ describe("ThreadOrchestrator", () => {
     });
     const { orchestrator } = createTestContext(adapter);
 
-    const thread = await run(
-      orchestrator.createThread({
-        workspaceId: "workspace_1",
-        providerKey: adapter.key,
-      }),
-    );
+    const thread = await orchestrator.createThread({
+      workspaceId: "workspace_1",
+      providerKey: adapter.key,
+    });
 
     const sendFiber = Effect.runFork(
       orchestrator.sendMessage(thread.threadId, "Interrupt me"),
@@ -153,20 +147,18 @@ describe("ThreadOrchestrator", () => {
     const interruptedThread = await run(orchestrator.stopTurn(thread.threadId));
     const finalThread = await Effect.runPromise(Effect.fromFiber(sendFiber));
 
-    expect(interruptedThread.status).toBe("interrupted");
-    expect(finalThread.status).toBe("interrupted");
+    expect(interruptedThread.runtimeState).toBe("interrupted");
+    expect(finalThread.runtimeState).toBe("interrupted");
   });
 
   it("replays events after a sequence checkpoint", async () => {
     const adapter = new FakeProviderAdapter({ mode: "stateful" });
     const { orchestrator, replayService } = createTestContext(adapter);
 
-    const thread = await run(
-      orchestrator.createThread({
-        workspaceId: "workspace_1",
-        providerKey: adapter.key,
-      }),
-    );
+    const thread = await orchestrator.createThread({
+      workspaceId: "workspace_1",
+      providerKey: adapter.key,
+    });
     await run(orchestrator.sendMessage(thread.threadId, "Replay this"));
 
     const replayedEvents = replayService.replayThread(thread.threadId, 2);
@@ -178,12 +170,10 @@ describe("ThreadOrchestrator", () => {
     const adapter = new FakeProviderAdapter({ mode: "stateful" });
     const { orchestrator } = createTestContext(adapter);
 
-    const thread = await run(
-      orchestrator.createThread({
-        workspaceId: "workspace_1",
-        providerKey: adapter.key,
-      }),
-    );
+    const thread = await orchestrator.createThread({
+      workspaceId: "workspace_1",
+      providerKey: adapter.key,
+    });
 
     const exit = await Effect.runPromiseExit(
       orchestrator.retryTurn(thread.threadId),
@@ -208,22 +198,20 @@ describe("ThreadOrchestrator", () => {
     const adapter = new FakeProviderAdapter({ mode: "stateful" });
     const { orchestrator } = createTestContext(adapter);
 
-    const thread = await run(
-      orchestrator.createThread({
-        workspaceId: "workspace_1",
-        providerKey: adapter.key,
-        title: "Opened chat",
-      }),
-    );
+    const thread = await orchestrator.createThread({
+      workspaceId: "workspace_1",
+      providerKey: adapter.key,
+      title: "Opened chat",
+    });
 
-    const summaries = await run(orchestrator.listThreads("workspace_1"));
+    const summaries = await orchestrator.listThreads("workspace_1");
     expect(summaries).toHaveLength(1);
     expect(summaries[0]?.threadId).toBe(thread.threadId);
 
-    const opened = await run(orchestrator.openThread(thread.threadId));
+    const opened = await orchestrator.openThread(thread.threadId);
     expect(opened.title).toBe("Opened chat");
 
-    const ensured = await run(orchestrator.ensureSession(thread.threadId));
+    const ensured = await orchestrator.ensureSession(thread.threadId);
     expect(ensured.threadId).toBe(thread.threadId);
   });
 
@@ -231,16 +219,14 @@ describe("ThreadOrchestrator", () => {
     const adapter = new FakeProviderAdapter({ mode: "stateful" });
     const { orchestrator } = createTestContext(adapter);
 
-    const thread = await run(
-      orchestrator.createThread({
-        workspaceId: "workspace_1",
-        providerKey: adapter.key,
-      }),
-    );
+    const thread = await orchestrator.createThread({
+      workspaceId: "workspace_1",
+      providerKey: adapter.key,
+    });
 
     const stopped = await run(orchestrator.stopTurn(thread.threadId));
     expect(stopped.threadId).toBe(thread.threadId);
-    expect(stopped.status).toBe("idle");
+    expect(stopped.runtimeState).toBe("idle");
   });
 
   it("handles provider failure and session state events from a custom provider", async () => {
@@ -295,18 +281,16 @@ describe("ThreadOrchestrator", () => {
     };
 
     const { orchestrator } = createProviderContext(adapter);
-    const thread = await run(
-      orchestrator.createThread({
-        workspaceId: "workspace_1",
-        providerKey: adapter.key,
-      }),
-    );
+    const thread = await orchestrator.createThread({
+      workspaceId: "workspace_1",
+      providerKey: adapter.key,
+    });
 
     const result = await run(
       orchestrator.sendMessage(thread.threadId, "Hello"),
     );
 
-    expect(result.status).toBe("failed");
+    expect(result.runtimeState).toBe("failed");
     expect(result.lastError).toBe("boom");
   });
 });

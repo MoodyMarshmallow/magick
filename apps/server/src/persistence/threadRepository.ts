@@ -2,6 +2,7 @@
 
 import type {
   ThreadRecord,
+  ThreadResolutionState,
   ThreadSummary,
   ThreadViewModel,
 } from "@magick/contracts/chat";
@@ -26,9 +27,10 @@ export class ThreadRepository {
               provider_key,
               provider_session_id,
               title,
+              resolution_state,
               created_at,
               updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
           `,
         )
         .run(
@@ -37,6 +39,7 @@ export class ThreadRepository {
           thread.providerKey,
           thread.providerSessionId,
           thread.title,
+          thread.resolutionState,
           thread.createdAt,
           thread.updatedAt,
         );
@@ -53,7 +56,7 @@ export class ThreadRepository {
       const row = this.#database
         .prepare(
           `
-            SELECT id, workspace_id, provider_key, provider_session_id, title, created_at, updated_at
+            SELECT id, workspace_id, provider_key, provider_session_id, title, resolution_state, created_at, updated_at
             FROM threads
             WHERE id = ?
           `,
@@ -65,6 +68,7 @@ export class ThreadRepository {
             provider_key: string;
             provider_session_id: string;
             title: string;
+            resolution_state: ThreadResolutionState;
             created_at: string;
             updated_at: string;
           }
@@ -77,6 +81,7 @@ export class ThreadRepository {
             providerKey: row.provider_key,
             providerSessionId: row.provider_session_id,
             title: row.title,
+            resolutionState: row.resolution_state ?? "open",
             createdAt: row.created_at,
             updatedAt: row.updated_at,
           }
@@ -118,7 +123,11 @@ export class ThreadRepository {
         .prepare("SELECT thread_json FROM thread_snapshots WHERE thread_id = ?")
         .get(threadId) as { thread_json: string } | undefined;
 
-      return row ? (JSON.parse(row.thread_json) as ThreadViewModel) : null;
+      if (!row) {
+        return null;
+      }
+
+      return JSON.parse(row.thread_json) as ThreadViewModel;
     } catch (error) {
       throw new PersistenceError({
         operation: "thread_repository.getSnapshot",
@@ -157,6 +166,25 @@ export class ThreadRepository {
     } catch (error) {
       throw new PersistenceError({
         operation: "thread_repository.saveSnapshot",
+        detail: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  updateResolutionState(
+    threadId: string,
+    resolutionState: ThreadResolutionState,
+    updatedAt: string,
+  ): void {
+    try {
+      this.#database
+        .prepare(
+          "UPDATE threads SET resolution_state = ?, updated_at = ? WHERE id = ?",
+        )
+        .run(resolutionState, updatedAt, threadId);
+    } catch (error) {
+      throw new PersistenceError({
+        operation: "thread_repository.updateResolutionState",
         detail: error instanceof Error ? error.message : String(error),
       });
     }

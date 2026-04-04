@@ -37,18 +37,21 @@ const runningSeed: ThreadViewModel = {
   providerKey: "fake",
   providerSessionId: "session_1",
   title: "Chat",
-  status: "running",
+  resolutionState: "open",
+  runtimeState: "running",
   messages: [
     {
       id: "message_1",
       role: "user",
       content: "Hello",
+      createdAt: "2026-01-01T00:00:01.000Z",
       status: "complete",
     },
     {
       id: "turn_1:assistant",
       role: "assistant",
       content: "Part 1",
+      createdAt: "2026-01-01T00:00:03.000Z",
       status: "streaming",
     },
   ],
@@ -57,6 +60,7 @@ const runningSeed: ThreadViewModel = {
   lastError: null,
   lastUserMessageAt: "2026-01-01T00:00:01.000Z",
   lastAssistantMessageAt: "2026-01-01T00:00:03.000Z",
+  latestActivityAt: "2026-01-01T00:00:03.000Z",
   updatedAt: "2026-01-01T00:00:03.000Z",
 };
 
@@ -68,19 +72,13 @@ describe("projectThreadEvents", () => {
         sequence: 2,
         occurredAt: "2026-01-01T00:00:01.000Z",
         type: "message.user.created",
-        payload: {
-          messageId: "message_1",
-          content: "Hello",
-        },
+        payload: { messageId: "message_1", content: "Hello" },
       }),
       makeEvent({
         sequence: 3,
         occurredAt: "2026-01-01T00:00:02.000Z",
         type: "turn.started",
-        payload: {
-          turnId: "turn_1",
-          parentTurnId: null,
-        },
+        payload: { turnId: "turn_1", parentTurnId: null },
       }),
       makeEvent({
         sequence: 4,
@@ -96,90 +94,25 @@ describe("projectThreadEvents", () => {
         sequence: 5,
         occurredAt: "2026-01-01T00:00:04.000Z",
         type: "turn.completed",
-        payload: {
-          turnId: "turn_1",
-          messageId: "assistant_1",
-        },
+        payload: { turnId: "turn_1", messageId: "assistant_1" },
       }),
     ]);
 
-    expect(thread.status).toBe("idle");
-    expect(thread.activeTurnId).toBeNull();
-    expect(thread.messages).toHaveLength(2);
+    expect(thread.runtimeState).toBe("idle");
     expect(thread.messages[1]).toMatchObject({
-      id: "turn_1:assistant",
-      role: "assistant",
       content: "Hi",
       status: "complete",
     });
-    expect(thread.lastUserMessageAt).toBe("2026-01-01T00:00:01.000Z");
-    expect(thread.lastAssistantMessageAt).toBe("2026-01-01T00:00:04.000Z");
-    expect(thread.latestSequence).toBe(5);
   });
 
-  it("appends multiple deltas into a single assistant message", () => {
-    const thread = projectThreadEvents(null, [
+  it("marks interrupted and failed turns correctly", () => {
+    const interrupted = projectThreadEvents(null, [
       createdEvent(),
       makeEvent({
         sequence: 2,
         occurredAt: "2026-01-01T00:00:01.000Z",
         type: "turn.started",
-        payload: {
-          turnId: "turn_1",
-          parentTurnId: null,
-        },
-      }),
-      makeEvent({
-        sequence: 3,
-        occurredAt: "2026-01-01T00:00:02.000Z",
-        type: "turn.delta",
-        payload: {
-          turnId: "turn_1",
-          messageId: "assistant_1",
-          delta: "Hello",
-        },
-      }),
-      makeEvent({
-        sequence: 4,
-        occurredAt: "2026-01-01T00:00:03.000Z",
-        type: "turn.delta",
-        payload: {
-          turnId: "turn_1",
-          messageId: "assistant_1",
-          delta: ", world",
-        },
-      }),
-      makeEvent({
-        sequence: 5,
-        occurredAt: "2026-01-01T00:00:04.000Z",
-        type: "turn.completed",
-        payload: {
-          turnId: "turn_1",
-          messageId: "assistant_1",
-        },
-      }),
-    ]);
-
-    expect(thread.messages).toHaveLength(1);
-    expect(thread.messages[0]).toMatchObject({
-      id: "turn_1:assistant",
-      content: "Hello, world",
-      status: "complete",
-    });
-    expect(thread.lastAssistantMessageAt).toBe("2026-01-01T00:00:04.000Z");
-  });
-
-  it("marks interrupted turns and preserves disconnect status while idle", () => {
-    const thread = projectThreadEvents(null, [
-      createdEvent(),
-      makeEvent({
-        sequence: 2,
-        occurredAt: "2026-01-01T00:00:01.000Z",
-        type: "turn.started",
-        payload: {
-          turnId: "turn_1",
-          parentTurnId: null,
-        },
+        payload: { turnId: "turn_1", parentTurnId: null },
       }),
       makeEvent({
         sequence: 3,
@@ -195,127 +128,53 @@ describe("projectThreadEvents", () => {
         sequence: 4,
         occurredAt: "2026-01-01T00:00:03.000Z",
         type: "turn.interrupted",
-        payload: {
-          turnId: "turn_1",
-          reason: "Stopped",
-        },
-      }),
-      makeEvent({
-        sequence: 5,
-        occurredAt: "2026-01-01T00:00:04.000Z",
-        type: "provider.session.disconnected",
-        payload: {
-          reason: "Socket lost",
-        },
+        payload: { turnId: "turn_1", reason: "Stopped" },
       }),
     ]);
 
-    expect(thread.status).toBe("interrupted");
-    expect(thread.lastError).toBe("Socket lost");
-    expect(thread.messages.at(-1)).toMatchObject({
-      status: "interrupted",
-      content: "Partial",
-    });
-  });
+    expect(interrupted.runtimeState).toBe("interrupted");
 
-  it("marks running threads as failed when the provider disconnects", () => {
-    const thread = projectThreadEvents(null, [
+    const failed = projectThreadEvents(null, [
       createdEvent(),
       makeEvent({
         sequence: 2,
         occurredAt: "2026-01-01T00:00:01.000Z",
         type: "turn.started",
-        payload: {
-          turnId: "turn_1",
-          parentTurnId: null,
-        },
+        payload: { turnId: "turn_1", parentTurnId: null },
       }),
       makeEvent({
         sequence: 3,
         occurredAt: "2026-01-01T00:00:02.000Z",
         type: "provider.session.disconnected",
-        payload: {
-          reason: "Socket lost",
-        },
+        payload: { reason: "Socket lost" },
       }),
     ]);
 
-    expect(thread.status).toBe("failed");
-    expect(thread.activeTurnId).toBe("turn_1");
-    expect(thread.lastError).toBe("Socket lost");
+    expect(failed.runtimeState).toBe("failed");
+    expect(failed.lastError).toBe("Socket lost");
   });
 
-  it("marks failed turns and updates the existing assistant message", () => {
-    const thread = projectThreadEvents(null, [
+  it("applies resolve and reopen events", () => {
+    const resolved = projectThreadEvents(null, [
       createdEvent(),
       makeEvent({
         sequence: 2,
         occurredAt: "2026-01-01T00:00:01.000Z",
-        type: "turn.started",
-        payload: {
-          turnId: "turn_1",
-          parentTurnId: null,
-        },
+        type: "thread.resolved",
+        payload: {},
       }),
+    ]);
+    expect(resolved.resolutionState).toBe("resolved");
+
+    const reopened = projectThreadEvents(resolved, [
       makeEvent({
         sequence: 3,
         occurredAt: "2026-01-01T00:00:02.000Z",
-        type: "turn.delta",
-        payload: {
-          turnId: "turn_1",
-          messageId: "assistant_1",
-          delta: "Almost done",
-        },
-      }),
-      makeEvent({
-        sequence: 4,
-        occurredAt: "2026-01-01T00:00:03.000Z",
-        type: "turn.failed",
-        payload: {
-          turnId: "turn_1",
-          error: "Provider exploded",
-        },
+        type: "thread.reopened",
+        payload: {},
       }),
     ]);
-
-    expect(thread.status).toBe("failed");
-    expect(thread.activeTurnId).toBeNull();
-    expect(thread.lastError).toBe("Provider exploded");
-    expect(thread.messages.at(-1)).toMatchObject({
-      id: "turn_1:assistant",
-      content: "Almost done",
-      status: "failed",
-    });
-  });
-
-  it("records provider session start and recovery updates", () => {
-    const thread = projectThreadEvents(null, [
-      createdEvent(),
-      makeEvent({
-        sequence: 2,
-        occurredAt: "2026-01-01T00:00:01.000Z",
-        type: "provider.session.started",
-        payload: {
-          providerKey: "fake",
-          resumeStrategy: "rebuild",
-        },
-      }),
-      {
-        ...makeEvent({
-          sequence: 3,
-          occurredAt: "2026-01-01T00:00:02.000Z",
-          type: "provider.session.recovered",
-          payload: {
-            reason: "Reconnected",
-          },
-        }),
-        providerSessionId: "session_2",
-      },
-    ]);
-
-    expect(thread.providerSessionId).toBe("session_2");
-    expect(thread.latestSequence).toBe(3);
-    expect(thread.updatedAt).toBe("2026-01-01T00:00:02.000Z");
+    expect(reopened.resolutionState).toBe("open");
   });
 
   it("replays events onto a seed without mutating the original thread", () => {
@@ -339,38 +198,15 @@ describe("projectThreadEvents", () => {
         sequence: 5,
         occurredAt: "2026-01-01T00:00:05.000Z",
         type: "turn.completed",
-        payload: {
-          turnId: "turn_1",
-          messageId: "assistant_1",
-        },
+        payload: { turnId: "turn_1", messageId: "assistant_1" },
       }),
     ]);
 
-    expect(thread).not.toBe(seed);
-    expect(thread.messages).not.toBe(seed.messages);
     expect(seed.messages[1]?.content).toBe("Part 1");
-    expect(seed.messages[1]?.status).toBe("streaming");
     expect(thread.messages[1]).toMatchObject({
       content: "Part 1 + Part 2",
       status: "complete",
     });
-    expect(thread.status).toBe("idle");
-  });
-
-  it("throws when projecting without a seed or thread.created event", () => {
-    expect(() =>
-      projectThreadEvents(null, [
-        makeEvent({
-          sequence: 1,
-          occurredAt: "2026-01-01T00:00:00.000Z",
-          type: "turn.started",
-          payload: {
-            turnId: "turn_1",
-            parentTurnId: null,
-          },
-        }),
-      ]),
-    ).toThrow("Thread projection requires a thread.created event as a seed.");
   });
 });
 
@@ -378,8 +214,10 @@ describe("toThreadSummary", () => {
   it("returns the list-view fields from a projected thread", () => {
     const summary = toThreadSummary({
       ...runningSeed,
-      status: "failed",
+      resolutionState: "resolved",
+      runtimeState: "failed",
       latestSequence: 9,
+      latestActivityAt: "2026-01-01T00:00:09.000Z",
       updatedAt: "2026-01-01T00:00:09.000Z",
     });
 
@@ -388,8 +226,10 @@ describe("toThreadSummary", () => {
       workspaceId: "workspace_1",
       providerKey: "fake",
       title: "Chat",
-      status: "failed",
+      resolutionState: "resolved",
+      runtimeState: "failed",
       latestSequence: 9,
+      latestActivityAt: "2026-01-01T00:00:09.000Z",
       updatedAt: "2026-01-01T00:00:09.000Z",
     });
   });

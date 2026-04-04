@@ -1,3 +1,5 @@
+import type { ProviderAuthState } from "@magick/contracts/provider";
+import type { ServerPushEnvelope } from "@magick/contracts/ws";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   type CSSProperties,
@@ -8,7 +10,7 @@ import {
   useState,
 } from "react";
 import { CommentSidebar } from "../features/comments/components/CommentSidebar";
-import { workspaceClient } from "../features/comments/data/workspaceClient";
+import { chatClient } from "../features/comments/data/chatClient";
 import { useCommentUiStore } from "../features/comments/state/commentUiStore";
 import {
   type CommentThread,
@@ -32,6 +34,9 @@ import {
 
 type ResizeSide = "left" | "right";
 
+const defaultWorkspaceId = "workspace_default";
+const defaultProviderKey = "codex";
+
 interface ResizeState {
   readonly side: ResizeSide;
 }
@@ -48,6 +53,9 @@ export function AppShell() {
     projectThreadEvent,
     [] as readonly CommentThread[],
   );
+  const [providerAuthByKey, setProviderAuthByKey] = useState<
+    Record<string, ProviderAuthState>
+  >({});
   const { activeThreadId, setActiveThreadId } = useCommentUiStore();
   const focusedDocumentId = useWorkspaceSessionStore((state) =>
     state.focusedTabId
@@ -76,7 +84,11 @@ export function AppShell() {
 
   const threadBootstrapQuery = useQuery({
     queryKey: ["workspace-thread-bootstrap"],
-    queryFn: () => workspaceClient.getWorkspaceBootstrap(),
+    queryFn: () =>
+      chatClient.getBootstrap({
+        workspaceId: defaultWorkspaceId,
+        ...(activeThreadId ? { threadId: activeThreadId } : {}),
+      }),
   });
 
   useEffect(() => {
@@ -123,7 +135,9 @@ export function AppShell() {
     dispatch({
       type: "snapshot.loaded",
       threads: threadBootstrapQuery.data.threads,
+      activeThread: threadBootstrapQuery.data.activeThread,
     });
+    setProviderAuthByKey(threadBootstrapQuery.data.providerAuth);
     if (
       activeThreadIdRef.current &&
       !threadBootstrapQuery.data.threads.some(
@@ -135,8 +149,22 @@ export function AppShell() {
   }, [threadBootstrapQuery.data, setActiveThreadId]);
 
   useEffect(() => {
-    return workspaceClient.subscribe((event) => {
-      dispatch(event);
+    return chatClient.subscribe((event: ServerPushEnvelope) => {
+      if (event.channel === "orchestration.domainEvent") {
+        dispatch({
+          type: "domain.event",
+          threadId: event.threadId,
+          event: event.event,
+        });
+        return;
+      }
+
+      if (event.channel === "provider.authStateChanged") {
+        setProviderAuthByKey((current) => ({
+          ...current,
+          [event.auth.providerKey]: event.auth,
+        }));
+      }
     });
   }, []);
 
@@ -193,8 +221,18 @@ export function AppShell() {
   }, [leftRailWidth, rightRailWidth]);
 
   const handleSelectThread = (threadId: string) => {
+    void chatClient.openThread(threadId).then((thread) => {
+      dispatch({
+        type: "thread.loaded",
+        thread,
+      });
+    });
     setActiveThreadId(threadId);
   };
+
+  const codexAuth = providerAuthByKey[defaultProviderKey] ?? null;
+  const isLoggedIn = codexAuth?.account != null;
+  const isLoginPending = codexAuth?.activeLoginId != null;
 
   const clearResizeState = () => {
     resizeStateRef.current = null;
@@ -302,14 +340,40 @@ export function AppShell() {
       <CommentSidebar
         threads={threads}
         activeThreadId={activeThreadId}
+        isLoggedIn={isLoggedIn}
+        isLoginPending={isLoginPending}
         onActivateThread={handleSelectThread}
+        onCreateThread={async () => {
+          const thread = await chatClient.createThread({
+            workspaceId: defaultWorkspaceId,
+            providerKey: defaultProviderKey,
+          });
+          dispatch({
+            type: "thread.loaded",
+            thread,
+          });
+          setActiveThreadId(thread.threadId);
+        }}
+        onLogin={async () => {
+          await chatClient.startLogin(defaultProviderKey);
+        }}
         onShowLedger={() => setActiveThreadId(null)}
         onSendReply={async (threadId: string, message: string) => {
-          await workspaceClient.sendThreadMessage(threadId, message);
+          await chatClient.sendThreadMessage(threadId, message);
           setActiveThreadId(threadId);
         }}
         onToggleResolved={async (threadId: string) => {
-          await workspaceClient.toggleThreadResolved(threadId);
+          const thread = threads.find(
+            (candidate) => candidate.threadId === threadId,
+          );
+          const updatedThread =
+            thread?.status === "resolved"
+              ? await chatClient.reopenThread(threadId)
+              : await chatClient.resolveThread(threadId);
+          dispatch({
+            type: "thread.loaded",
+            thread: updatedThread,
+          });
         }}
       />
     </main>

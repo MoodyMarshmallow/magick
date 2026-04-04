@@ -278,9 +278,22 @@ button:disabled {
 
 .comment-sidebar {
   display: grid;
-  grid-template-rows: minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
   overflow: hidden;
   background: var(--bg-ink);
+}
+
+.comment-sidebar__header {
+  display: flex;
+  justify-content: flex-end;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg);
+}
+
+.comment-sidebar__login {
+  min-height: 1.9rem;
+  padding: 0.35rem 0.55rem;
 }
 
 .comment-sidebar__footer,
@@ -302,6 +315,19 @@ button:disabled {
   font-size: var(--text-size-body);
   font-weight: 400;
   letter-spacing: 0.01em;
+}
+
+.comment-sidebar__footer-main {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.comment-sidebar__create {
+  width: calc(var(--text-size-body) + 0.4rem);
+  height: calc(var(--text-size-body) + 0.4rem);
+  padding: 0.2rem;
 }
 
 .comment-sidebar__filter,

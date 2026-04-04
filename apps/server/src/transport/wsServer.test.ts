@@ -28,6 +28,7 @@ const makeServices = () => {
 
   return {
     adapter,
+    providerRegistry: new ProviderRegistry([adapter]),
     providerAuth: {
       read: async (providerKey: string) => ({
         providerKey,
@@ -42,6 +43,7 @@ const makeServices = () => {
       }),
       cancelLogin: async () => undefined,
       logout: async () => undefined,
+      subscribe: () => () => undefined,
     },
     replayService: new ReplayService({
       eventStore,
@@ -87,6 +89,7 @@ describe("WebSocketCommandServer", () => {
     const wsServer = new WebSocketCommandServer({
       httpServer: server,
       providerAuth: services.providerAuth,
+      providerRegistry: services.providerRegistry,
       replayService: services.replayService,
       threadOrchestrator: services.threadOrchestrator,
       connections: new ConnectionRegistry(),
@@ -123,17 +126,16 @@ describe("WebSocketCommandServer", () => {
     const wsServer = new WebSocketCommandServer({
       httpServer: server,
       providerAuth: services.providerAuth,
+      providerRegistry: services.providerRegistry,
       replayService: services.replayService,
       threadOrchestrator: services.threadOrchestrator,
       connections: new ConnectionRegistry(),
     });
 
-    const thread = await Effect.runPromise(
-      services.threadOrchestrator.createThread({
-        workspaceId: "workspace_1",
-        providerKey: services.adapter.key,
-      }),
-    );
+    const thread = await services.threadOrchestrator.createThread({
+      workspaceId: "workspace_1",
+      providerKey: services.adapter.key,
+    });
 
     const response = await wsServer.handleCommand(
       {
@@ -167,6 +169,7 @@ describe("WebSocketCommandServer", () => {
     const wsServer = new WebSocketCommandServer({
       httpServer: server,
       providerAuth: services.providerAuth,
+      providerRegistry: services.providerRegistry,
       replayService: services.replayService,
       threadOrchestrator: services.threadOrchestrator,
       connections: new ConnectionRegistry(),
@@ -209,6 +212,7 @@ describe("WebSocketCommandServer", () => {
     const wsServer = new WebSocketCommandServer({
       httpServer: server,
       providerAuth: services.providerAuth,
+      providerRegistry: services.providerRegistry,
       replayService: services.replayService,
       threadOrchestrator: services.threadOrchestrator,
       connections: new ConnectionRegistry(),
@@ -389,17 +393,16 @@ describe("WebSocketCommandServer", () => {
     const wsServer = new WebSocketCommandServer({
       httpServer: server,
       providerAuth: services.providerAuth,
+      providerRegistry: services.providerRegistry,
       replayService: services.replayService,
       threadOrchestrator: services.threadOrchestrator,
       connections,
     });
 
-    const thread = await Effect.runPromise(
-      services.threadOrchestrator.createThread({
-        workspaceId: "workspace_1",
-        providerKey: services.adapter.key,
-      }),
-    );
+    const thread = await services.threadOrchestrator.createThread({
+      workspaceId: "workspace_1",
+      providerKey: services.adapter.key,
+    });
     connections.subscribeThread("conn_push", thread.threadId);
 
     await wsServer.publish([
@@ -440,7 +443,9 @@ describe("WebSocketCommandServer", () => {
         logout: async () => {
           throw new Error("boom");
         },
+        subscribe: () => () => undefined,
       },
+      providerRegistry: new ProviderRegistry([]),
       replayService: {
         getThreadState: () => {
           throw new Error("boom");
@@ -450,13 +455,27 @@ describe("WebSocketCommandServer", () => {
         },
       },
       threadOrchestrator: {
-        createThread: () => Effect.die(new Error("boom")),
-        listThreads: () => Effect.die(new Error("boom")),
-        openThread: () => Effect.die(new Error("boom")),
+        createThread: async () => {
+          throw new Error("boom");
+        },
+        listThreads: async () => {
+          throw new Error("boom");
+        },
+        openThread: async () => {
+          throw new Error("boom");
+        },
         sendMessage: () => Effect.die(new Error("boom")),
+        resolveThread: async () => {
+          throw new Error("boom");
+        },
+        reopenThread: async () => {
+          throw new Error("boom");
+        },
         stopTurn: () => Effect.die(new Error("boom")),
         retryTurn: () => Effect.die(new Error("boom")),
-        ensureSession: () => Effect.die(new Error("boom")),
+        ensureSession: async () => {
+          throw new Error("boom");
+        },
       },
       connections: new ConnectionRegistry(),
     });

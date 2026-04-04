@@ -133,11 +133,17 @@ describe("ProviderAuthService", () => {
       exchangeAuthorizationCode: vi.fn().mockResolvedValue({
         accessToken: "access",
         refreshToken: "refresh",
-        expiresAt: Date.now() + 60_000,
+        expiresAt: Date.now() + 120_000,
         accountId: "acct_1",
         email: "user@example.com",
       }),
-      refreshAccessToken: vi.fn(),
+      refreshAccessToken: vi.fn().mockResolvedValue({
+        accessToken: "access",
+        refreshToken: "refresh",
+        expiresAt: Date.now() + 120_000,
+        accountId: "acct_1",
+        email: "user@example.com",
+      }),
     } as unknown as CodexAuthClient;
     const oauthHarness = {
       startLogin: vi.fn().mockResolvedValue({
@@ -156,12 +162,12 @@ describe("ProviderAuthService", () => {
       oauthHarness,
     });
     await service.startChatGptLogin("codex");
-    await new Promise((resolve) => setTimeout(resolve, 0));
-
-    expect(authRepository.get("codex")).toMatchObject({
-      accessToken: "access",
-      accountId: "acct_1",
-      email: "user@example.com",
+    await vi.waitFor(() => {
+      expect(authRepository.get("codex")).toMatchObject({
+        accessToken: "access",
+        accountId: "acct_1",
+        email: "user@example.com",
+      });
     });
   });
 
@@ -183,5 +189,32 @@ describe("ProviderAuthService", () => {
 
     await expect(service.startChatGptLogin("codex")).rejects.toBeTruthy();
     await expect(service.cancelLogin("codex", "missing")).rejects.toBeTruthy();
+  });
+
+  it("does not fail auth mutations when a subscriber rejects", async () => {
+    const oauthHarness = {
+      startLogin: vi.fn().mockResolvedValue({
+        loginId: "login_1",
+        authUrl: "https://chatgpt.com/login",
+        redirectUri: "http://127.0.0.1:1455/auth/callback",
+        codeVerifier: "verifier",
+        waitForCode: () => new Promise<string>(() => {}),
+        cancel: vi.fn().mockResolvedValue(undefined),
+      }),
+    } as unknown as CodexOAuthHarness;
+
+    const service = makeService({ oauthHarness });
+    service.subscribe(async () => {
+      throw new Error("listener failure");
+    });
+
+    await expect(service.startChatGptLogin("codex")).resolves.toEqual({
+      providerKey: "codex",
+      loginId: "login_1",
+      authUrl: "https://chatgpt.com/login",
+    });
+    await expect(
+      service.cancelLogin("codex", "login_1"),
+    ).resolves.toBeUndefined();
   });
 });

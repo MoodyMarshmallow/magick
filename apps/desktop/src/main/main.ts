@@ -1,10 +1,42 @@
+import { type Server, createServer } from "node:http";
 import { join } from "node:path";
 import { BrowserWindow, app, ipcMain } from "electron";
+import {
+  attachWebSocketServer,
+  createBackendServices,
+} from "../../../server/src/index";
+import { resolveDesktopBackendDatabasePath } from "./backendRuntime";
 import { LocalWorkspaceService } from "./localWorkspaceService";
 import { LocalWorkspaceWatcher } from "./localWorkspaceWatcher";
 
 const eventChannel = "magick-desktop:thread-event";
 const fileEventChannel = "magick-desktop:file-event";
+
+let backendServer: Server | null = null;
+let backendUrl: string | null = null;
+
+const ensureBackendServer = async (databasePath: string): Promise<string> => {
+  if (backendServer && backendUrl) {
+    return backendUrl;
+  }
+
+  const httpServer = createServer();
+  const services = createBackendServices({ databasePath });
+  attachWebSocketServer(httpServer, services);
+  await new Promise<void>((resolve, reject) => {
+    httpServer.listen(0, "127.0.0.1", () => resolve());
+    httpServer.once("error", reject);
+  });
+
+  const address = httpServer.address();
+  if (!address || typeof address === "string") {
+    throw new Error("Failed to resolve local backend address.");
+  }
+
+  backendServer = httpServer;
+  backendUrl = `ws://127.0.0.1:${address.port}`;
+  return backendUrl;
+};
 
 const createWorkspaceService = () =>
   new LocalWorkspaceService({
@@ -23,6 +55,7 @@ const registerIpc = (
   ipcMain.removeHandler("magick-desktop:saveFile");
   ipcMain.removeHandler("magick-desktop:sendThreadMessage");
   ipcMain.removeHandler("magick-desktop:toggleThreadResolved");
+  ipcMain.removeHandler("magick-desktop:getBackendUrl");
 
   ipcMain.handle("magick-desktop:getWorkspaceBootstrap", async () => {
     return workspaceService.getWorkspaceBootstrap();
@@ -72,9 +105,18 @@ const registerIpc = (
       window.webContents.send(eventChannel, threadEvent);
     },
   );
+  ipcMain.handle("magick-desktop:getBackendUrl", async () => {
+    return ensureBackendServer(
+      resolveDesktopBackendDatabasePath(app.getPath("userData")),
+    );
+  });
 };
 
 const createWindow = async (): Promise<void> => {
+  await ensureBackendServer(
+    resolveDesktopBackendDatabasePath(app.getPath("userData")),
+  );
+
   const window = new BrowserWindow({
     width: 1440,
     height: 960,
@@ -124,6 +166,11 @@ app.whenReady().then(async () => {
 
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") {
+    if (backendServer) {
+      backendServer.close();
+      backendServer = null;
+      backendUrl = null;
+    }
     app.quit();
   }
 });

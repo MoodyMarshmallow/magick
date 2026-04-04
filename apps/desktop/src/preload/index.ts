@@ -53,5 +53,10 @@ const fileApi: MagickDesktopFileApi = {
   },
 };
 
+const runtimeApi = {
+  getBackendUrl: () => ipcRenderer.invoke("magick-desktop:getBackendUrl"),
+};
+
 contextBridge.exposeInMainWorld("magickDesktop", api);
 contextBridge.exposeInMainWorld("magickDesktopFiles", fileApi);
+contextBridge.exposeInMainWorld("magickDesktopRuntime", runtimeApi);

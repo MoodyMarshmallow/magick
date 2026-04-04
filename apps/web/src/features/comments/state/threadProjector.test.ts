@@ -1,159 +1,140 @@
-import { type CommentThread, projectThreadEvent } from "./threadProjector";
+import type { ThreadSummary, ThreadViewModel } from "@magick/contracts/chat";
+import { projectThreadEvent } from "./threadProjector";
 
-const baseThread: CommentThread = {
+const summary: ThreadSummary = {
   threadId: "thread_1",
-  title: "Thread 1",
-  status: "open",
-  updatedAt: "2026-03-27T10:00:00.000Z",
-  messages: [],
+  workspaceId: "workspace_default",
+  providerKey: "codex",
+  title: "Chat 1",
+  resolutionState: "open",
+  runtimeState: "idle",
+  latestSequence: 1,
+  latestActivityAt: "2026-04-02T10:00:00.000Z",
+  updatedAt: "2026-04-02T10:00:00.000Z",
 };
 
-describe("threadProjector", () => {
-  it("loads snapshots in descending updated order", () => {
+const thread: ThreadViewModel = {
+  threadId: "thread_1",
+  workspaceId: "workspace_default",
+  providerKey: "codex",
+  providerSessionId: "session_1",
+  title: "Chat 1",
+  resolutionState: "open",
+  runtimeState: "idle",
+  messages: [
+    {
+      id: "message_1",
+      role: "user",
+      content: "hello",
+      createdAt: "2026-04-02T10:00:00.000Z",
+      status: "complete",
+    },
+  ],
+  activeTurnId: null,
+  latestSequence: 1,
+  lastError: null,
+  lastUserMessageAt: "2026-04-02T10:00:00.000Z",
+  lastAssistantMessageAt: null,
+  latestActivityAt: "2026-04-02T10:00:00.000Z",
+  updatedAt: "2026-04-02T10:00:00.000Z",
+};
+
+describe("projectThreadEvent", () => {
+  it("loads bootstrap summaries and merges an active thread snapshot", () => {
     const projected = projectThreadEvent([], {
       type: "snapshot.loaded",
-      threads: [
-        baseThread,
-        {
-          ...baseThread,
-          threadId: "thread_2",
-          updatedAt: "2026-03-27T10:05:00.000Z",
-        },
-      ],
+      threads: [summary],
+      activeThread: thread,
     });
 
-    expect(projected.map((thread) => thread.threadId)).toEqual([
-      "thread_2",
-      "thread_1",
+    expect(projected).toEqual([
+      expect.objectContaining({
+        threadId: "thread_1",
+        status: "open",
+        runtimeState: "idle",
+        messages: [expect.objectContaining({ body: "hello" })],
+      }),
     ]);
   });
 
-  it("appends streaming deltas to an existing message", () => {
-    const withMessage = projectThreadEvent([baseThread], {
-      type: "message.added",
-      threadId: baseThread.threadId,
-      updatedAt: "2026-03-27T10:10:00.000Z",
-      message: {
-        id: "message_1",
-        author: "ai",
-        body: "Hello",
-        createdAt: "2026-03-27T10:10:00.000Z",
-        status: "streaming",
+  it("projects streamed assistant output and completion", () => {
+    const initial = projectThreadEvent([], {
+      type: "snapshot.loaded",
+      threads: [summary],
+      activeThread: thread,
+    });
+
+    const firstThread = initial[0];
+    expect(firstThread).toBeDefined();
+
+    const started = projectThreadEvent(firstThread ? [firstThread] : [], {
+      type: "domain.event",
+      threadId: "thread_1",
+      event: {
+        eventId: "event_2",
+        threadId: "thread_1",
+        providerSessionId: "session_1",
+        sequence: 2,
+        occurredAt: "2026-04-02T10:01:00.000Z",
+        type: "turn.delta",
+        payload: {
+          turnId: "turn_1",
+          messageId: "assistant_1",
+          delta: "world",
+        },
       },
     });
-    const projected = projectThreadEvent(withMessage, {
-      type: "message.delta",
-      threadId: baseThread.threadId,
-      messageId: "message_1",
-      delta: " world",
-      updatedAt: "2026-03-27T10:11:00.000Z",
+
+    expect(started[0]?.runtimeState).toBe("running");
+    expect(started[0]?.messages.at(-1)).toMatchObject({
+      author: "ai",
+      body: "world",
+      status: "streaming",
     });
 
-    expect(projected[0]?.messages[0]?.body).toBe("Hello world");
-  });
-
-  it("updates thread status without replacing the history", () => {
-    const projected = projectThreadEvent([baseThread], {
-      type: "thread.statusChanged",
-      threadId: baseThread.threadId,
-      status: "resolved",
-      updatedAt: "2026-03-27T10:20:00.000Z",
-    });
-
-    expect(projected[0]).toMatchObject({
-      threadId: baseThread.threadId,
-      status: "resolved",
-    });
-  });
-
-  it("moves a thread to the top when a new message arrives", () => {
-    const projected = projectThreadEvent(
-      [
-        baseThread,
-        {
-          ...baseThread,
-          threadId: "thread_2",
-          updatedAt: "2026-03-27T10:05:00.000Z",
+    const completed = projectThreadEvent(started, {
+      type: "domain.event",
+      threadId: "thread_1",
+      event: {
+        eventId: "event_3",
+        threadId: "thread_1",
+        providerSessionId: "session_1",
+        sequence: 3,
+        occurredAt: "2026-04-02T10:02:00.000Z",
+        type: "turn.completed",
+        payload: {
+          turnId: "turn_1",
+          messageId: "assistant_1",
         },
-      ],
+      },
+    });
+
+    expect(completed[0]?.runtimeState).toBe("idle");
+    expect(completed[0]?.messages.at(-1)?.status).toBe("complete");
+  });
+
+  it("projects resolved state changes", () => {
+    const projected = projectThreadEvent(
+      projectThreadEvent([], {
+        type: "snapshot.loaded",
+        threads: [summary],
+        activeThread: null,
+      }),
       {
-        type: "message.added",
-        threadId: baseThread.threadId,
-        updatedAt: "2026-03-27T10:10:00.000Z",
-        message: {
-          id: "message_1",
-          author: "human",
-          body: "Reply",
-          createdAt: "2026-03-27T10:10:00.000Z",
-          status: "complete",
+        type: "domain.event",
+        threadId: "thread_1",
+        event: {
+          eventId: "event_2",
+          threadId: "thread_1",
+          providerSessionId: "session_1",
+          sequence: 2,
+          occurredAt: "2026-04-02T10:01:00.000Z",
+          type: "thread.resolved",
+          payload: {},
         },
       },
     );
 
-    expect(projected.map((thread) => thread.threadId)).toEqual([
-      "thread_1",
-      "thread_2",
-    ]);
-  });
-
-  it("marks a streaming message as complete without changing other messages", () => {
-    const projected = projectThreadEvent(
-      [
-        {
-          ...baseThread,
-          messages: [
-            {
-              id: "message_1",
-              author: "ai",
-              body: "Hello world",
-              createdAt: "2026-03-27T10:10:00.000Z",
-              status: "streaming",
-            },
-            {
-              id: "message_2",
-              author: "human",
-              body: "Stable",
-              createdAt: "2026-03-27T10:09:00.000Z",
-              status: "complete",
-            },
-          ],
-        },
-      ],
-      {
-        type: "message.completed",
-        threadId: baseThread.threadId,
-        messageId: "message_1",
-        updatedAt: "2026-03-27T10:12:00.000Z",
-      },
-    );
-
-    expect(projected[0]?.messages).toEqual([
-      {
-        id: "message_1",
-        author: "ai",
-        body: "Hello world",
-        createdAt: "2026-03-27T10:10:00.000Z",
-        status: "complete",
-      },
-      {
-        id: "message_2",
-        author: "human",
-        body: "Stable",
-        createdAt: "2026-03-27T10:09:00.000Z",
-        status: "complete",
-      },
-    ]);
-  });
-
-  it("leaves state unchanged when an event targets an unknown thread", () => {
-    const projected = projectThreadEvent([baseThread], {
-      type: "message.delta",
-      threadId: "missing_thread",
-      messageId: "message_1",
-      delta: "ignored",
-      updatedAt: "2026-03-27T10:30:00.000Z",
-    });
-
-    expect(projected).toEqual([baseThread]);
+    expect(projected[0]?.status).toBe("resolved");
   });
 });

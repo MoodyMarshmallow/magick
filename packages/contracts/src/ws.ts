@@ -10,7 +10,17 @@ import type {
   ProviderAuthLoginStartResult,
   ProviderAuthState,
   ProviderCapabilities,
+  ProviderKey,
 } from "./provider";
+
+export interface AppBootstrapData {
+  readonly threadSummaries: readonly ThreadSummary[];
+  readonly activeThread: ThreadViewModel | null;
+  readonly providerAuth: Readonly<Record<ProviderKey, ProviderAuthState>>;
+  readonly providerCapabilities: Readonly<
+    Record<ProviderKey, ProviderCapabilities>
+  >;
+}
 
 export interface CommandEnvelope {
   readonly requestId: string;
@@ -23,9 +33,7 @@ export type CommandResult =
       readonly data:
         | {
             readonly kind: "bootstrap";
-            readonly threadSummaries: readonly ThreadSummary[];
-            readonly activeThread: ThreadViewModel | null;
-            readonly capabilities: ProviderCapabilities | null;
+            readonly bootstrap: AppBootstrapData;
           }
         | {
             readonly kind: "threadList";
@@ -67,6 +75,10 @@ export type ServerPushEnvelope =
       readonly channel: "orchestration.domainEvent";
       readonly threadId: string;
       readonly event: DomainEvent;
+    }
+  | {
+      readonly channel: "provider.authStateChanged";
+      readonly auth: ProviderAuthState;
     }
   | {
       readonly channel: "transport.connectionState";

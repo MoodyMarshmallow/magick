@@ -77,5 +77,13 @@ export const createDatabase = (filename = ":memory:"): DatabaseClient => {
     );
   `);
 
+  try {
+    database.exec(
+      "ALTER TABLE threads ADD COLUMN resolution_state TEXT NOT NULL DEFAULT 'open'",
+    );
+  } catch {
+    // Existing databases already have the column.
+  }
+
   return database;
 };

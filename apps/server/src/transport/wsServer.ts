@@ -6,12 +6,14 @@ import { Cause, Effect, Exit, Option } from "effect";
 import { type WebSocket, WebSocketServer } from "ws";
 
 import type { DomainEvent } from "@magick/contracts/chat";
+import type { ProviderAuthState } from "@magick/contracts/provider";
 import type {
   CommandEnvelope,
   CommandResponseEnvelope,
 } from "@magick/contracts/ws";
 import { createId } from "@magick/shared/id";
 import type { ProviderAuthServiceApi } from "../application/providerAuthService";
+import type { ProviderRegistry } from "../application/providerRegistry";
 import type { ReplayServiceApi } from "../application/replayService";
 import type { ThreadOrchestratorApi } from "../application/threadOrchestrator";
 import type { BackendError } from "../core/errors";
@@ -78,6 +80,7 @@ const runBackendEffect = <A>(
 export class WebSocketCommandServer {
   readonly #connections: ConnectionRegistry;
   readonly #providerAuth: ProviderAuthServiceApi;
+  readonly #providerRegistry: ProviderRegistry;
   readonly #replayService: ReplayServiceApi;
   readonly #threadOrchestrator: ThreadOrchestratorApi;
   readonly #server: WebSocketServer;
@@ -85,15 +88,23 @@ export class WebSocketCommandServer {
   constructor(args: {
     httpServer: Server;
     providerAuth: ProviderAuthServiceApi;
+    providerRegistry: ProviderRegistry;
     replayService: ReplayServiceApi;
     threadOrchestrator: ThreadOrchestratorApi;
     connections?: ConnectionRegistry;
   }) {
     this.#providerAuth = args.providerAuth;
+    this.#providerRegistry = args.providerRegistry;
     this.#replayService = args.replayService;
     this.#threadOrchestrator = args.threadOrchestrator;
     this.#connections = args.connections ?? new ConnectionRegistry();
     this.#server = new WebSocketServer({ server: args.httpServer });
+    this.#providerAuth.subscribe(async (auth) => {
+      await this.#connections.broadcast({
+        channel: "provider.authStateChanged",
+        auth,
+      });
+    });
     this.#server.on("connection", (socket) => {
       const connectionId = createId("conn");
       const connection = new WsPushConnection(connectionId, socket);
@@ -145,6 +156,43 @@ export class WebSocketCommandServer {
     );
   }
 
+  async #readProviderAuthState(
+    providerKey: string,
+  ): Promise<ProviderAuthState> {
+    if (providerKey === "codex") {
+      return this.#providerAuth.read(providerKey);
+    }
+
+    return {
+      providerKey,
+      requiresOpenaiAuth: false,
+      account: null,
+      activeLoginId: null,
+    };
+  }
+
+  async #readBootstrapState() {
+    const providerAuthEntries = await Promise.all(
+      this.#providerRegistry
+        .list()
+        .map(
+          async (provider) =>
+            [
+              provider.key,
+              await this.#readProviderAuthState(provider.key),
+            ] as const,
+        ),
+    );
+    const providerCapabilityEntries = this.#providerRegistry
+      .list()
+      .map((provider) => [provider.key, provider.listCapabilities()] as const);
+
+    return {
+      providerAuth: Object.fromEntries(providerAuthEntries),
+      providerCapabilities: Object.fromEntries(providerCapabilityEntries),
+    };
+  }
+
   async handleCommand(
     envelope: CommandEnvelope,
     connectionId: string,
@@ -154,16 +202,13 @@ export class WebSocketCommandServer {
     try {
       switch (envelope.command.type) {
         case "app.bootstrap": {
-          const threadSummaries = await runBackendEffect(
-            this.#threadOrchestrator.listThreads(
-              envelope.command.payload.workspaceId,
-            ),
+          const bootstrapState = await this.#readBootstrapState();
+          const threadSummaries = await this.#threadOrchestrator.listThreads(
+            envelope.command.payload.workspaceId,
           );
           const activeThread = envelope.command.payload.threadId
-            ? await runBackendEffect(
-                this.#threadOrchestrator.openThread(
-                  envelope.command.payload.threadId,
-                ),
+            ? await this.#threadOrchestrator.openThread(
+                envelope.command.payload.threadId,
               )
             : null;
 
@@ -180,9 +225,12 @@ export class WebSocketCommandServer {
               ok: true,
               data: {
                 kind: "bootstrap",
-                threadSummaries,
-                activeThread,
-                capabilities: null,
+                bootstrap: {
+                  threadSummaries,
+                  activeThread,
+                  providerAuth: bootstrapState.providerAuth,
+                  providerCapabilities: bootstrapState.providerCapabilities,
+                },
               },
             },
           } satisfies CommandResponseEnvelope;
@@ -194,17 +242,15 @@ export class WebSocketCommandServer {
               ok: true,
               data: {
                 kind: "threadList",
-                threadSummaries: await runBackendEffect(
-                  this.#threadOrchestrator.listThreads(
-                    envelope.command.payload.workspaceId,
-                  ),
+                threadSummaries: await this.#threadOrchestrator.listThreads(
+                  envelope.command.payload.workspaceId,
                 ),
               },
             },
           } satisfies CommandResponseEnvelope;
         case "thread.create": {
-          const thread = await runBackendEffect(
-            this.#threadOrchestrator.createThread(envelope.command.payload),
+          const thread = await this.#threadOrchestrator.createThread(
+            envelope.command.payload,
           );
           connections.subscribeThread(connectionId, thread.threadId);
           return {
@@ -219,10 +265,8 @@ export class WebSocketCommandServer {
           } satisfies CommandResponseEnvelope;
         }
         case "thread.open": {
-          const thread = await runBackendEffect(
-            this.#threadOrchestrator.openThread(
-              envelope.command.payload.threadId,
-            ),
+          const thread = await this.#threadOrchestrator.openThread(
+            envelope.command.payload.threadId,
           );
           connections.subscribeThread(connectionId, thread.threadId);
           return {
@@ -257,6 +301,36 @@ export class WebSocketCommandServer {
               },
             },
           } satisfies CommandResponseEnvelope;
+        case "thread.resolve": {
+          const thread = await this.#threadOrchestrator.resolveThread(
+            envelope.command.payload.threadId,
+          );
+          return {
+            requestId: envelope.requestId,
+            result: {
+              ok: true,
+              data: {
+                kind: "threadState",
+                thread,
+              },
+            },
+          } satisfies CommandResponseEnvelope;
+        }
+        case "thread.reopen": {
+          const thread = await this.#threadOrchestrator.reopenThread(
+            envelope.command.payload.threadId,
+          );
+          return {
+            requestId: envelope.requestId,
+            result: {
+              ok: true,
+              data: {
+                kind: "threadState",
+                thread,
+              },
+            },
+          } satisfies CommandResponseEnvelope;
+        }
         case "thread.stopTurn": {
           const thread = await runBackendEffect(
             this.#threadOrchestrator.stopTurn(
@@ -295,10 +369,8 @@ export class WebSocketCommandServer {
             connectionId,
             envelope.command.payload.threadId,
           );
-          const thread = await runBackendEffect(
-            this.#threadOrchestrator.ensureSession(
-              envelope.command.payload.threadId,
-            ),
+          const thread = await this.#threadOrchestrator.ensureSession(
+            envelope.command.payload.threadId,
           );
           const replayedEvents = this.#replayService.replayThread(
             envelope.command.payload.threadId,
