@@ -324,10 +324,116 @@ export function AppShell() {
             activeFilePath={focusedDocumentId}
             expandedIds={expandedTreeItemIds}
             onExpandedIdsChange={setExpandedTreeItemIds}
+            onCreateDirectory={async (directoryPath) => {
+              await localWorkspaceFileClient.createDirectory(directoryPath);
+              await queryClient.invalidateQueries({
+                queryKey: ["workspace-files-bootstrap"],
+              });
+            }}
+            onCreateFile={async (directoryPath) => {
+              const createdFile =
+                await localWorkspaceFileClient.createFile(directoryPath);
+              await Promise.all([
+                queryClient.invalidateQueries({
+                  queryKey: ["workspace-files-bootstrap"],
+                }),
+                queryClient.invalidateQueries({
+                  queryKey: ["document", createdFile.filePath],
+                }),
+              ]);
+              useWorkspaceSessionStore
+                .getState()
+                .openDocument(createdFile.filePath, {
+                  paneId: null,
+                  duplicate: false,
+                });
+            }}
+            onDeleteDirectory={async (directoryPath) => {
+              const deletedEntry =
+                await localWorkspaceFileClient.deleteDirectory(directoryPath);
+              for (const deletedFilePath of deletedEntry.deletedFilePaths) {
+                useWorkspaceSessionStore
+                  .getState()
+                  .closeDocument(deletedFilePath);
+              }
+              await queryClient.invalidateQueries({
+                queryKey: ["workspace-files-bootstrap"],
+              });
+            }}
+            onDeleteFile={async (filePath) => {
+              const deletedEntry =
+                await localWorkspaceFileClient.deleteFile(filePath);
+              for (const deletedFilePath of deletedEntry.deletedFilePaths) {
+                useWorkspaceSessionStore
+                  .getState()
+                  .closeDocument(deletedFilePath);
+              }
+              await Promise.all([
+                queryClient.invalidateQueries({
+                  queryKey: ["workspace-files-bootstrap"],
+                }),
+                queryClient.invalidateQueries({
+                  queryKey: ["document", filePath],
+                }),
+              ]);
+            }}
             onOpenFile={(documentId) => {
               useWorkspaceSessionStore
                 .getState()
                 .openDocument(documentId, { paneId: null, duplicate: false });
+            }}
+            onRenameDirectory={async (directoryPath, nextName) => {
+              const renamedDirectory =
+                await localWorkspaceFileClient.renameDirectory(
+                  directoryPath,
+                  nextName,
+                );
+              for (const filePathChange of renamedDirectory.filePathChanges) {
+                useWorkspaceSessionStore
+                  .getState()
+                  .renameDocument(
+                    filePathChange.previousFilePath,
+                    filePathChange.filePath,
+                  );
+              }
+              await Promise.all([
+                queryClient.invalidateQueries({
+                  queryKey: ["workspace-files-bootstrap"],
+                }),
+                ...renamedDirectory.filePathChanges.flatMap(
+                  (filePathChange) => [
+                    queryClient.invalidateQueries({
+                      queryKey: ["document", filePathChange.previousFilePath],
+                    }),
+                    queryClient.invalidateQueries({
+                      queryKey: ["document", filePathChange.filePath],
+                    }),
+                  ],
+                ),
+              ]);
+            }}
+            onRenameFile={async (filePath, nextName) => {
+              const renamedFile = await localWorkspaceFileClient.renameFile(
+                filePath,
+                nextName,
+              );
+              useWorkspaceSessionStore
+                .getState()
+                .renameDocument(
+                  renamedFile.previousFilePath,
+                  renamedFile.filePath,
+                );
+              await Promise.all([
+                queryClient.invalidateQueries({
+                  queryKey: ["workspace-files-bootstrap"],
+                }),
+                queryClient.invalidateQueries({
+                  queryKey: ["document", renamedFile.previousFilePath],
+                }),
+                queryClient.invalidateQueries({
+                  queryKey: ["document", renamedFile.filePath],
+                }),
+              ]);
             }}
             onStartDragFile={(documentId) => {
               setDragItem(documentId ? { type: "document", documentId } : null);

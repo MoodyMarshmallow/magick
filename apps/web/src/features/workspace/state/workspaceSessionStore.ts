@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import {
+  closeDocumentInWorkspace,
   closeTabInWorkspace,
   createEmptyWorkspaceSession,
   createWorkspaceSessionWithDocument,
@@ -8,6 +9,7 @@ import {
   markDocumentSaved,
   moveTabWithinWorkspace,
   openDocumentInWorkspace,
+  renameDocumentInWorkspace,
   setSplitRatio,
   splitPaneWithDocument,
   splitPaneWithTab,
@@ -45,6 +47,7 @@ interface WorkspaceSessionStore extends WorkspaceSessionState {
   ) => void;
   moveTab: (tabId: string, targetPaneId: string, targetIndex: number) => void;
   closeTab: (tabId: string) => void;
+  closeDocument: (documentId: string) => void;
   focusTab: (paneId: string, tabId: string) => void;
   hydrateDocument: (
     documentId: string,
@@ -53,6 +56,7 @@ interface WorkspaceSessionStore extends WorkspaceSessionState {
   ) => void;
   updateDraft: (documentId: string, markdown: string) => void;
   markSaved: (documentId: string, markdown: string) => void;
+  renameDocument: (previousDocumentId: string, documentId: string) => void;
   updateSplitRatio: (splitPaneId: string, ratio: number) => void;
 }
 
@@ -124,6 +128,8 @@ export const useWorkspaceSessionStore = create<WorkspaceSessionStore>(
         moveTabWithinWorkspace({ state, tabId, targetPaneId, targetIndex }),
       ),
     closeTab: (tabId) => set((state) => closeTabInWorkspace({ state, tabId })),
+    closeDocument: (documentId) =>
+      set((state) => closeDocumentInWorkspace({ state, documentId })),
     focusTab: (paneId, tabId) =>
       set((state) => focusTabInPane(state, paneId, tabId)),
     hydrateDocument: (documentId, title, markdown) =>
@@ -134,6 +140,10 @@ export const useWorkspaceSessionStore = create<WorkspaceSessionStore>(
       set((state) => updateDocumentDraft({ state, documentId, markdown })),
     markSaved: (documentId, markdown) =>
       set((state) => markDocumentSaved({ state, documentId, markdown })),
+    renameDocument: (previousDocumentId, documentId) =>
+      set((state) =>
+        renameDocumentInWorkspace({ state, previousDocumentId, documentId }),
+      ),
     updateSplitRatio: (splitPaneId, ratio) =>
       set((state) => setSplitRatio({ state, splitPaneId, ratio })),
   }),

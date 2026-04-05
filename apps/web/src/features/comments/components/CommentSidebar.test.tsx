@@ -78,6 +78,18 @@ describe("CommentSidebar", () => {
     });
   });
 
+  it("creates a new chat from the trailing add zone", async () => {
+    const onCreateThread = vi.fn(async () => undefined);
+
+    render(<CommentSidebar {...baseProps} onCreateThread={onCreateThread} />);
+
+    fireEvent.click(screen.getByLabelText("Create new chat from add zone"));
+
+    await waitFor(() => {
+      expect(onCreateThread).toHaveBeenCalled();
+    });
+  });
+
   it("toggles the ledger between open and resolved chats", () => {
     render(<CommentSidebar {...baseProps} />);
 
@@ -124,6 +136,17 @@ describe("CommentSidebar", () => {
         "Renamed chat",
       );
     });
+  });
+
+  it("opens the ledger actions menu from the dots trigger without throwing", () => {
+    render(<CommentSidebar {...baseProps} />);
+
+    expect(() => {
+      fireEvent.click(screen.getByLabelText("More actions for Chat 1"));
+    }).not.toThrow();
+
+    expect(screen.getByRole("menuitem", { name: "Rename" })).toBeTruthy();
+    expect(screen.getByRole("menuitem", { name: "Delete" })).toBeTruthy();
   });
 
   it("blocks overlong names while renaming", () => {

@@ -4,6 +4,8 @@ import {
   readFileSync,
   readdirSync,
   realpathSync,
+  renameSync,
+  rmSync,
   statSync,
   writeFileSync,
 } from "node:fs";
@@ -23,7 +25,13 @@ import type {
   LocalThreadMessage,
   LocalThreadStatus,
   LocalWorkspaceBootstrap,
+  LocalWorkspaceCreatedDirectory,
+  LocalWorkspaceCreatedFile,
+  LocalWorkspaceDeletedEntry,
   LocalWorkspaceFilesBootstrap,
+  LocalWorkspacePathChange,
+  LocalWorkspaceRenamedDirectory,
+  LocalWorkspaceRenamedFile,
   LocalWorkspaceThread,
 } from "@magick/shared/localWorkspace";
 import {
@@ -52,6 +60,21 @@ const toTitleFromFilePath = (filePath: string): string => {
 
 const createThreadReply = (threadId: string): string =>
   `This reply stays in ${threadId}, which keeps the chat durable across local restarts.`;
+
+export const pathsResolveToSameEntry = (
+  currentPath: string,
+  nextPath: string,
+): boolean => {
+  try {
+    const currentStats = statSync(currentPath);
+    const nextStats = statSync(nextPath);
+    return (
+      currentStats.dev === nextStats.dev && currentStats.ino === nextStats.ino
+    );
+  } catch {
+    return false;
+  }
+};
 
 const createSeedThreads = (): MutableLocalWorkspaceThread[] => {
   const now = new Date().toISOString();
@@ -162,6 +185,135 @@ export class LocalWorkspaceService {
   public saveFile(filePath: string, markdown: string): void {
     const absoluteFilePath = this.resolveWorkspaceFile(filePath);
     writeFileSync(absoluteFilePath, markdown, "utf8");
+  }
+
+  public createFile(directoryPath: string): LocalWorkspaceCreatedFile {
+    const absoluteDirectoryPath = this.resolveWorkspaceDirectory(
+      directoryPath,
+      {
+        allowWorkspaceRoot: true,
+      },
+    );
+    const fileName = this.resolveUniqueChildName(absoluteDirectoryPath, {
+      baseName: "untitled",
+      extension: ".md",
+    });
+    const absoluteFilePath = join(absoluteDirectoryPath, fileName);
+    writeFileSync(absoluteFilePath, "", "utf8");
+
+    return {
+      filePath: this.toWorkspaceRelativePath(absoluteFilePath),
+    };
+  }
+
+  public createDirectory(
+    directoryPath: string,
+  ): LocalWorkspaceCreatedDirectory {
+    const absoluteDirectoryPath = this.resolveWorkspaceDirectory(
+      directoryPath,
+      {
+        allowWorkspaceRoot: true,
+      },
+    );
+    const directoryName = this.resolveUniqueChildName(absoluteDirectoryPath, {
+      baseName: "untitled-folder",
+      extension: "",
+    });
+    const absoluteChildDirectoryPath = join(
+      absoluteDirectoryPath,
+      directoryName,
+    );
+    mkdirSync(absoluteChildDirectoryPath, { recursive: true });
+
+    return {
+      path: this.toWorkspaceRelativePath(absoluteChildDirectoryPath),
+    };
+  }
+
+  public renameFile(
+    filePath: string,
+    nextName: string,
+  ): LocalWorkspaceRenamedFile {
+    const absoluteFilePath = this.resolveWorkspaceFile(filePath);
+    const sanitizedName = this.sanitizeEntryName(nextName, {
+      fallbackBaseName: "untitled",
+      extension: extname(filePath),
+    });
+    const absoluteRenamedPath = this.resolveWorkspaceSiblingPath(
+      absoluteFilePath,
+      sanitizedName,
+    );
+
+    if (absoluteRenamedPath !== absoluteFilePath) {
+      renameSync(absoluteFilePath, absoluteRenamedPath);
+    }
+
+    return {
+      previousFilePath: filePath,
+      filePath: this.toWorkspaceRelativePath(absoluteRenamedPath),
+    };
+  }
+
+  public renameDirectory(
+    directoryPath: string,
+    nextName: string,
+  ): LocalWorkspaceRenamedDirectory {
+    const absoluteDirectoryPath = this.resolveWorkspaceDirectory(directoryPath);
+    const previousFilePaths = this.collectFilePathsInDirectory(
+      absoluteDirectoryPath,
+    );
+    const sanitizedName = this.sanitizeEntryName(nextName, {
+      fallbackBaseName: "untitled-folder",
+      extension: "",
+    });
+    const absoluteRenamedPath = this.resolveWorkspaceSiblingPath(
+      absoluteDirectoryPath,
+      sanitizedName,
+    );
+
+    if (absoluteRenamedPath !== absoluteDirectoryPath) {
+      renameSync(absoluteDirectoryPath, absoluteRenamedPath);
+    }
+
+    const filePathChanges = previousFilePaths.map(
+      (previousFilePath) =>
+        ({
+          previousFilePath: this.toWorkspaceRelativePath(previousFilePath),
+          filePath: this.toWorkspaceRelativePath(
+            join(
+              absoluteRenamedPath,
+              relative(absoluteDirectoryPath, previousFilePath),
+            ),
+          ),
+        }) satisfies LocalWorkspacePathChange,
+    );
+
+    return {
+      previousPath: directoryPath,
+      path: this.toWorkspaceRelativePath(absoluteRenamedPath),
+      filePathChanges,
+    };
+  }
+
+  public deleteFile(filePath: string): LocalWorkspaceDeletedEntry {
+    const absoluteFilePath = this.resolveWorkspaceFile(filePath);
+    rmSync(absoluteFilePath);
+
+    return {
+      deletedFilePaths: [filePath],
+    };
+  }
+
+  public deleteDirectory(directoryPath: string): LocalWorkspaceDeletedEntry {
+    const absoluteDirectoryPath = this.resolveWorkspaceDirectory(directoryPath);
+    const deletedFilePaths = this.collectFilePathsInDirectory(
+      absoluteDirectoryPath,
+    ).map((filePath) => this.toWorkspaceRelativePath(filePath));
+    rmSync(absoluteDirectoryPath, { force: true, recursive: true });
+
+    return {
+      deletedFilePaths,
+    };
   }
 
   public sendThreadMessage(threadId: string, body: string): LocalThreadEvent[] {
@@ -290,23 +442,155 @@ export class LocalWorkspaceService {
   }
 
   private resolveWorkspaceFile(filePath: string): string {
-    const normalizedPath = toPosixPath(filePath);
-    const absolutePath = resolve(this.workspaceDir, normalizedPath);
-    const relativeToRoot = relative(this.workspaceDir, absolutePath);
-
-    if (
-      relativeToRoot.startsWith("..") ||
-      relativeToRoot === "" ||
-      toPosixPath(relativeToRoot) !== normalizedPath
-    ) {
-      throw new Error(`File '${filePath}' is outside the workspace root.`);
-    }
+    const absolutePath = this.resolveWorkspacePath(filePath);
 
     if (!existsSync(absolutePath) || !statSync(absolutePath).isFile()) {
       throw new Error(`File '${filePath}' was not found.`);
     }
 
     return absolutePath;
+  }
+
+  private resolveWorkspaceDirectory(
+    directoryPath: string,
+    options: { readonly allowWorkspaceRoot?: boolean } = {},
+  ): string {
+    const absolutePath = this.resolveWorkspacePath(directoryPath, options);
+
+    if (!existsSync(absolutePath) || !statSync(absolutePath).isDirectory()) {
+      throw new Error(`Directory '${directoryPath}' was not found.`);
+    }
+
+    return absolutePath;
+  }
+
+  private resolveWorkspacePath(
+    workspacePath: string,
+    options: { readonly allowWorkspaceRoot?: boolean } = {},
+  ): string {
+    const normalizedPath = toPosixPath(workspacePath);
+    const absolutePath = resolve(this.workspaceDir, normalizedPath);
+    const relativeToRoot = relative(this.workspaceDir, absolutePath);
+    const isWorkspaceRoot = relativeToRoot === "";
+
+    if (
+      relativeToRoot.startsWith("..") ||
+      (isWorkspaceRoot && !options.allowWorkspaceRoot) ||
+      toPosixPath(relativeToRoot) !== normalizedPath
+    ) {
+      throw new Error(`File '${workspacePath}' is outside the workspace root.`);
+    }
+
+    return absolutePath;
+  }
+
+  private toWorkspaceRelativePath(absolutePath: string): string {
+    return toPosixPath(relative(this.workspaceDir, absolutePath));
+  }
+
+  private collectFilePathsInDirectory(directoryPath: string): string[] {
+    const collectedPaths: string[] = [];
+    const visit = (currentDirectoryPath: string) => {
+      const entries = readdirSync(currentDirectoryPath, {
+        withFileTypes: true,
+      }).sort((left, right) => left.name.localeCompare(right.name));
+
+      for (const entry of entries) {
+        const nextPath = join(currentDirectoryPath, entry.name);
+        if (entry.isDirectory()) {
+          if (ignoredDirectoryNames.has(entry.name)) {
+            continue;
+          }
+
+          visit(nextPath);
+          continue;
+        }
+
+        if (
+          entry.isFile() &&
+          supportedFileExtensions.has(extname(nextPath).toLowerCase())
+        ) {
+          collectedPaths.push(nextPath);
+        }
+      }
+    };
+
+    visit(directoryPath);
+    return collectedPaths;
+  }
+
+  private sanitizeEntryName(
+    nextName: string,
+    args: {
+      readonly fallbackBaseName: string;
+      readonly extension: string;
+    },
+  ): string {
+    const trimmedName = nextName.trim();
+    if (!trimmedName) {
+      throw new Error("A name is required.");
+    }
+
+    const segments = trimmedName.split(/[\\/]+/).filter(Boolean);
+    const leafName = segments.at(-1)?.trim() ?? "";
+    if (!leafName || leafName === "." || leafName === "..") {
+      throw new Error("A valid name is required.");
+    }
+
+    if (!args.extension) {
+      return leafName;
+    }
+
+    const baseName =
+      basename(leafName, extname(leafName)) || args.fallbackBaseName;
+    const nextExtension = extname(leafName) || args.extension;
+    if (!supportedFileExtensions.has(nextExtension.toLowerCase())) {
+      throw new Error(`File extension '${nextExtension}' is not supported.`);
+    }
+
+    return `${baseName}${nextExtension}`;
+  }
+
+  private resolveWorkspaceSiblingPath(
+    absolutePath: string,
+    nextName: string,
+  ): string {
+    const absoluteSiblingPath = join(dirname(absolutePath), nextName);
+    const relativeSiblingPath =
+      this.toWorkspaceRelativePath(absoluteSiblingPath);
+    const resolvedSiblingPath = this.resolveWorkspacePath(relativeSiblingPath);
+    if (
+      resolvedSiblingPath !== absolutePath &&
+      existsSync(resolvedSiblingPath) &&
+      !pathsResolveToSameEntry(absolutePath, resolvedSiblingPath)
+    ) {
+      throw new Error(`Path '${relativeSiblingPath}' already exists.`);
+    }
+
+    return resolvedSiblingPath;
+  }
+
+  private resolveUniqueChildName(
+    absoluteDirectoryPath: string,
+    args: {
+      readonly baseName: string;
+      readonly extension: string;
+    },
+  ): string {
+    let suffix = 0;
+
+    while (true) {
+      const candidateName =
+        suffix === 0
+          ? `${args.baseName}${args.extension}`
+          : `${args.baseName}-${suffix}${args.extension}`;
+      const candidatePath = join(absoluteDirectoryPath, candidateName);
+      if (!existsSync(candidatePath)) {
+        return candidateName;
+      }
+
+      suffix += 1;
+    }
   }
 
   private resolveThreadStorePath(): string {

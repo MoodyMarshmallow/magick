@@ -53,6 +53,12 @@ const registerIpc = (
   ipcMain.removeHandler("magick-desktop:openFile");
   ipcMain.removeHandler("magick-desktop:saveDocument");
   ipcMain.removeHandler("magick-desktop:saveFile");
+  ipcMain.removeHandler("magick-desktop:createFile");
+  ipcMain.removeHandler("magick-desktop:createDirectory");
+  ipcMain.removeHandler("magick-desktop:renameFile");
+  ipcMain.removeHandler("magick-desktop:renameDirectory");
+  ipcMain.removeHandler("magick-desktop:deleteFile");
+  ipcMain.removeHandler("magick-desktop:deleteDirectory");
   ipcMain.removeHandler("magick-desktop:sendThreadMessage");
   ipcMain.removeHandler("magick-desktop:toggleThreadResolved");
   ipcMain.removeHandler("magick-desktop:getBackendUrl");
@@ -85,6 +91,42 @@ const registerIpc = (
     "magick-desktop:saveFile",
     async (_event, filePath: string, markdown: string) => {
       workspaceService.saveFile(filePath, markdown);
+    },
+  );
+  ipcMain.handle(
+    "magick-desktop:createFile",
+    async (_event, directoryPath: string) => {
+      return workspaceService.createFile(directoryPath);
+    },
+  );
+  ipcMain.handle(
+    "magick-desktop:createDirectory",
+    async (_event, directoryPath: string) => {
+      return workspaceService.createDirectory(directoryPath);
+    },
+  );
+  ipcMain.handle(
+    "magick-desktop:renameFile",
+    async (_event, filePath: string, nextName: string) => {
+      return workspaceService.renameFile(filePath, nextName);
+    },
+  );
+  ipcMain.handle(
+    "magick-desktop:renameDirectory",
+    async (_event, directoryPath: string, nextName: string) => {
+      return workspaceService.renameDirectory(directoryPath, nextName);
+    },
+  );
+  ipcMain.handle(
+    "magick-desktop:deleteFile",
+    async (_event, filePath: string) => {
+      return workspaceService.deleteFile(filePath);
+    },
+  );
+  ipcMain.handle(
+    "magick-desktop:deleteDirectory",
+    async (_event, directoryPath: string) => {
+      return workspaceService.deleteDirectory(directoryPath);
     },
   );
   ipcMain.handle(

@@ -4,7 +4,8 @@
   "type": "module",
   "workspaces": ["apps/*", "packages/*"],
   "scripts": {
-    "dev": "concurrently -k -n server,web -c auto \"bun run server:dev\" \"wait-on tcp:8787 && bun run web:dev\"",
+    "dev": "node ./scripts/dev.mjs",
+    "dev:stack": "concurrently -k -n server,web -c auto \"bun run server:dev\" \"wait-on tcp:8787 && bun run web:dev\"",
     "desktop:dev": "concurrently -k -n web,desktop -c auto \"bun run web:dev\" \"wait-on tcp:4173 && cross-env MAGICK_RENDERER_URL=http://localhost:4173 bun run desktop:main\"",
     "desktop:main": "nodemon --watch apps/desktop/src/main --watch apps/desktop/src/preload --ext ts --signal SIGTERM --exec \"cross-env NODE_OPTIONS=--import=tsx electron apps/desktop/src/main/main.ts\"",
     "desktop:start": "cross-env NODE_OPTIONS=--import=tsx electron apps/desktop/src/main/main.ts",

@@ -700,6 +700,71 @@ export const markDocumentSaved = (args: {
   };
 };
 
+export const renameDocumentInWorkspace = (args: {
+  state: WorkspaceSessionState;
+  previousDocumentId: string;
+  documentId: string;
+}): WorkspaceSessionState => {
+  const currentDraft = args.state.draftsByDocumentId[args.previousDocumentId];
+  const nextTabsById = Object.fromEntries(
+    Object.entries(args.state.tabsById).map(([tabId, tab]) => [
+      tabId,
+      tab.documentId === args.previousDocumentId
+        ? { ...tab, documentId: args.documentId }
+        : tab,
+    ]),
+  );
+  const nextDraftsByDocumentId = { ...args.state.draftsByDocumentId };
+  if (currentDraft) {
+    nextDraftsByDocumentId[args.documentId] = currentDraft;
+    delete nextDraftsByDocumentId[args.previousDocumentId];
+  }
+
+  const nextLastFocusedTabIdByDocumentId = {
+    ...args.state.lastFocusedTabIdByDocumentId,
+  };
+  const lastFocusedTabId =
+    nextLastFocusedTabIdByDocumentId[args.previousDocumentId];
+  if (lastFocusedTabId) {
+    nextLastFocusedTabIdByDocumentId[args.documentId] = lastFocusedTabId;
+    delete nextLastFocusedTabIdByDocumentId[args.previousDocumentId];
+  }
+
+  return {
+    ...args.state,
+    tabsById: nextTabsById,
+    draftsByDocumentId: nextDraftsByDocumentId,
+    lastFocusedTabIdByDocumentId: nextLastFocusedTabIdByDocumentId,
+  };
+};
+
+export const closeDocumentInWorkspace = (args: {
+  state: WorkspaceSessionState;
+  documentId: string;
+}): WorkspaceSessionState => {
+  let nextState = args.state;
+  const tabIds = Object.values(args.state.tabsById)
+    .filter((tab) => tab.documentId === args.documentId)
+    .map((tab) => tab.id);
+
+  for (const tabId of tabIds) {
+    nextState = closeTabInWorkspace({ state: nextState, tabId });
+  }
+
+  const nextDraftsByDocumentId = { ...nextState.draftsByDocumentId };
+  delete nextDraftsByDocumentId[args.documentId];
+  const nextLastFocusedTabIdByDocumentId = {
+    ...nextState.lastFocusedTabIdByDocumentId,
+  };
+  delete nextLastFocusedTabIdByDocumentId[args.documentId];
+
+  return {
+    ...nextState,
+    draftsByDocumentId: nextDraftsByDocumentId,
+    lastFocusedTabIdByDocumentId: nextLastFocusedTabIdByDocumentId,
+  };
+};
+
 export const findFirstLeafPane = (
   node: WorkspacePaneNode | null,
 ): WorkspaceLeafPane | null => {

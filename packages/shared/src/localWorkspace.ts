@@ -56,6 +56,34 @@ export interface LocalWorkspaceFilesBootstrap {
   readonly tree: readonly LocalWorkspaceTreeNode[];
 }
 
+export interface LocalWorkspaceCreatedFile {
+  readonly filePath: string;
+}
+
+export interface LocalWorkspaceCreatedDirectory {
+  readonly path: string;
+}
+
+export interface LocalWorkspaceRenamedFile {
+  readonly previousFilePath: string;
+  readonly filePath: string;
+}
+
+export interface LocalWorkspacePathChange {
+  readonly previousFilePath: string;
+  readonly filePath: string;
+}
+
+export interface LocalWorkspaceRenamedDirectory {
+  readonly previousPath: string;
+  readonly path: string;
+  readonly filePathChanges: readonly LocalWorkspacePathChange[];
+}
+
+export interface LocalWorkspaceDeletedEntry {
+  readonly deletedFilePaths: readonly string[];
+}
+
 export interface LocalWorkspaceFileEvent {
   readonly type: "workspace.files.changed";
   readonly filePaths: readonly string[];
@@ -65,6 +93,22 @@ export interface MagickDesktopFileApi {
   getFileWorkspaceBootstrap: () => Promise<LocalWorkspaceFilesBootstrap>;
   openFile: (filePath: string) => Promise<LocalFilePayload>;
   saveFile: (filePath: string, markdown: string) => Promise<void>;
+  createFile: (directoryPath: string) => Promise<LocalWorkspaceCreatedFile>;
+  createDirectory: (
+    directoryPath: string,
+  ) => Promise<LocalWorkspaceCreatedDirectory>;
+  renameFile: (
+    filePath: string,
+    nextName: string,
+  ) => Promise<LocalWorkspaceRenamedFile>;
+  renameDirectory: (
+    directoryPath: string,
+    nextName: string,
+  ) => Promise<LocalWorkspaceRenamedDirectory>;
+  deleteFile: (filePath: string) => Promise<LocalWorkspaceDeletedEntry>;
+  deleteDirectory: (
+    directoryPath: string,
+  ) => Promise<LocalWorkspaceDeletedEntry>;
   onWorkspaceEvent: (
     listener: (event: LocalWorkspaceFileEvent) => void,
   ) => () => void;

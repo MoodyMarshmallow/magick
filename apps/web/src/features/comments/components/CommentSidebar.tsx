@@ -9,6 +9,11 @@ import {
 } from "lucide-react";
 import { type KeyboardEvent, useEffect, useRef, useState } from "react";
 import { appIconSize } from "../../../app/appIconSize";
+import {
+  OverlayMenu,
+  type OverlayMenuPosition,
+  getMenuPositionFromTrigger,
+} from "../../../app/components/OverlayMenu";
 import { RenderedMarkdown } from "../../document/components/RenderedMarkdown";
 import type { CommentThread } from "../state/threadProjector";
 
@@ -44,6 +49,8 @@ export function CommentSidebar({
   const [replyDraft, setReplyDraft] = useState("");
   const [showResolvedOnly, setShowResolvedOnly] = useState(false);
   const [threadMenuId, setThreadMenuId] = useState<string | null>(null);
+  const [threadMenuPosition, setThreadMenuPosition] =
+    useState<OverlayMenuPosition | null>(null);
   const [titleDraft, setTitleDraft] = useState("");
   const activeThread =
     threads.find((thread) => thread.threadId === activeThreadId) ?? null;
@@ -66,6 +73,7 @@ export function CommentSidebar({
       !threads.some((thread) => thread.threadId === threadMenuId)
     ) {
       setThreadMenuId(null);
+      setThreadMenuPosition(null);
     }
   }, [editingThreadId, threadMenuId, threads]);
 
@@ -81,6 +89,7 @@ export function CommentSidebar({
   const beginThreadRename = (thread: CommentThread) => {
     skipNextRenameBlurRef.current = false;
     setThreadMenuId(null);
+    setThreadMenuPosition(null);
     setEditingThreadId(thread.threadId);
     setTitleDraft(thread.title);
   };
@@ -356,17 +365,34 @@ export function CommentSidebar({
                     aria-haspopup="menu"
                     aria-label={`More actions for ${thread.title}`}
                     className="flat-button thread-entry__menu-trigger"
-                    onClick={() => {
-                      setThreadMenuId((current) =>
-                        current === thread.threadId ? null : thread.threadId,
+                    onClick={(event) => {
+                      const menuPosition = getMenuPositionFromTrigger(
+                        event.currentTarget,
                       );
+
+                      setThreadMenuId((current) => {
+                        if (current === thread.threadId) {
+                          setThreadMenuPosition(null);
+                          return null;
+                        }
+
+                        setThreadMenuPosition(menuPosition);
+                        return thread.threadId;
+                      });
                     }}
                     type="button"
                   >
                     <EllipsisVertical size={appIconSize} />
                   </button>
-                  {threadMenuId === thread.threadId ? (
-                    <div className="thread-entry__menu" role="menu">
+                  {threadMenuId === thread.threadId && threadMenuPosition ? (
+                    <OverlayMenu
+                      className="thread-entry__menu"
+                      onClose={() => {
+                        setThreadMenuId(null);
+                        setThreadMenuPosition(null);
+                      }}
+                      position={threadMenuPosition}
+                    >
                       <button
                         className="thread-entry__menu-item"
                         onClick={() => {
@@ -382,6 +408,7 @@ export function CommentSidebar({
                         disabled={thread.runtimeState === "running"}
                         onClick={async () => {
                           setThreadMenuId(null);
+                          setThreadMenuPosition(null);
                           await onDeleteThread(thread.threadId);
                         }}
                         role="menuitem"
@@ -389,7 +416,7 @@ export function CommentSidebar({
                       >
                         Delete
                       </button>
-                    </div>
+                    </OverlayMenu>
                   ) : null}
                 </div>
               </div>
@@ -401,6 +428,24 @@ export function CommentSidebar({
                   : "No open chats yet."}
               </div>
             ) : null}
+            <div className="file-tree__root-create comment-sidebar__root-create">
+              <div
+                className="file-tree__root-create-spacer"
+                aria-hidden="true"
+              />
+              <div className="file-tree__actions">
+                <button
+                  aria-label="Create new chat from add zone"
+                  className="flat-button file-tree__action-button file-tree__action-button--root-create"
+                  onClick={async () => {
+                    await onCreateThread();
+                  }}
+                  type="button"
+                >
+                  <Plus size={appIconSize} />
+                </button>
+              </div>
+            </div>
           </div>
         </section>
       )}

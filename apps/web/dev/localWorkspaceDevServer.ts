@@ -205,6 +205,128 @@ export const createLocalWorkspaceDevPlugin = (
               }
             }
 
+            if (
+              request.method === "POST" &&
+              requestUrl.pathname === "/create-file"
+            ) {
+              const hasDirectoryPath =
+                requestUrl.searchParams.has("directoryPath");
+              const directoryPath =
+                requestUrl.searchParams.get("directoryPath") ?? "";
+              if (!hasDirectoryPath) {
+                return sendJson(response, 400, {
+                  code: "missing_directory_path",
+                  message: "The local workspace directory path is required.",
+                });
+              }
+
+              return sendJson(
+                response,
+                200,
+                workspaceService.createFile(directoryPath),
+              );
+            }
+
+            if (
+              request.method === "POST" &&
+              requestUrl.pathname === "/create-directory"
+            ) {
+              const hasDirectoryPath =
+                requestUrl.searchParams.has("directoryPath");
+              const directoryPath =
+                requestUrl.searchParams.get("directoryPath") ?? "";
+              if (!hasDirectoryPath) {
+                return sendJson(response, 400, {
+                  code: "missing_directory_path",
+                  message: "The local workspace directory path is required.",
+                });
+              }
+
+              return sendJson(
+                response,
+                200,
+                workspaceService.createDirectory(directoryPath),
+              );
+            }
+
+            if (
+              request.method === "POST" &&
+              requestUrl.pathname === "/rename-file"
+            ) {
+              const filePath = requestUrl.searchParams.get("path");
+              const nextName = requestUrl.searchParams.get("name");
+              if (!filePath || !nextName) {
+                return sendJson(response, 400, {
+                  code: "missing_rename_params",
+                  message: "The local workspace path and name are required.",
+                });
+              }
+
+              return sendJson(
+                response,
+                200,
+                workspaceService.renameFile(filePath, nextName),
+              );
+            }
+
+            if (
+              request.method === "POST" &&
+              requestUrl.pathname === "/rename-directory"
+            ) {
+              const directoryPath = requestUrl.searchParams.get("path");
+              const nextName = requestUrl.searchParams.get("name");
+              if (!directoryPath || !nextName) {
+                return sendJson(response, 400, {
+                  code: "missing_rename_params",
+                  message: "The local workspace path and name are required.",
+                });
+              }
+
+              return sendJson(
+                response,
+                200,
+                workspaceService.renameDirectory(directoryPath, nextName),
+              );
+            }
+
+            if (
+              request.method === "POST" &&
+              requestUrl.pathname === "/delete-file"
+            ) {
+              const filePath = requestUrl.searchParams.get("path");
+              if (!filePath) {
+                return sendJson(response, 400, {
+                  code: "missing_file_path",
+                  message: "The local workspace file path is required.",
+                });
+              }
+
+              return sendJson(
+                response,
+                200,
+                workspaceService.deleteFile(filePath),
+              );
+            }
+
+            if (
+              request.method === "POST" &&
+              requestUrl.pathname === "/delete-directory"
+            ) {
+              const directoryPath = requestUrl.searchParams.get("path");
+              if (!directoryPath) {
+                return sendJson(response, 400, {
+                  code: "missing_directory_path",
+                  message: "The local workspace directory path is required.",
+                });
+              }
+
+              return sendJson(
+                response,
+                200,
+                workspaceService.deleteDirectory(directoryPath),
+              );
+            }
+
             next();
           } catch (error) {
             sendJson(response, 500, {

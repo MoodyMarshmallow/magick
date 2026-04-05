@@ -39,6 +39,22 @@ const fileApi: MagickDesktopFileApi = {
     ipcRenderer.invoke("magick-desktop:openFile", filePath),
   saveFile: (filePath, markdown) =>
     ipcRenderer.invoke("magick-desktop:saveFile", filePath, markdown),
+  createFile: (directoryPath) =>
+    ipcRenderer.invoke("magick-desktop:createFile", directoryPath),
+  createDirectory: (directoryPath) =>
+    ipcRenderer.invoke("magick-desktop:createDirectory", directoryPath),
+  renameFile: (filePath, nextName) =>
+    ipcRenderer.invoke("magick-desktop:renameFile", filePath, nextName),
+  renameDirectory: (directoryPath, nextName) =>
+    ipcRenderer.invoke(
+      "magick-desktop:renameDirectory",
+      directoryPath,
+      nextName,
+    ),
+  deleteFile: (filePath) =>
+    ipcRenderer.invoke("magick-desktop:deleteFile", filePath),
+  deleteDirectory: (directoryPath) =>
+    ipcRenderer.invoke("magick-desktop:deleteDirectory", directoryPath),
   onWorkspaceEvent: (listener) => {
     const wrapped = (
       _event: Electron.IpcRendererEvent,

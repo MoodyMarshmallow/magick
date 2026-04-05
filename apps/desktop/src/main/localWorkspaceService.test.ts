@@ -1,4 +1,5 @@
 import {
+  linkSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -7,7 +8,10 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { LocalWorkspaceService } from "./localWorkspaceService";
+import {
+  LocalWorkspaceService,
+  pathsResolveToSameEntry,
+} from "./localWorkspaceService";
 
 const createHarness = () => {
   const root = mkdtempSync(join(tmpdir(), "magick-desktop-"));
@@ -141,6 +145,125 @@ describe("LocalWorkspaceService", () => {
           "utf8",
         ),
       ).toContain("Fresh local markdown");
+    } finally {
+      harness.cleanup();
+    }
+  });
+
+  it("creates a new markdown file inside a directory", () => {
+    const harness = createHarness();
+
+    try {
+      const created = harness.service.createFile("notes/patterns");
+
+      expect(created.filePath).toBe("notes/patterns/untitled.md");
+      expect(
+        readFileSync(join(harness.workspaceDir, created.filePath), "utf8"),
+      ).toBe("");
+    } finally {
+      harness.cleanup();
+    }
+  });
+
+  it("creates uniquely named folders inside a directory", () => {
+    const harness = createHarness();
+
+    try {
+      const first = harness.service.createDirectory("notes");
+      const second = harness.service.createDirectory("notes");
+
+      expect(first.path).toBe("notes/untitled-folder");
+      expect(second.path).toBe("notes/untitled-folder-1");
+    } finally {
+      harness.cleanup();
+    }
+  });
+
+  it("creates files and folders at the workspace root", () => {
+    const harness = createHarness();
+
+    try {
+      const createdFile = harness.service.createFile("");
+      const createdDirectory = harness.service.createDirectory("");
+
+      expect(createdFile.filePath).toBe("untitled.md");
+      expect(createdDirectory.path).toBe("untitled-folder");
+    } finally {
+      harness.cleanup();
+    }
+  });
+
+  it("renames files inside the workspace", () => {
+    const harness = createHarness();
+
+    try {
+      const renamed = harness.service.renameFile(
+        "notes/scratch.txt",
+        "renamed-scratch.txt",
+      );
+
+      expect(renamed).toEqual({
+        previousFilePath: "notes/scratch.txt",
+        filePath: "notes/renamed-scratch.txt",
+      });
+      expect(
+        readFileSync(join(harness.workspaceDir, renamed.filePath), "utf8"),
+      ).toContain("Plain text is also supported");
+    } finally {
+      harness.cleanup();
+    }
+  });
+
+  it("renames directories and reports nested file path changes", () => {
+    const harness = createHarness();
+
+    try {
+      const renamed = harness.service.renameDirectory(
+        "notes/patterns",
+        "systems",
+      );
+
+      expect(renamed.previousPath).toBe("notes/patterns");
+      expect(renamed.path).toBe("notes/systems");
+      expect(renamed.filePathChanges).toEqual([
+        {
+          previousFilePath: "notes/patterns/design-system-field-notes.md",
+          filePath: "notes/systems/design-system-field-notes.md",
+        },
+      ]);
+    } finally {
+      harness.cleanup();
+    }
+  });
+
+  it("deletes files and directories", () => {
+    const harness = createHarness();
+
+    try {
+      expect(harness.service.deleteFile("notes/scratch.txt")).toEqual({
+        deletedFilePaths: ["notes/scratch.txt"],
+      });
+      expect(
+        harness.service.deleteDirectory("notes/patterns").deletedFilePaths,
+      ).toEqual(["notes/patterns/design-system-field-notes.md"]);
+    } finally {
+      harness.cleanup();
+    }
+  });
+
+  it("treats renamed aliases to the same entry as non-colliding", () => {
+    const harness = createHarness();
+
+    try {
+      const originalPath = join(harness.workspaceDir, "notes", "scratch.txt");
+      const aliasPath = join(
+        harness.workspaceDir,
+        "notes",
+        "scratch-alias.txt",
+      );
+      linkSync(originalPath, aliasPath);
+
+      expect(pathsResolveToSameEntry(originalPath, aliasPath)).toBe(true);
     } finally {
       harness.cleanup();
     }

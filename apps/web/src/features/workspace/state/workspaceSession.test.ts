@@ -1,4 +1,5 @@
 import {
+  closeDocumentInWorkspace,
   closeTabInWorkspace,
   createWorkspaceSessionWithDocument,
   focusTabInPane,
@@ -7,6 +8,7 @@ import {
   markDocumentSaved,
   moveTabWithinWorkspace,
   openDocumentInWorkspace,
+  renameDocumentInWorkspace,
   splitPaneWithDocument,
   splitPaneWithTab,
   updateDocumentDraft,
@@ -349,5 +351,60 @@ describe("workspaceSession", () => {
     expect(reopened.focusedTabId).toBe(
       closed.lastFocusedTabIdByDocumentId.doc_1,
     );
+  });
+
+  it("renames open documents across tabs and drafts", () => {
+    const ids = createIds();
+    const initial = createWorkspaceSessionWithDocument({
+      documentId: "doc_1",
+      ids,
+    });
+    const duplicated = splitPaneWithDocument({
+      state: initial,
+      documentId: "doc_1",
+      targetPaneId: initial.focusedPaneId ?? "pane_missing",
+      position: "right",
+      ids,
+    });
+
+    const renamed = renameDocumentInWorkspace({
+      state: duplicated,
+      previousDocumentId: "doc_1",
+      documentId: "doc_2",
+    });
+
+    expect(
+      Object.values(renamed.tabsById).every(
+        (tab) => tab.documentId === "doc_2",
+      ),
+    ).toBe(true);
+    expect(renamed.draftsByDocumentId.doc_2).toBeTruthy();
+    expect(renamed.draftsByDocumentId.doc_1).toBeUndefined();
+    expect(renamed.lastFocusedTabIdByDocumentId.doc_2).toBeTruthy();
+  });
+
+  it("closes all tabs and clears draft state for a deleted document", () => {
+    const ids = createIds();
+    const initial = createWorkspaceSessionWithDocument({
+      documentId: "doc_1",
+      ids,
+    });
+    const withSecondDoc = openDocumentInWorkspace({
+      state: initial,
+      documentId: "doc_2",
+      target: { paneId: initial.focusedPaneId, duplicate: false },
+      ids,
+    });
+
+    const closed = closeDocumentInWorkspace({
+      state: withSecondDoc,
+      documentId: "doc_1",
+    });
+
+    expect(Object.values(closed.tabsById).map((tab) => tab.documentId)).toEqual(
+      ["doc_2"],
+    );
+    expect(closed.draftsByDocumentId.doc_1).toBeUndefined();
+    expect(closed.lastFocusedTabIdByDocumentId.doc_1).toBeUndefined();
   });
 });
