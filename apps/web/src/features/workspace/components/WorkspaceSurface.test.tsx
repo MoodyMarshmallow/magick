@@ -65,4 +65,106 @@ describe("WorkspaceSurface", () => {
       expect(useWorkspaceSessionStore.getState().focusedTabId).not.toBeNull();
     });
   });
+
+  it("applies pane border classes only for right and bottom neighbors", () => {
+    useWorkspaceSessionStore.setState({
+      ...useWorkspaceSessionStore.getInitialState(),
+      rootPane: {
+        type: "split",
+        id: "split_root",
+        direction: "vertical",
+        ratio: 0.5,
+        first: {
+          type: "split",
+          id: "split_left",
+          direction: "horizontal",
+          ratio: 0.5,
+          first: {
+            type: "leaf",
+            id: "pane_top_left",
+            tabIds: ["tab_top_left"],
+            activeTabId: "tab_top_left",
+          },
+          second: {
+            type: "leaf",
+            id: "pane_bottom_left",
+            tabIds: ["tab_bottom_left"],
+            activeTabId: "tab_bottom_left",
+          },
+        },
+        second: {
+          type: "leaf",
+          id: "pane_right",
+          tabIds: ["tab_right"],
+          activeTabId: "tab_right",
+        },
+      },
+      tabsById: {
+        tab_top_left: { id: "tab_top_left", documentId: "top-left.md" },
+        tab_bottom_left: {
+          id: "tab_bottom_left",
+          documentId: "bottom-left.md",
+        },
+        tab_right: { id: "tab_right", documentId: "right.md" },
+      },
+      draftsByDocumentId: {
+        "top-left.md": {
+          title: "Top Left",
+          markdown: "Top Left",
+          savedMarkdown: "Top Left",
+          isLoaded: true,
+        },
+        "bottom-left.md": {
+          title: "Bottom Left",
+          markdown: "Bottom Left",
+          savedMarkdown: "Bottom Left",
+          isLoaded: true,
+        },
+        "right.md": {
+          title: "Right",
+          markdown: "Right",
+          savedMarkdown: "Right",
+          isLoaded: true,
+        },
+      },
+      focusedPaneId: "pane_top_left",
+      focusedTabId: "tab_top_left",
+      lastFocusedTabIdByDocumentId: {
+        "top-left.md": "tab_top_left",
+        "bottom-left.md": "tab_bottom_left",
+        "right.md": "tab_right",
+      },
+    });
+
+    const queryClient = new QueryClient();
+    const { container } = render(
+      <QueryClientProvider client={queryClient}>
+        <WorkspaceSurface
+          dragItem={null}
+          initialDocumentId="top-left.md"
+          onDragItemChange={() => undefined}
+        />
+      </QueryClientProvider>,
+    );
+
+    const panes = Array.from(container.querySelectorAll(".workspace-pane"));
+    expect(panes).toHaveLength(3);
+
+    expect(panes[0]?.className).toContain("workspace-pane--has-right-neighbor");
+    expect(panes[0]?.className).toContain(
+      "workspace-pane--has-bottom-neighbor",
+    );
+
+    expect(panes[1]?.className).toContain("workspace-pane--has-right-neighbor");
+    expect(panes[1]?.className).not.toContain(
+      "workspace-pane--has-bottom-neighbor",
+    );
+
+    expect(panes[2]?.className).not.toContain(
+      "workspace-pane--has-right-neighbor",
+    );
+    expect(panes[2]?.className).not.toContain(
+      "workspace-pane--has-bottom-neighbor",
+    );
+  });
 });

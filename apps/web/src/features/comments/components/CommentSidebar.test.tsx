@@ -40,12 +40,9 @@ const threads: readonly CommentThread[] = [
 
 const baseProps = {
   activeThreadId: null,
-  isLoggedIn: false,
-  isLoginPending: false,
   onActivateThread: vi.fn(),
   onCreateThread: vi.fn(async () => undefined),
   onDeleteThread: vi.fn(async () => undefined),
-  onLogin: vi.fn(async () => undefined),
   onRenameThread: vi.fn(async () => undefined),
   onSendReply: vi.fn(async () => undefined),
   onShowLedger: vi.fn(),
@@ -67,22 +64,6 @@ describe("CommentSidebar", () => {
     fireEvent.click(screen.getByLabelText("Open Chat 1"));
 
     expect(handleActivateThread).toHaveBeenCalledWith("thread_1");
-  });
-
-  it("shows a login button and disables it when logged in", () => {
-    const { rerender } = render(<CommentSidebar {...baseProps} />);
-
-    const loginButton = screen.getByRole("button", { name: "log in" });
-    expect(loginButton).toBeTruthy();
-    expect(loginButton.hasAttribute("disabled")).toBe(false);
-
-    rerender(<CommentSidebar {...baseProps} isLoggedIn />);
-
-    expect(
-      screen
-        .getByRole("button", { name: "logged in" })
-        .hasAttribute("disabled"),
-    ).toBe(true);
   });
 
   it("creates a new chat from the ledger footer", async () => {

@@ -15,12 +15,9 @@ import type { CommentThread } from "../state/threadProjector";
 interface CommentSidebarProps {
   readonly threads: readonly CommentThread[];
   readonly activeThreadId: string | null;
-  readonly isLoggedIn: boolean;
-  readonly isLoginPending: boolean;
   readonly onActivateThread: (threadId: string) => void;
   readonly onCreateThread: () => Promise<void>;
   readonly onDeleteThread: (threadId: string) => Promise<void>;
-  readonly onLogin: () => Promise<void>;
   readonly onRenameThread: (threadId: string, title: string) => Promise<void>;
   readonly onShowLedger: () => void;
   readonly onSendReply: (threadId: string, message: string) => Promise<void>;
@@ -30,12 +27,9 @@ interface CommentSidebarProps {
 export function CommentSidebar({
   threads,
   activeThreadId,
-  isLoggedIn,
-  isLoginPending,
   onActivateThread,
   onCreateThread,
   onDeleteThread,
-  onLogin,
   onRenameThread,
   onShowLedger,
   onSendReply,
@@ -189,60 +183,9 @@ export function CommentSidebar({
 
   return (
     <aside className="comment-sidebar">
-      <header className="comment-sidebar__header">
-        <button
-          className="flat-button comment-sidebar__login"
-          disabled={isLoggedIn || isLoginPending}
-          onClick={async () => {
-            await onLogin();
-          }}
-          type="button"
-        >
-          {isLoggedIn ? "logged in" : "log in"}
-        </button>
-      </header>
       {activeThread ? (
         <section className="comment-sidebar__active-thread">
-          <div className="thread-record__messages">
-            {activeThread.messages.map((message) => (
-              <article
-                className={`thread-record__message thread-record__message--${message.author}`}
-                key={message.id}
-              >
-                <header>
-                  <span>{message.author === "human" ? "you" : "magick"}</span>
-                  <span>
-                    {new Date(message.createdAt).toLocaleTimeString()}
-                  </span>
-                </header>
-                <div className="thread-record__message-body">
-                  {message.body ? (
-                    <RenderedMarkdown content={message.body} />
-                  ) : (
-                    <p>Streaming...</p>
-                  )}
-                </div>
-              </article>
-            ))}
-          </div>
-
-          <div className="thread-record__composer">
-            <div className="thread-record__response-field">
-              <textarea
-                id="thread-response-field"
-                value={replyDraft}
-                onChange={(event) => setReplyDraft(event.target.value)}
-                onKeyDown={(event) =>
-                  handleComposerKeyDown(event, activeThread.threadId)
-                }
-                enterKeyHint="send"
-                placeholder="Write a response"
-                rows={3}
-              />
-            </div>
-          </div>
-
-          <footer className="thread-record__footer">
+          <header className="thread-record__header-bar">
             <div className="thread-record__header-main">
               <button
                 aria-label="Back to chats"
@@ -289,10 +232,77 @@ export function CommentSidebar({
                 <CircleCheckBig size={appIconSize} />
               )}
             </button>
-          </footer>
+          </header>
+
+          <div className="thread-record__messages">
+            {activeThread.messages.map((message) => (
+              <article
+                className={`thread-record__message thread-record__message--${message.author}`}
+                key={message.id}
+              >
+                <header>
+                  <span>{message.author === "human" ? "you" : "magick"}</span>
+                  <span>
+                    {new Date(message.createdAt).toLocaleTimeString()}
+                  </span>
+                </header>
+                <div className="thread-record__message-body">
+                  {message.body ? (
+                    <RenderedMarkdown content={message.body} />
+                  ) : (
+                    <p>Streaming...</p>
+                  )}
+                </div>
+              </article>
+            ))}
+          </div>
+
+          <div className="thread-record__composer">
+            <div className="thread-record__response-field">
+              <textarea
+                id="thread-response-field"
+                value={replyDraft}
+                onChange={(event) => setReplyDraft(event.target.value)}
+                onKeyDown={(event) =>
+                  handleComposerKeyDown(event, activeThread.threadId)
+                }
+                enterKeyHint="send"
+                placeholder="Write a response"
+                rows={3}
+              />
+            </div>
+          </div>
         </section>
       ) : (
         <section className="thread-ledger thread-ledger--full">
+          <header className="comment-sidebar__header">
+            <div className="comment-sidebar__footer-main">
+              <button
+                aria-label="Create new chat"
+                className="flat-button comment-sidebar__create"
+                onClick={async () => {
+                  await onCreateThread();
+                }}
+                type="button"
+              >
+                <Plus size={appIconSize} />
+              </button>
+              <strong>Chats</strong>
+            </div>
+            <button
+              aria-label={
+                showResolvedOnly ? "Show open chats" : "Show resolved chats"
+              }
+              className={`flat-button comment-sidebar__filter${showResolvedOnly ? " is-active" : ""}`}
+              onClick={() => {
+                setShowResolvedOnly((current) => !current);
+              }}
+              type="button"
+            >
+              <Archive size={appIconSize} />
+            </button>
+          </header>
+
           <div className="thread-ledger__items">
             {visibleThreads.map((thread) => (
               <div
@@ -392,33 +402,6 @@ export function CommentSidebar({
               </div>
             ) : null}
           </div>
-          <footer className="comment-sidebar__footer">
-            <div className="comment-sidebar__footer-main">
-              <button
-                aria-label="Create new chat"
-                className="flat-button comment-sidebar__create"
-                onClick={async () => {
-                  await onCreateThread();
-                }}
-                type="button"
-              >
-                <Plus size={appIconSize} />
-              </button>
-              <strong>Chats</strong>
-            </div>
-            <button
-              aria-label={
-                showResolvedOnly ? "Show open chats" : "Show resolved chats"
-              }
-              className={`flat-button comment-sidebar__filter${showResolvedOnly ? " is-active" : ""}`}
-              onClick={() => {
-                setShowResolvedOnly((current) => !current);
-              }}
-              type="button"
-            >
-              <Archive size={appIconSize} />
-            </button>
-          </footer>
         </section>
       )}
     </aside>

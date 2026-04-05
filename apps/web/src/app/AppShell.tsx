@@ -306,6 +306,19 @@ export function AppShell() {
 
         {/* <AuthStatus /> */}
 
+        <header className="rail-header">
+          <button
+            className="flat-button rail-header__button"
+            disabled={isLoggedIn || isLoginPending}
+            onClick={async () => {
+              await chatClient.startLogin(defaultProviderKey);
+            }}
+            type="button"
+          >
+            {isLoggedIn ? "logged in" : "log in"}
+          </button>
+        </header>
+
         <section className="sidebar-section rail-section">
           <FileTree
             activeFilePath={focusedDocumentId}
@@ -355,8 +368,6 @@ export function AppShell() {
       <CommentSidebar
         threads={threads}
         activeThreadId={activeThreadId}
-        isLoggedIn={isLoggedIn}
-        isLoginPending={isLoginPending}
         onActivateThread={handleSelectThread}
         onCreateThread={async () => {
           const thread = await chatClient.createThread({
@@ -378,9 +389,6 @@ export function AppShell() {
           if (activeThreadIdRef.current === threadId) {
             setActiveThreadId(null);
           }
-        }}
-        onLogin={async () => {
-          await chatClient.startLogin(defaultProviderKey);
         }}
         onRenameThread={async (threadId: string, title: string) => {
           const thread = await chatClient.renameThread(threadId, title);

@@ -54,6 +54,11 @@ interface WorkspaceOverlayRect {
   readonly variant: "tab-insert" | "split-top";
 }
 
+interface WorkspacePaneBorderState {
+  readonly hasBottomNeighbor: boolean;
+  readonly hasRightNeighbor: boolean;
+}
+
 const isLeavingForChild = (event: DragEvent<HTMLElement>): boolean => {
   const nextTarget = event.relatedTarget;
   return nextTarget instanceof Node && event.currentTarget.contains(nextTarget);
@@ -225,6 +230,7 @@ function PaneResizer({
 
 function WorkspaceLeafPaneView({
   pane,
+  borderState,
   dragItem,
   onDragItemChange,
   registerEditor,
@@ -232,6 +238,7 @@ function WorkspaceLeafPaneView({
   onTabInsertionOverlayChange,
 }: {
   readonly pane: WorkspaceLeafPane;
+  readonly borderState: WorkspacePaneBorderState;
   readonly dragItem: WorkspaceDragItem | null;
   readonly onDragItemChange: (item: WorkspaceDragItem | null) => void;
   readonly registerEditor: (
@@ -407,7 +414,7 @@ function WorkspaceLeafPaneView({
 
   return (
     <section
-      className={`workspace-pane${dropPosition ? ` is-drop-${dropPosition}` : ""}`}
+      className={`workspace-pane${borderState.hasRightNeighbor ? " workspace-pane--has-right-neighbor" : ""}${borderState.hasBottomNeighbor ? " workspace-pane--has-bottom-neighbor" : ""}${dropPosition ? ` is-drop-${dropPosition}` : ""}`}
     >
       <div
         className="workspace-pane__tabs"
@@ -729,6 +736,7 @@ function WorkspaceLeafPaneView({
 
 function WorkspacePaneNodeView({
   node,
+  borderState,
   dragItem,
   onDragItemChange,
   registerEditor,
@@ -736,6 +744,7 @@ function WorkspacePaneNodeView({
   onTabInsertionOverlayChange,
 }: {
   readonly node: WorkspacePaneNode;
+  readonly borderState: WorkspacePaneBorderState;
   readonly dragItem: WorkspaceDragItem | null;
   readonly onDragItemChange: (item: WorkspaceDragItem | null) => void;
   readonly registerEditor: (
@@ -753,6 +762,7 @@ function WorkspacePaneNodeView({
   if (node.type === "leaf") {
     return (
       <WorkspaceLeafPaneView
+        borderState={borderState}
         dragItem={dragItem}
         onDragItemChange={onDragItemChange}
         onFormatStateChange={onFormatStateChange}
@@ -780,6 +790,12 @@ function WorkspacePaneNodeView({
     >
       <div className="workspace-split__panel workspace-split__panel--first">
         <WorkspacePaneNodeView
+          borderState={{
+            hasBottomNeighbor:
+              borderState.hasBottomNeighbor || node.direction === "horizontal",
+            hasRightNeighbor:
+              borderState.hasRightNeighbor || node.direction === "vertical",
+          }}
           dragItem={dragItem}
           node={node.first}
           onDragItemChange={onDragItemChange}
@@ -791,6 +807,7 @@ function WorkspacePaneNodeView({
       <PaneResizer splitPane={node} />
       <div className="workspace-split__panel workspace-split__panel--second">
         <WorkspacePaneNodeView
+          borderState={borderState}
           dragItem={dragItem}
           node={node.second}
           onDragItemChange={onDragItemChange}
@@ -906,6 +923,7 @@ export function WorkspaceSurface({
       </div>
       <div className="workspace__frame workspace__frame--multi">
         <WorkspacePaneNodeView
+          borderState={{ hasBottomNeighbor: false, hasRightNeighbor: false }}
           dragItem={dragItem}
           node={rootPane}
           onDragItemChange={onDragItemChange}

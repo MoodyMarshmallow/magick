@@ -23,13 +23,14 @@
   --yellow: #dbbc7f;
   --orange: #e69875;
   --red: #e67e80;
-  --line: rgba(211, 198, 170, 0.14);
-  --line-strong: rgba(211, 198, 170, 0.28);
+  --line: transparent;
+  --line-strong: transparent;
+  --shell-border: rgba(211, 198, 170, 0.14);
   --hover: rgba(211, 198, 170, 0.08);
   --active: rgba(211, 198, 170, 0.12);
   --anchor: rgba(219, 188, 127, 0.22);
   --scrollbar-size: 10px;
-  --scrollbar-border: 2px;
+  --scrollbar-border: 0px;
   --scrollbar-thumb: transparent;
   --scrollbar-thumb-visible: color-mix(in srgb, var(--aqua) 20%, transparent);
   --scrollbar-thumb-hover: color-mix(in srgb, var(--aqua) 28%, transparent);
@@ -258,9 +259,9 @@ button:disabled {
 .left-rail {
   padding: 0;
   display: grid;
-  align-content: start;
-  gap: 1rem;
+  grid-template-rows: auto minmax(0, 1fr);
   background: var(--bg-ink);
+  border-right: 1px solid var(--shell-border);
   font-family: "Departure Mono", monospace;
   overflow: hidden;
 }
@@ -279,25 +280,30 @@ button:disabled {
 
 .comment-sidebar {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
   overflow: hidden;
   background: var(--bg-ink);
+  border-left: 1px solid var(--shell-border);
 }
 
-.comment-sidebar__header {
+.rail-header {
   display: flex;
-  justify-content: flex-end;
-  padding: 0.5rem 0.75rem;
-  border-bottom: 1px solid var(--line);
-  background: var(--bg);
+  align-items: center;
+  justify-content: flex-start;
+  height: 2.5rem;
+  padding: 0 0.75rem;
+  background: var(--bg-ink);
+  box-sizing: border-box;
 }
 
-.comment-sidebar__login {
-  min-height: 1.9rem;
+.rail-header__button {
+  height: 100%;
   padding: 0.35rem 0.55rem;
 }
 
+.comment-sidebar__header,
 .comment-sidebar__footer,
+.thread-record__header-bar,
 .thread-record__footer {
   display: flex;
   align-items: center;
@@ -305,11 +311,11 @@ button:disabled {
   gap: 0.75rem;
   height: 2.5rem;
   padding: 0.65rem 0.75rem;
-  border-top: 1px solid var(--line);
-  background: var(--bg);
+  background: var(--bg-ink);
   box-sizing: border-box;
 }
 
+.comment-sidebar__header strong,
 .comment-sidebar__footer strong {
   color: var(--fg);
   font-family: "Departure Mono", monospace;
@@ -658,6 +664,7 @@ button:disabled {
 .file-tree {
   display: grid;
   gap: 0;
+  align-content: start;
 }
 
 .file-tree__row {
@@ -761,6 +768,8 @@ button:disabled {
 .thread-record__message-body,
 .editor-surface__prose {
   font-family: "IBM Plex Mono", monospace;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .rendered-markdown > :first-child,
@@ -926,7 +935,7 @@ button:disabled {
   gap: 0.35rem;
   padding: 0.5rem 0;
   background: var(--bg);
-  border-right: 1px solid var(--line);
+  border-right: 1px solid var(--shell-border);
   align-items: center;
   width: 2.6rem;
   overflow: visible;
@@ -1071,12 +1080,14 @@ button:disabled {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   background: var(--bg);
-  border-right: 1px solid var(--line);
 }
 
-.workspace-split__panel:last-child .workspace-pane,
-.workspace > .workspace__canvas > .workspace__frame > .workspace-pane {
-  border-right: 0;
+.workspace-pane--has-right-neighbor {
+  border-right: 1px solid var(--shell-border);
+}
+
+.workspace-pane--has-bottom-neighbor {
+  border-bottom: 1px solid var(--shell-border);
 }
 
 .workspace-pane__tabs {
@@ -1320,7 +1331,7 @@ textarea {
   height: 100%;
   padding: 0;
   background: var(--bg-ink);
-  grid-template-rows: minmax(0, 1fr) auto;
+  grid-template-rows: auto minmax(0, 1fr);
   gap: 0;
 }
 
@@ -1348,7 +1359,7 @@ textarea {
   min-height: 0;
   height: 100%;
   display: grid;
-  grid-template-rows: minmax(0, 1fr) auto auto;
+  grid-template-rows: auto minmax(0, 1fr) auto;
   grid-row: 1 / -1;
   gap: 0;
   overflow: hidden;
@@ -1436,6 +1447,8 @@ textarea {
 }
 
 .thread-record__message {
+  min-width: 0;
+  max-width: 100%;
   padding: 0.15rem 0;
   border: 0;
   background: transparent;
@@ -1446,12 +1459,18 @@ textarea {
   flex-direction: column;
   align-items: flex-start;
   align-self: start;
-  inline-size: fit-content;
+  inline-size: auto;
   max-inline-size: 100%;
   justify-self: start;
   padding: 0.75rem 0.85rem;
   background: var(--bg);
   border: 1px solid var(--line);
+}
+
+.thread-record__message header,
+.thread-record__message-body {
+  min-width: 0;
+  max-width: 100%;
 }
 
 .thread-record__composer {
