@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+import { maxThreadTitleLength } from "@magick/shared/threadTitle";
 import {
   createEvent,
   fireEvent,
@@ -43,7 +44,9 @@ const baseProps = {
   isLoginPending: false,
   onActivateThread: vi.fn(),
   onCreateThread: vi.fn(async () => undefined),
+  onDeleteThread: vi.fn(async () => undefined),
   onLogin: vi.fn(async () => undefined),
+  onRenameThread: vi.fn(async () => undefined),
   onSendReply: vi.fn(async () => undefined),
   onShowLedger: vi.fn(),
   onToggleResolved: vi.fn(async () => undefined),
@@ -120,6 +123,58 @@ describe("CommentSidebar", () => {
     });
   });
 
+  it("renames a thread from the ledger actions menu", async () => {
+    const handleRenameThread = vi.fn(async () => undefined);
+
+    render(
+      <CommentSidebar {...baseProps} onRenameThread={handleRenameThread} />,
+    );
+
+    fireEvent.click(screen.getByLabelText("More actions for Chat 1"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Rename" }));
+
+    const input = screen.getByLabelText("Rename Chat 1");
+    fireEvent.change(input, { target: { value: "Renamed chat" } });
+    fireEvent.blur(input);
+
+    await waitFor(() => {
+      expect(handleRenameThread).toHaveBeenCalledWith(
+        "thread_1",
+        "Renamed chat",
+      );
+    });
+  });
+
+  it("blocks overlong names while renaming", () => {
+    render(<CommentSidebar {...baseProps} />);
+
+    fireEvent.click(screen.getByLabelText("More actions for Chat 1"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Rename" }));
+
+    const input = screen.getByLabelText("Rename Chat 1") as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "Short" } });
+    fireEvent.change(input, {
+      target: { value: "x".repeat(maxThreadTitleLength + 1) },
+    });
+
+    expect(input.value).toBe("Short");
+  });
+
+  it("deletes a thread from the ledger actions menu", async () => {
+    const handleDeleteThread = vi.fn(async () => undefined);
+
+    render(
+      <CommentSidebar {...baseProps} onDeleteThread={handleDeleteThread} />,
+    );
+
+    fireEvent.click(screen.getByLabelText("More actions for Chat 1"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
+
+    await waitFor(() => {
+      expect(handleDeleteThread).toHaveBeenCalledWith("thread_1");
+    });
+  });
+
   it("sends replies on Enter without requiring a send button", async () => {
     const handleSendReply = vi.fn(async () => undefined);
 
@@ -163,6 +218,31 @@ describe("CommentSidebar", () => {
 
     await waitFor(() => {
       expect(handleSendReply).not.toHaveBeenCalled();
+    });
+  });
+
+  it("renames the active thread in place from the header title", async () => {
+    const handleRenameThread = vi.fn(async () => undefined);
+
+    render(
+      <CommentSidebar
+        {...baseProps}
+        activeThreadId="thread_1"
+        onRenameThread={handleRenameThread}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Chat 1" }));
+
+    const input = screen.getByLabelText("Rename Chat 1");
+    fireEvent.change(input, { target: { value: "Renamed in place" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    await waitFor(() => {
+      expect(handleRenameThread).toHaveBeenCalledWith(
+        "thread_1",
+        "Renamed in place",
+      );
     });
   });
 

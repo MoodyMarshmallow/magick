@@ -54,6 +54,10 @@ export type CommentThreadEvent =
       readonly thread: CommentThread;
     }
   | {
+      readonly type: "thread.deleted";
+      readonly threadId: string;
+    }
+  | {
       readonly type: "thread.statusChanged";
       readonly threadId: string;
       readonly status: CommentThreadStatus;
@@ -190,6 +194,8 @@ export const projectThreadEvent = (
       return upsertThread(threads, toCommentThread(event.thread));
     case "thread.created":
       return upsertThread(threads, event.thread);
+    case "thread.deleted":
+      return threads.filter((thread) => thread.threadId !== event.threadId);
     case "thread.statusChanged":
       return updateThread(threads, event.threadId, (thread) => ({
         ...thread,
@@ -235,6 +241,12 @@ export const projectThreadEvent = (
             updatedAt: domainEvent.occurredAt,
             messages: [],
           });
+        case "thread.renamed":
+          return updateThread(nextThreads, event.threadId, (thread) => ({
+            ...thread,
+            title: domainEvent.payload.title,
+            updatedAt: domainEvent.occurredAt,
+          }));
         case "thread.resolved":
           return updateThread(nextThreads, event.threadId, (thread) => ({
             ...thread,

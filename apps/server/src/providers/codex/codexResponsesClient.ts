@@ -11,7 +11,7 @@ import type { CodexAuthClient } from "./codexAuthClient";
 const CODEX_API_ENDPOINT = "https://chatgpt.com/backend-api/codex/responses";
 const REFRESH_SAFETY_MARGIN_MS = 60_000;
 const CODEX_SYSTEM_PROMPT =
-  "You are Codex, based on GPT-5. You are running as a coding agent in the Codex CLI on a user's computer.";
+  "You are Codex, based on GPT-5. You are running as a coding agent in the Codex CLI on a user's computer. When writing math in markdown, always use dollar-delimited LaTeX: `$...$` for inline math and `$$...$$` for display math. Do not use `\\(...\\)` or `\\[...\\]` delimiters.";
 
 export interface CodexResponsesClientOptions {
   readonly fetch?: typeof fetch;

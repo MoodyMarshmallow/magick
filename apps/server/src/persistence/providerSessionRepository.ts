@@ -143,4 +143,17 @@ export class ProviderSessionRepository {
       });
     }
   }
+
+  delete(sessionId: string): void {
+    try {
+      this.#database
+        .prepare("DELETE FROM provider_sessions WHERE id = ?")
+        .run(sessionId);
+    } catch (error) {
+      throw new PersistenceError({
+        operation: "provider_session_repository.delete",
+        detail: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
 }

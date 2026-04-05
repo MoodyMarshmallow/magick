@@ -520,16 +520,24 @@ button:disabled {
   box-sizing: border-box;
 }
 
+.thread-entry--menu-open {
+  z-index: 10000;
+}
+
 .thread-entry__summary {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   align-items: center;
   width: 100%;
   height: 2.5rem;
-  padding: 0.5rem 0.75rem 0.5rem 2.5rem;
+  padding: 0.5rem 2.9rem 0.5rem 2.5rem;
   background: var(--bg-ink);
   font-weight: 400;
   box-sizing: border-box;
+}
+
+.thread-entry__summary--editing {
+  cursor: text;
 }
 
 .thread-entry__toggle {
@@ -561,6 +569,52 @@ button:disabled {
   align-items: center;
   min-width: 0;
   white-space: nowrap;
+}
+
+.thread-entry__menu-shell {
+  position: absolute;
+  top: 50%;
+  right: 0.45rem;
+  transform: translateY(-50%);
+  z-index: 2;
+}
+
+.thread-entry__menu-trigger {
+  width: 1.75rem;
+  height: 1.75rem;
+  padding: 0;
+  color: var(--fg-dim);
+}
+
+.thread-entry__menu {
+  position: absolute;
+  top: calc(100% + 0.2rem);
+  right: 0;
+  min-width: 7rem;
+  display: grid;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  z-index: 10000;
+}
+
+.thread-entry__menu-item {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--fg);
+  padding: 0.55rem 0.7rem;
+  font-family: "Departure Mono", monospace;
+  font-size: var(--text-size-small);
+  text-align: left;
+  text-transform: lowercase;
+}
+
+.thread-entry__menu-item:hover {
+  background: var(--hover);
+}
+
+.thread-entry__menu-item:disabled {
+  color: var(--fg-dim);
 }
 
 .document-entry__body,
@@ -1322,6 +1376,49 @@ textarea {
   font-size: var(--text-size-body);
   font-weight: 400;
   letter-spacing: 0.01em;
+}
+
+.thread-record__header-title-button {
+  appearance: none;
+  border: 0;
+  min-width: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+}
+
+.thread-title-input {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: var(--fg);
+  padding: 0;
+  font-family: "Departure Mono", monospace;
+  font-size: var(--text-size-body);
+  font-weight: 400;
+  letter-spacing: 0.01em;
+  line-height: 1.1;
+  box-sizing: border-box;
+}
+
+.thread-title-input:focus {
+  outline: none;
+}
+
+.thread-entry__title-input,
+.thread-record__header-title-input {
+  min-width: 0;
+}
+
+.thread-entry__title-input {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.thread-record__header-title-input {
+  max-width: 100%;
 }
 
 .thread-record__status {

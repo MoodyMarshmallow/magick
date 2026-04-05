@@ -70,6 +70,7 @@ export type DomainEvent =
       "thread.created",
       { workspaceId: string; providerKey: ProviderKey; title: string }
     >
+  | EventBase<"thread.renamed", { title: string }>
   | EventBase<
       "provider.session.started",
       {
@@ -110,6 +111,14 @@ export type ClientCommand =
     }
   | {
       readonly type: "thread.open";
+      readonly payload: { threadId: string };
+    }
+  | {
+      readonly type: "thread.rename";
+      readonly payload: { threadId: string; title: string };
+    }
+  | {
+      readonly type: "thread.delete";
       readonly payload: { threadId: string };
     }
   | {

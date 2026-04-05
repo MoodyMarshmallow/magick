@@ -95,6 +95,7 @@ export const projectThreadEvents = (
 
     switch (event.type) {
       case "thread.created":
+      case "thread.renamed":
         state.title = event.payload.title;
         state.latestSequence = event.sequence;
         state.latestActivityAt = event.occurredAt;

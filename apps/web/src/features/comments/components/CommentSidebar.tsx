@@ -1,5 +1,13 @@
-import { Archive, ArrowLeft, Circle, CircleCheckBig, Plus } from "lucide-react";
-import { type KeyboardEvent, useState } from "react";
+import { maxThreadTitleLength } from "@magick/shared/threadTitle";
+import {
+  Archive,
+  ArrowLeft,
+  Circle,
+  CircleCheckBig,
+  EllipsisVertical,
+  Plus,
+} from "lucide-react";
+import { type KeyboardEvent, useEffect, useRef, useState } from "react";
 import { appIconSize } from "../../../app/appIconSize";
 import { RenderedMarkdown } from "../../document/components/RenderedMarkdown";
 import type { CommentThread } from "../state/threadProjector";
@@ -11,7 +19,9 @@ interface CommentSidebarProps {
   readonly isLoginPending: boolean;
   readonly onActivateThread: (threadId: string) => void;
   readonly onCreateThread: () => Promise<void>;
+  readonly onDeleteThread: (threadId: string) => Promise<void>;
   readonly onLogin: () => Promise<void>;
+  readonly onRenameThread: (threadId: string, title: string) => Promise<void>;
   readonly onShowLedger: () => void;
   readonly onSendReply: (threadId: string, message: string) => Promise<void>;
   readonly onToggleResolved: (threadId: string) => Promise<void>;
@@ -24,18 +34,95 @@ export function CommentSidebar({
   isLoginPending,
   onActivateThread,
   onCreateThread,
+  onDeleteThread,
   onLogin,
+  onRenameThread,
   onShowLedger,
   onSendReply,
   onToggleResolved,
 }: CommentSidebarProps) {
+  const skipNextRenameBlurRef = useRef(false);
+  const titleInputRef = useRef<HTMLInputElement | null>(null);
+  const [editingThreadId, setEditingThreadId] = useState<string | null>(null);
+  const [renamePendingThreadId, setRenamePendingThreadId] = useState<
+    string | null
+  >(null);
   const [replyDraft, setReplyDraft] = useState("");
   const [showResolvedOnly, setShowResolvedOnly] = useState(false);
+  const [threadMenuId, setThreadMenuId] = useState<string | null>(null);
+  const [titleDraft, setTitleDraft] = useState("");
   const activeThread =
     threads.find((thread) => thread.threadId === activeThreadId) ?? null;
   const visibleThreads = threads.filter((thread) =>
     showResolvedOnly ? thread.status === "resolved" : thread.status === "open",
   );
+
+  useEffect(() => {
+    if (
+      editingThreadId &&
+      !threads.some((thread) => thread.threadId === editingThreadId)
+    ) {
+      setEditingThreadId(null);
+      setRenamePendingThreadId(null);
+      setTitleDraft("");
+    }
+
+    if (
+      threadMenuId &&
+      !threads.some((thread) => thread.threadId === threadMenuId)
+    ) {
+      setThreadMenuId(null);
+    }
+  }, [editingThreadId, threadMenuId, threads]);
+
+  useEffect(() => {
+    if (!editingThreadId) {
+      return;
+    }
+
+    titleInputRef.current?.focus();
+    titleInputRef.current?.select();
+  }, [editingThreadId]);
+
+  const beginThreadRename = (thread: CommentThread) => {
+    skipNextRenameBlurRef.current = false;
+    setThreadMenuId(null);
+    setEditingThreadId(thread.threadId);
+    setTitleDraft(thread.title);
+  };
+
+  const cancelThreadRename = () => {
+    setEditingThreadId(null);
+    setRenamePendingThreadId(null);
+    setTitleDraft("");
+  };
+
+  const commitThreadRename = async (thread: CommentThread) => {
+    const nextTitle = titleDraft.trim();
+    if (!nextTitle || nextTitle === thread.title) {
+      cancelThreadRename();
+      return;
+    }
+
+    setRenamePendingThreadId(thread.threadId);
+    try {
+      await onRenameThread(thread.threadId, nextTitle);
+      setEditingThreadId(null);
+      setTitleDraft("");
+    } finally {
+      setRenamePendingThreadId((current) =>
+        current === thread.threadId ? null : current,
+      );
+    }
+  };
+
+  const updateTitleDraft = (nextTitle: string) => {
+    if (nextTitle.length > maxThreadTitleLength) {
+      return;
+    }
+
+    setTitleDraft(nextTitle);
+  };
 
   const sendReply = async (threadId: string) => {
     const nextMessage = replyDraft.trim();
@@ -62,6 +149,43 @@ export function CommentSidebar({
     event.preventDefault();
     await sendReply(threadId);
   };
+
+  const renderTitleInput = (thread: CommentThread, className: string) => (
+    <input
+      aria-label={`Rename ${thread.title}`}
+      className={className}
+      disabled={renamePendingThreadId === thread.threadId}
+      maxLength={maxThreadTitleLength}
+      onBlur={() => {
+        if (skipNextRenameBlurRef.current) {
+          skipNextRenameBlurRef.current = false;
+          return;
+        }
+
+        void commitThreadRename(thread);
+      }}
+      onChange={(event) => {
+        updateTitleDraft(event.target.value);
+      }}
+      onKeyDown={(event) => {
+        if (event.key === "Escape") {
+          skipNextRenameBlurRef.current = true;
+          cancelThreadRename();
+          return;
+        }
+
+        if (event.key !== "Enter") {
+          return;
+        }
+
+        event.preventDefault();
+        event.currentTarget.blur();
+      }}
+      ref={titleInputRef}
+      type="text"
+      value={titleDraft}
+    />
+  );
 
   return (
     <aside className="comment-sidebar">
@@ -128,9 +252,24 @@ export function CommentSidebar({
               >
                 <ArrowLeft size={appIconSize} />
               </button>
-              <strong className="thread-record__header-title">
-                {activeThread.title}
-              </strong>
+              {editingThreadId === activeThread.threadId ? (
+                renderTitleInput(
+                  activeThread,
+                  "thread-title-input thread-record__header-title-input",
+                )
+              ) : (
+                <button
+                  className="thread-record__header-title-button"
+                  onClick={() => {
+                    beginThreadRename(activeThread);
+                  }}
+                  type="button"
+                >
+                  <strong className="thread-record__header-title">
+                    {activeThread.title}
+                  </strong>
+                </button>
+              )}
             </div>
             <button
               aria-label={
@@ -156,7 +295,10 @@ export function CommentSidebar({
         <section className="thread-ledger thread-ledger--full">
           <div className="thread-ledger__items">
             {visibleThreads.map((thread) => (
-              <div className="thread-entry" key={thread.threadId}>
+              <div
+                className={`thread-entry${threadMenuId === thread.threadId ? " thread-entry--menu-open" : ""}`}
+                key={thread.threadId}
+              >
                 <button
                   aria-label={
                     thread.status === "open"
@@ -175,18 +317,71 @@ export function CommentSidebar({
                     <CircleCheckBig size={appIconSize} />
                   )}
                 </button>
-                <button
-                  aria-label={`Open ${thread.title}`}
-                  className="thread-entry__summary"
-                  onClick={() => {
-                    onActivateThread(thread.threadId);
-                  }}
-                  type="button"
-                >
-                  <div className="thread-entry__content">
-                    <strong>{thread.title}</strong>
+                {editingThreadId === thread.threadId ? (
+                  <div className="thread-entry__summary thread-entry__summary--editing">
+                    <div className="thread-entry__content">
+                      {renderTitleInput(
+                        thread,
+                        "thread-title-input thread-entry__title-input",
+                      )}
+                    </div>
                   </div>
-                </button>
+                ) : (
+                  <button
+                    aria-label={`Open ${thread.title}`}
+                    className="thread-entry__summary"
+                    onClick={() => {
+                      onActivateThread(thread.threadId);
+                    }}
+                    type="button"
+                  >
+                    <div className="thread-entry__content">
+                      <strong>{thread.title}</strong>
+                    </div>
+                  </button>
+                )}
+                <div className="thread-entry__menu-shell">
+                  <button
+                    aria-expanded={threadMenuId === thread.threadId}
+                    aria-haspopup="menu"
+                    aria-label={`More actions for ${thread.title}`}
+                    className="flat-button thread-entry__menu-trigger"
+                    onClick={() => {
+                      setThreadMenuId((current) =>
+                        current === thread.threadId ? null : thread.threadId,
+                      );
+                    }}
+                    type="button"
+                  >
+                    <EllipsisVertical size={appIconSize} />
+                  </button>
+                  {threadMenuId === thread.threadId ? (
+                    <div className="thread-entry__menu" role="menu">
+                      <button
+                        className="thread-entry__menu-item"
+                        onClick={() => {
+                          beginThreadRename(thread);
+                        }}
+                        role="menuitem"
+                        type="button"
+                      >
+                        Rename
+                      </button>
+                      <button
+                        className="thread-entry__menu-item"
+                        disabled={thread.runtimeState === "running"}
+                        onClick={async () => {
+                          setThreadMenuId(null);
+                          await onDeleteThread(thread.threadId);
+                        }}
+                        role="menuitem"
+                        type="button"
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
               </div>
             ))}
             {visibleThreads.length === 0 ? (

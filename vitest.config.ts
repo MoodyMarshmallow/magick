@@ -14,6 +14,9 @@ export default defineConfig({
       "@magick/shared/localWorkspace": resolve(
         "packages/shared/src/localWorkspace.ts",
       ),
+      "@magick/shared/threadTitle": resolve(
+        "packages/shared/src/threadTitle.ts",
+      ),
       "@magick/shared/time": resolve("packages/shared/src/time.ts"),
     },
   },

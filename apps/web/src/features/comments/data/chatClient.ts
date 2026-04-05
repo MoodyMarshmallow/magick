@@ -27,6 +27,8 @@ export interface ChatClient {
     title?: string;
   }) => Promise<ThreadViewModel>;
   openThread: (threadId: string) => Promise<ThreadViewModel>;
+  renameThread: (threadId: string, title: string) => Promise<ThreadViewModel>;
+  deleteThread: (threadId: string) => Promise<void>;
   sendThreadMessage: (threadId: string, content: string) => Promise<void>;
   resolveThread: (threadId: string) => Promise<ThreadViewModel>;
   reopenThread: (threadId: string) => Promise<ThreadViewModel>;
@@ -41,6 +43,34 @@ const defaultBackendUrl = (): string => {
   }
 
   return "ws://127.0.0.1:8787";
+};
+
+export const parseChatMessageData = async (
+  data: MessageEvent["data"],
+): Promise<CommandResponseEnvelope | ServerPushEnvelope> => {
+  if (typeof data === "string") {
+    return JSON.parse(data) as CommandResponseEnvelope | ServerPushEnvelope;
+  }
+
+  if (data instanceof Blob) {
+    return JSON.parse(await data.text()) as
+      | CommandResponseEnvelope
+      | ServerPushEnvelope;
+  }
+
+  if (data instanceof ArrayBuffer) {
+    return JSON.parse(new TextDecoder().decode(data)) as
+      | CommandResponseEnvelope
+      | ServerPushEnvelope;
+  }
+
+  if (ArrayBuffer.isView(data)) {
+    return JSON.parse(new TextDecoder().decode(data)) as
+      | CommandResponseEnvelope
+      | ServerPushEnvelope;
+  }
+
+  throw new Error("Unsupported chat backend message payload.");
 };
 
 class WebSocketChatClient implements ChatClient {
@@ -90,10 +120,8 @@ class WebSocketChatClient implements ChatClient {
             this.#socket = null;
             this.#connectionPromise = null;
           });
-          socket.addEventListener("message", (messageEvent) => {
-            const payload = JSON.parse(String(messageEvent.data)) as
-              | CommandResponseEnvelope
-              | ServerPushEnvelope;
+          socket.addEventListener("message", async (messageEvent) => {
+            const payload = await parseChatMessageData(messageEvent.data);
 
             if ("requestId" in payload) {
               const pending = this.#pending.get(payload.requestId);
@@ -182,6 +210,28 @@ class WebSocketChatClient implements ChatClient {
     }
 
     return result.thread;
+  }
+
+  async renameThread(threadId: string, title: string) {
+    const result = await this.#send({
+      type: "thread.rename",
+      payload: { threadId, title },
+    });
+    if (result.kind !== "threadState") {
+      throw new Error("Unexpected thread rename response.");
+    }
+
+    return result.thread;
+  }
+
+  async deleteThread(threadId: string) {
+    const result = await this.#send({
+      type: "thread.delete",
+      payload: { threadId },
+    });
+    if (result.kind !== "threadDeleted") {
+      throw new Error("Unexpected thread delete response.");
+    }
   }
 
   async sendThreadMessage(threadId: string, content: string) {

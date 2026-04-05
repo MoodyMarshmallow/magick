@@ -10,6 +10,7 @@ import type {
   ThreadViewModel,
 } from "@magick/contracts/chat";
 import type { ProviderSessionRecord } from "@magick/contracts/provider";
+import { maxThreadTitleLength } from "@magick/shared/threadTitle";
 import {
   type BackendError,
   InvalidStateError,
@@ -52,6 +53,13 @@ export interface ThreadOrchestratorApi {
     workspaceId: string,
   ) => Promise<readonly ThreadSummary[]>;
   readonly openThread: (threadId: string) => Promise<ThreadViewModel>;
+  readonly renameThread: (
+    threadId: string,
+    title: string,
+  ) => Promise<ThreadViewModel>;
+  readonly deleteThread: (
+    threadId: string,
+  ) => Promise<{ readonly threadId: string; readonly workspaceId: string }>;
   readonly sendMessage: (
     threadId: string,
     content: string,
@@ -142,6 +150,29 @@ export class ThreadOrchestrator implements ThreadOrchestratorApi {
 
       throw new Error("Unhandled backend effect failure");
     });
+
+  readonly #normalizeThreadTitle = (title: string, fallback?: string) => {
+    const normalized = title.trim();
+    if (normalized.length === 0) {
+      if (fallback) {
+        return fallback;
+      }
+
+      throw new InvalidStateError({
+        code: "thread_title_invalid",
+        detail: "Thread title must not be empty.",
+      });
+    }
+
+    if (normalized.length > maxThreadTitleLength) {
+      throw new InvalidStateError({
+        code: "thread_title_too_long",
+        detail: `Thread title must be ${maxThreadTitleLength} characters or fewer.`,
+      });
+    }
+
+    return normalized;
+  };
 
   readonly #requireThread = (threadId: string) =>
     Effect.gen(
@@ -409,7 +440,7 @@ export class ThreadOrchestrator implements ThreadOrchestratorApi {
           workspaceId: input.workspaceId,
           providerKey: input.providerKey,
           providerSessionId,
-          title: input.title ?? "New chat",
+          title: this.#normalizeThreadTitle(input.title ?? "", "New chat"),
           resolutionState: "open",
           createdAt: now,
           updatedAt: now,
@@ -448,6 +479,82 @@ export class ThreadOrchestrator implements ThreadOrchestratorApi {
 
   readonly createThread = (input: CreateThreadInput) =>
     this.#run(this.#createThreadEffect(input));
+
+  readonly renameThread = (threadId: string, title: string) =>
+    this.#run(
+      Effect.gen(
+        function* (this: ThreadOrchestrator) {
+          const thread = yield* this.#requireThread(threadId);
+          const normalizedTitle = this.#normalizeThreadTitle(title);
+          if (thread.title === normalizedTitle) {
+            return yield* fromPromise(() => this.openThread(threadId));
+          }
+
+          const occurredAt = this.#clock.now();
+          yield* fromSync(() =>
+            this.#threadRepository.updateTitle(
+              threadId,
+              normalizedTitle,
+              occurredAt,
+            ),
+          );
+
+          const projected = yield* this.#persistAndProject(threadId, [
+            {
+              eventId: this.#idGenerator.next("event"),
+              threadId,
+              providerSessionId: thread.providerSessionId,
+              occurredAt,
+              type: "thread.renamed",
+              payload: {
+                title: normalizedTitle,
+              },
+            },
+          ]);
+
+          return projected.thread;
+        }.bind(this),
+      ),
+    );
+
+  readonly deleteThread = (threadId: string) =>
+    this.#run(
+      Effect.gen(
+        function* (this: ThreadOrchestrator) {
+          const thread = yield* this.#requireThread(threadId);
+          const activeTurn = this.#runtimeState.getActiveTurn(threadId);
+          if (activeTurn) {
+            return yield* Effect.fail(
+              new InvalidStateError({
+                code: "thread_delete_while_running",
+                detail: `Thread '${threadId}' cannot be deleted while a turn is running.`,
+              }),
+            );
+          }
+
+          const sessionRuntime = this.#runtimeState.getSessionRuntime(
+            thread.providerSessionId,
+          );
+          if (sessionRuntime) {
+            yield* sessionRuntime.session.dispose();
+            yield* Effect.sync(() =>
+              this.#runtimeState.clearSessionRuntime(thread.providerSessionId),
+            );
+          }
+
+          yield* fromSync(() => this.#eventStore.deleteThreadEvents(threadId));
+          yield* fromSync(() => this.#threadRepository.delete(threadId));
+          yield* fromSync(() =>
+            this.#providerSessionRepository.delete(thread.providerSessionId),
+          );
+
+          return {
+            threadId,
+            workspaceId: thread.workspaceId,
+          } as const;
+        }.bind(this),
+      ),
+    );
 
   readonly sendMessage = (threadId: string, content: string) =>
     Effect.gen(

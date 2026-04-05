@@ -127,4 +127,17 @@ export class EventStore {
       });
     }
   }
+
+  deleteThreadEvents(threadId: string): void {
+    try {
+      this.#database
+        .prepare("DELETE FROM thread_events WHERE thread_id = ?")
+        .run(threadId);
+    } catch (error) {
+      throw new PersistenceError({
+        operation: "event_store.deleteThreadEvents",
+        detail: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
 }

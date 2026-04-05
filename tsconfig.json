@@ -25,6 +25,7 @@
       "@magick/shared/localWorkspace": [
         "packages/shared/src/localWorkspace.ts"
       ],
+      "@magick/shared/threadTitle": ["packages/shared/src/threadTitle.ts"],
       "@magick/shared/time": ["packages/shared/src/time.ts"]
     },
     "types": ["bun-types", "vitest/globals"]

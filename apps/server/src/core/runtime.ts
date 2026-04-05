@@ -33,6 +33,7 @@ export interface RuntimeStateService {
     sessionId: string,
     runtime: ProviderSessionRuntime,
   ) => void;
+  readonly clearSessionRuntime: (sessionId: string) => void;
   readonly getActiveTurn: (threadId: string) =>
     | {
         readonly turnId: string;
@@ -65,6 +66,10 @@ class RuntimeStateClient implements RuntimeStateService {
 
   setSessionRuntime(sessionId: string, runtime: ProviderSessionRuntime): void {
     this.#sessionRuntimes.set(sessionId, runtime);
+  }
+
+  clearSessionRuntime(sessionId: string): void {
+    this.#sessionRuntimes.delete(sessionId);
   }
 
   getActiveTurn(threadId: string):

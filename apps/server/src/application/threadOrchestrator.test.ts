@@ -229,6 +229,37 @@ describe("ThreadOrchestrator", () => {
     expect(stopped.runtimeState).toBe("idle");
   });
 
+  it("renames and deletes threads", async () => {
+    const adapter = new FakeProviderAdapter({ mode: "stateful" });
+    const { orchestrator, providerSessionRepository, publishedEvents } =
+      createTestContext(adapter);
+
+    const thread = await orchestrator.createThread({
+      workspaceId: "workspace_1",
+      providerKey: adapter.key,
+      title: "Original chat",
+    });
+
+    const renamed = await orchestrator.renameThread(
+      thread.threadId,
+      "Renamed chat",
+    );
+
+    expect(renamed.title).toBe("Renamed chat");
+    expect(publishedEvents).toContain("thread.renamed");
+
+    await orchestrator.deleteThread(thread.threadId);
+
+    await expect(
+      orchestrator.openThread(thread.threadId),
+    ).rejects.toMatchObject({
+      entity: "thread",
+      id: thread.threadId,
+    });
+    expect(providerSessionRepository.get(thread.providerSessionId)).toBeNull();
+    await expect(orchestrator.listThreads("workspace_1")).resolves.toEqual([]);
+  });
+
   it("handles provider failure and session state events from a custom provider", async () => {
     const adapter: ProviderAdapter = {
       key: "custom",

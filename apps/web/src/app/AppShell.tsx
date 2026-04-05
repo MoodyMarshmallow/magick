@@ -159,6 +159,21 @@ export function AppShell() {
         return;
       }
 
+      if (event.channel === "thread.deleted") {
+        if (event.workspaceId !== defaultWorkspaceId) {
+          return;
+        }
+
+        dispatch({
+          type: "thread.deleted",
+          threadId: event.threadId,
+        });
+        if (activeThreadIdRef.current === event.threadId) {
+          setActiveThreadId(null);
+        }
+        return;
+      }
+
       if (event.channel === "provider.authStateChanged") {
         setProviderAuthByKey((current) => ({
           ...current,
@@ -166,7 +181,7 @@ export function AppShell() {
         }));
       }
     });
-  }, []);
+  }, [setActiveThreadId]);
 
   useEffect(() => {
     const handlePointerMove = (event: PointerEvent) => {
@@ -354,8 +369,25 @@ export function AppShell() {
           });
           setActiveThreadId(thread.threadId);
         }}
+        onDeleteThread={async (threadId: string) => {
+          await chatClient.deleteThread(threadId);
+          dispatch({
+            type: "thread.deleted",
+            threadId,
+          });
+          if (activeThreadIdRef.current === threadId) {
+            setActiveThreadId(null);
+          }
+        }}
         onLogin={async () => {
           await chatClient.startLogin(defaultProviderKey);
+        }}
+        onRenameThread={async (threadId: string, title: string) => {
+          const thread = await chatClient.renameThread(threadId, title);
+          dispatch({
+            type: "thread.loaded",
+            thread,
+          });
         }}
         onShowLedger={() => setActiveThreadId(null)}
         onSendReply={async (threadId: string, message: string) => {

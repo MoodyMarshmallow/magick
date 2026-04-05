@@ -280,6 +280,42 @@ export class WebSocketCommandServer {
             },
           } satisfies CommandResponseEnvelope;
         }
+        case "thread.rename": {
+          const thread = await this.#threadOrchestrator.renameThread(
+            envelope.command.payload.threadId,
+            envelope.command.payload.title,
+          );
+          return {
+            requestId: envelope.requestId,
+            result: {
+              ok: true,
+              data: {
+                kind: "threadState",
+                thread,
+              },
+            },
+          } satisfies CommandResponseEnvelope;
+        }
+        case "thread.delete": {
+          const deletedThread = await this.#threadOrchestrator.deleteThread(
+            envelope.command.payload.threadId,
+          );
+          await connections.broadcast({
+            channel: "thread.deleted",
+            threadId: deletedThread.threadId,
+            workspaceId: deletedThread.workspaceId,
+          });
+          return {
+            requestId: envelope.requestId,
+            result: {
+              ok: true,
+              data: {
+                kind: "threadDeleted",
+                threadId: envelope.command.payload.threadId,
+              },
+            },
+          } satisfies CommandResponseEnvelope;
+        }
         case "thread.sendMessage":
           connections.subscribeThread(
             connectionId,

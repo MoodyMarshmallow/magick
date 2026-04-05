@@ -10,10 +10,62 @@ import { PersistenceError } from "../core/errors";
 import type { DatabaseClient } from "./database";
 
 export class ThreadRepository {
+  readonly #deleteThreadById: (threadId: string) => void;
+  readonly #updateTitleById: (
+    threadId: string,
+    title: string,
+    updatedAt: string,
+  ) => void;
   readonly #database: DatabaseClient;
 
   constructor(database: DatabaseClient) {
     this.#database = database;
+    this.#deleteThreadById = database.transaction((threadId: string) => {
+      database
+        .prepare("DELETE FROM thread_snapshots WHERE thread_id = ?")
+        .run(threadId);
+      database.prepare("DELETE FROM threads WHERE id = ?").run(threadId);
+    });
+    this.#updateTitleById = database.transaction(
+      (threadId: string, title: string, updatedAt: string) => {
+        database
+          .prepare("UPDATE threads SET title = ?, updated_at = ? WHERE id = ?")
+          .run(title, updatedAt, threadId);
+
+        const snapshotRow = database
+          .prepare(
+            "SELECT summary_json, thread_json FROM thread_snapshots WHERE thread_id = ?",
+          )
+          .get(threadId) as
+          | {
+              summary_json: string;
+              thread_json: string;
+            }
+          | undefined;
+
+        if (!snapshotRow) {
+          return;
+        }
+
+        const summary = JSON.parse(snapshotRow.summary_json) as ThreadSummary;
+        const thread = JSON.parse(snapshotRow.thread_json) as ThreadViewModel;
+
+        database
+          .prepare(
+            `
+              UPDATE thread_snapshots
+              SET summary_json = ?, thread_json = ?, updated_at = ?
+              WHERE thread_id = ?
+            `,
+          )
+          .run(
+            JSON.stringify({ ...summary, title, updatedAt }),
+            JSON.stringify({ ...thread, title, updatedAt }),
+            updatedAt,
+            threadId,
+          );
+      },
+    );
   }
 
   create(thread: ThreadRecord): void {
@@ -185,6 +237,28 @@ export class ThreadRepository {
     } catch (error) {
       throw new PersistenceError({
         operation: "thread_repository.updateResolutionState",
+        detail: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  updateTitle(threadId: string, title: string, updatedAt: string): void {
+    try {
+      this.#updateTitleById(threadId, title, updatedAt);
+    } catch (error) {
+      throw new PersistenceError({
+        operation: "thread_repository.updateTitle",
+        detail: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  delete(threadId: string): void {
+    try {
+      this.#deleteThreadById(threadId);
+    } catch (error) {
+      throw new PersistenceError({
+        operation: "thread_repository.delete",
         detail: error instanceof Error ? error.message : String(error),
       });
     }

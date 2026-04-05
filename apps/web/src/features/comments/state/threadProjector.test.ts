@@ -137,4 +137,38 @@ describe("projectThreadEvent", () => {
 
     expect(projected[0]?.status).toBe("resolved");
   });
+
+  it("projects renamed and deleted threads", () => {
+    const renamed = projectThreadEvent(
+      projectThreadEvent([], {
+        type: "snapshot.loaded",
+        threads: [summary],
+        activeThread: null,
+      }),
+      {
+        type: "domain.event",
+        threadId: "thread_1",
+        event: {
+          eventId: "event_rename",
+          threadId: "thread_1",
+          providerSessionId: "session_1",
+          sequence: 2,
+          occurredAt: "2026-04-02T10:01:00.000Z",
+          type: "thread.renamed",
+          payload: {
+            title: "Renamed chat",
+          },
+        },
+      },
+    );
+
+    expect(renamed[0]?.title).toBe("Renamed chat");
+
+    const deleted = projectThreadEvent(renamed, {
+      type: "thread.deleted",
+      threadId: "thread_1",
+    });
+
+    expect(deleted).toEqual([]);
+  });
 });

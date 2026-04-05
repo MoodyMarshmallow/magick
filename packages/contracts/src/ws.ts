@@ -49,6 +49,10 @@ export type CommandResult =
             readonly threadId: string;
           }
         | {
+            readonly kind: "threadDeleted";
+            readonly threadId: string;
+          }
+        | {
             readonly kind: "providerAuthState";
             readonly auth: ProviderAuthState;
           }
@@ -75,6 +79,11 @@ export type ServerPushEnvelope =
       readonly channel: "orchestration.domainEvent";
       readonly threadId: string;
       readonly event: DomainEvent;
+    }
+  | {
+      readonly channel: "thread.deleted";
+      readonly threadId: string;
+      readonly workspaceId: string;
     }
   | {
       readonly channel: "provider.authStateChanged";

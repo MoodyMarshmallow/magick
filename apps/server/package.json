@@ -1,5 +1,9 @@
 {
   "name": "@magick/server",
   "private": true,
-  "type": "module"
+  "type": "module",
+  "scripts": {
+    "dev": "nodemon --watch src --ext ts --signal SIGTERM --exec \"node --import=tsx ./src/main.ts\"",
+    "start": "node --import=tsx ./src/main.ts"
+  }
 }

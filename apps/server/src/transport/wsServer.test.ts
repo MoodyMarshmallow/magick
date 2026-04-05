@@ -279,6 +279,26 @@ describe("WebSocketCommandServer", () => {
       result: { ok: true, data: { kind: "threadState" } },
     });
 
+    const rename = await wsServer.handleCommand(
+      {
+        requestId: "req_rename",
+        command: {
+          type: "thread.rename",
+          payload: { threadId, title: "Renamed chat" },
+        },
+      },
+      "conn_rename",
+    );
+    expect(rename).toMatchObject({
+      result: {
+        ok: true,
+        data: {
+          kind: "threadState",
+          thread: { title: "Renamed chat" },
+        },
+      },
+    });
+
     await wsServer.handleCommand(
       {
         requestId: "req_send",
@@ -374,6 +394,67 @@ describe("WebSocketCommandServer", () => {
       result: { ok: true, data: { kind: "providerAuthState" } },
     });
 
+    const deleted = await wsServer.handleCommand(
+      {
+        requestId: "req_delete",
+        command: {
+          type: "thread.delete",
+          payload: { threadId },
+        },
+      },
+      "conn_delete",
+    );
+    expect(deleted).toMatchObject({
+      result: { ok: true, data: { kind: "threadDeleted", threadId } },
+    });
+
+    await closeServer(server);
+  });
+
+  it("broadcasts thread deletion to connected clients", async () => {
+    const services = makeServices();
+    const server = createServer();
+    await listen(server);
+    const connections = new ConnectionRegistry();
+    const pushed: unknown[] = [];
+    connections.register({
+      id: "conn_watch",
+      send: async (message) => {
+        pushed.push(message);
+      },
+    });
+
+    const wsServer = new WebSocketCommandServer({
+      httpServer: server,
+      providerAuth: services.providerAuth,
+      providerRegistry: services.providerRegistry,
+      replayService: services.replayService,
+      threadOrchestrator: services.threadOrchestrator,
+      connections,
+    });
+
+    const thread = await services.threadOrchestrator.createThread({
+      workspaceId: "workspace_1",
+      providerKey: services.adapter.key,
+    });
+
+    await wsServer.handleCommand(
+      {
+        requestId: "req_delete_broadcast",
+        command: {
+          type: "thread.delete",
+          payload: { threadId: thread.threadId },
+        },
+      },
+      "conn_delete",
+    );
+
+    expect(pushed).toContainEqual({
+      channel: "thread.deleted",
+      threadId: thread.threadId,
+      workspaceId: "workspace_1",
+    });
+
     await closeServer(server);
   });
 
@@ -462,6 +543,12 @@ describe("WebSocketCommandServer", () => {
           throw new Error("boom");
         },
         openThread: async () => {
+          throw new Error("boom");
+        },
+        renameThread: async () => {
+          throw new Error("boom");
+        },
+        deleteThread: async () => {
           throw new Error("boom");
         },
         sendMessage: () => Effect.die(new Error("boom")),

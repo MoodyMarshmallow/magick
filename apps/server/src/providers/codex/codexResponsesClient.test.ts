@@ -70,6 +70,7 @@ describe("CodexResponsesClient", () => {
       String(fetchMock.mock.calls[0]?.[1]?.body ?? "{}"),
     );
     expect(request.instructions).toContain("You are Codex, based on GPT-5");
+    expect(request.instructions).toContain("always use dollar-delimited LaTeX");
     expect(request.store).toBe(false);
     expect(request.input[0].content[0].type).toBe("input_text");
   });
