@@ -1126,6 +1126,39 @@ button:disabled {
   overflow-wrap: anywhere;
 }
 
+.workspace__document-title-button {
+  appearance: none;
+  border: 0;
+  width: 100%;
+  text-align: left;
+  cursor: text;
+}
+
+.workspace__document-title-button:hover {
+  color: var(--fg-soft);
+}
+
+.workspace__document-title-input {
+  width: 100%;
+  border: 0;
+  outline: 0;
+  box-shadow: none;
+  padding: 1.5rem var(--workspace-pane-padding-inline);
+  background: var(--bg);
+  color: var(--fg);
+  font-family: "Alegreya", serif;
+  font-size: var(--text-size-heading);
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  line-height: 1.12;
+}
+
+.workspace__document-title-input:focus,
+.workspace__document-title-input:focus-visible {
+  outline: 0;
+  box-shadow: none;
+}
+
 .workspace__document-scroll {
   min-height: 0;
   height: 100%;

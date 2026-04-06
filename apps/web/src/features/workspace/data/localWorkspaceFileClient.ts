@@ -11,6 +11,7 @@ import type {
   LocalWorkspaceTreeNode,
   MagickDesktopFileApi,
 } from "@magick/shared/localWorkspace";
+import { getLocalWorkspaceFileTitle } from "@magick/shared/localWorkspace";
 import {
   type DocumentBootstrap,
   demoDocumentIds,
@@ -150,7 +151,7 @@ const createBrowserWorkspaceState = (
               (candidate) => candidate.documentId === documentId,
             ) ?? null);
       filesByPath.set(node.filePath, {
-        title: document?.title ?? node.name,
+        title: getLocalWorkspaceFileTitle(node.filePath),
         markdown: document?.markdown ?? "",
       });
     }
@@ -191,15 +192,13 @@ const createDirectoryNode = (path: string): LocalWorkspaceTreeNode => ({
   children: [],
 });
 
-const getPathName = (path: string): string => path.split("/").at(-1) ?? path;
-
 const getParentPath = (path: string): string =>
   path.split("/").slice(0, -1).join("/");
 
 const joinBrowserPath = (parentPath: string, name: string): string =>
   parentPath ? `${parentPath}/${name}` : name;
 
-const supportedBrowserFileExtensions = new Set([".md", ".mdx", ".txt"]);
+const supportedBrowserFileExtensions = new Set([".md"]);
 
 const sanitizeBrowserEntryName = (
   nextName: string,
@@ -223,15 +222,16 @@ const sanitizeBrowserEntryName = (
     return leafName;
   }
 
-  const nextExtension = leafName.includes(".")
-    ? leafName.slice(leafName.lastIndexOf("."))
-    : args.extension;
-  if (!supportedBrowserFileExtensions.has(nextExtension.toLowerCase())) {
-    throw new Error(`File extension '${nextExtension}' is not supported.`);
+  const normalizedExtension = args.extension.toLowerCase();
+  if (!supportedBrowserFileExtensions.has(normalizedExtension)) {
+    throw new Error(`File extension '${args.extension}' is not supported.`);
   }
 
-  const baseName = leafName.slice(0, leafName.length - nextExtension.length);
-  return `${baseName || args.fallbackBaseName}${nextExtension}`;
+  if (leafName.toLowerCase().endsWith(normalizedExtension)) {
+    return leafName;
+  }
+
+  return `${leafName || args.fallbackBaseName}${args.extension}`;
 };
 
 const assertBrowserSiblingNameAvailable = (
@@ -246,6 +246,35 @@ const assertBrowserSiblingNameAvailable = (
     throw new Error(
       `Path '${joinBrowserPath(getParentPath(previousPath), nextName)}' already exists.`,
     );
+  }
+};
+
+const resolveAvailableBrowserFileName = (
+  children: readonly LocalWorkspaceTreeNode[],
+  previousPath: string,
+  nextName: string,
+): string => {
+  const siblingNames = new Set(
+    children
+      .filter((child) => child.path !== previousPath)
+      .map((child) => child.name),
+  );
+  const extension = nextName.includes(".")
+    ? nextName.slice(nextName.lastIndexOf("."))
+    : "";
+  const fileTitle = extension ? nextName.slice(0, -extension.length) : nextName;
+
+  let collisionIndex = 0;
+  while (true) {
+    const candidateName =
+      collisionIndex === 0
+        ? nextName
+        : `${fileTitle} ${collisionIndex}${extension}`;
+    if (!siblingNames.has(candidateName)) {
+      return candidateName;
+    }
+
+    collisionIndex += 1;
   }
 };
 
@@ -497,7 +526,7 @@ export const createBrowserLocalWorkspaceFileClient =
         const document = await getBrowserDocumentByFilePath(filePath);
         return {
           filePath,
-          title: document.title,
+          title: getLocalWorkspaceFileTitle(filePath),
           markdown: document.markdown,
         };
       }
@@ -540,7 +569,7 @@ export const createBrowserLocalWorkspaceFileClient =
           createFileNode(filePath),
         ),
         filesByPath: new Map(workspaceState.filesByPath).set(filePath, {
-          title: "Untitled",
+          title: getLocalWorkspaceFileTitle(filePath),
           markdown: "",
         }),
       };
@@ -590,8 +619,12 @@ export const createBrowserLocalWorkspaceFileClient =
           ? filePath.slice(filePath.lastIndexOf("."))
           : ".md",
       });
-      assertBrowserSiblingNameAvailable(children, filePath, sanitizedName);
-      const renamedFilePath = joinBrowserPath(parentPath, sanitizedName);
+      const resolvedName = resolveAvailableBrowserFileName(
+        children,
+        filePath,
+        sanitizedName,
+      );
+      const renamedFilePath = joinBrowserPath(parentPath, resolvedName);
       const nextFilesByPath = renameBrowserFileRecord(
         workspaceState.filesByPath,
         filePath,
@@ -599,7 +632,7 @@ export const createBrowserLocalWorkspaceFileClient =
       );
       const renamedRecord = nextFilesByPath.get(renamedFilePath);
       if (renamedRecord) {
-        renamedRecord.title = getPathName(renamedFilePath);
+        renamedRecord.title = getLocalWorkspaceFileTitle(renamedFilePath);
       }
 
       browserWorkspaceState = {

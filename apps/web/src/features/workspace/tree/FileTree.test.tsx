@@ -80,18 +80,18 @@ describe("FileTree", () => {
     const user = userEvent.setup();
     render(<FileTreeHarness />);
 
-    expect(screen.queryByText("field-notes.md")).toBeNull();
+    expect(screen.queryByText("field-notes")).toBeNull();
 
     await user.click(screen.getByRole("treeitem", { name: /notes/i }));
     await user.click(screen.getByRole("treeitem", { name: /patterns/i }));
-    await user.click(screen.getByRole("treeitem", { name: /field-notes.md/i }));
+    await user.click(screen.getByRole("treeitem", { name: /field-notes/i }));
 
     expect(screen.getByTestId("active-file").textContent).toContain(
       "notes/patterns/field-notes.md",
     );
     expect(
       screen
-        .getByRole("treeitem", { name: /field-notes.md/i })
+        .getByRole("treeitem", { name: /field-notes/i })
         .className.includes("is-active"),
     ).toBe(true);
   });
@@ -102,18 +102,14 @@ describe("FileTree", () => {
 
     await user.click(screen.getByRole("treeitem", { name: /notes/i }));
     await user.click(screen.getByRole("treeitem", { name: /patterns/i }));
-    await user.click(screen.getByRole("treeitem", { name: /field-notes.md/i }));
+    await user.click(screen.getByRole("treeitem", { name: /field-notes/i }));
 
     expect(screen.getByRole("treeitem", { name: /patterns/i })).toBeTruthy();
-    expect(
-      screen.getByRole("treeitem", { name: /manifesto.md/i }),
-    ).toBeTruthy();
+    expect(screen.getByRole("treeitem", { name: /manifesto/i })).toBeTruthy();
 
-    await user.click(screen.getByRole("treeitem", { name: /manifesto.md/i }));
+    await user.click(screen.getByRole("treeitem", { name: /manifesto/i }));
 
-    expect(
-      screen.getByRole("treeitem", { name: /field-notes.md/i }),
-    ).toBeTruthy();
+    expect(screen.getByRole("treeitem", { name: /field-notes/i })).toBeTruthy();
     expect(screen.getByTestId("active-file").textContent).toContain(
       "codex/manifesto.md",
     );
@@ -200,12 +196,12 @@ describe("FileTree", () => {
     );
 
     await user.click(
-      screen.getByRole("button", { name: "More actions for manifesto.md" }),
+      screen.getByRole("button", { name: "More actions for manifesto" }),
     );
     await user.click(screen.getByRole("menuitem", { name: "Rename" }));
-    const input = screen.getByLabelText("Rename manifesto.md");
+    const input = screen.getByLabelText("Rename manifesto");
     await user.clear(input);
-    await user.type(input, "manifesto-2.md");
+    await user.type(input, "manifesto-2");
     await user.tab();
 
     expect(onRenameFile).toHaveBeenCalledWith(
@@ -236,7 +232,7 @@ describe("FileTree", () => {
     );
 
     await user.click(
-      screen.getByRole("button", { name: "More actions for manifesto.md" }),
+      screen.getByRole("button", { name: "More actions for manifesto" }),
     );
     await user.click(screen.getByRole("menuitem", { name: "Delete" }));
 

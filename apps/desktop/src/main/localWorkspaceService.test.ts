@@ -32,8 +32,8 @@ const createHarness = () => {
     "utf8",
   );
   writeFileSync(
-    join(workspaceDir, "notes", "scratch.txt"),
-    "Plain text is also supported in the first pass.",
+    join(workspaceDir, "notes", "scratch.md"),
+    "Markdown is the only supported local document type for now.",
     "utf8",
   );
   writeFileSync(
@@ -98,11 +98,11 @@ describe("LocalWorkspaceService", () => {
               ],
             },
             {
-              id: "file:notes/scratch.txt",
+              id: "file:notes/scratch.md",
               type: "file",
-              name: "scratch.txt",
-              path: "notes/scratch.txt",
-              filePath: "notes/scratch.txt",
+              name: "scratch.md",
+              path: "notes/scratch.md",
+              filePath: "notes/scratch.md",
             },
           ],
         },
@@ -118,7 +118,7 @@ describe("LocalWorkspaceService", () => {
     try {
       const file = harness.service.openFile("codex/evergreen-systems-memo.md");
 
-      expect(file.title).toBe("Evergreen Systems Memo");
+      expect(file.title).toBe("evergreen-systems-memo");
       expect(file.markdown).toContain("Magick should feel like a calm studio");
     } finally {
       harness.cleanup();
@@ -198,17 +198,59 @@ describe("LocalWorkspaceService", () => {
 
     try {
       const renamed = harness.service.renameFile(
-        "notes/scratch.txt",
-        "renamed-scratch.txt",
+        "notes/scratch.md",
+        "renamed-scratch.md",
       );
 
       expect(renamed).toEqual({
-        previousFilePath: "notes/scratch.txt",
-        filePath: "notes/renamed-scratch.txt",
+        previousFilePath: "notes/scratch.md",
+        filePath: "notes/renamed-scratch.md",
       });
       expect(
         readFileSync(join(harness.workspaceDir, renamed.filePath), "utf8"),
-      ).toContain("Plain text is also supported");
+      ).toContain("Markdown is the only supported");
+    } finally {
+      harness.cleanup();
+    }
+  });
+
+  it("preserves the original md extension when renaming to a dotted title", () => {
+    const harness = createHarness();
+
+    try {
+      const renamed = harness.service.renameFile(
+        "notes/scratch.md",
+        "test.txt",
+      );
+
+      expect(renamed).toEqual({
+        previousFilePath: "notes/scratch.md",
+        filePath: "notes/test.txt.md",
+      });
+    } finally {
+      harness.cleanup();
+    }
+  });
+
+  it("appends a numeric suffix when a sibling file name already exists", () => {
+    const harness = createHarness();
+
+    try {
+      writeFileSync(
+        join(harness.workspaceDir, "notes", "renamed-scratch.md"),
+        "Existing sibling",
+        "utf8",
+      );
+
+      const renamed = harness.service.renameFile(
+        "notes/scratch.md",
+        "renamed-scratch.md",
+      );
+
+      expect(renamed).toEqual({
+        previousFilePath: "notes/scratch.md",
+        filePath: "notes/renamed-scratch 1.md",
+      });
     } finally {
       harness.cleanup();
     }
@@ -240,8 +282,8 @@ describe("LocalWorkspaceService", () => {
     const harness = createHarness();
 
     try {
-      expect(harness.service.deleteFile("notes/scratch.txt")).toEqual({
-        deletedFilePaths: ["notes/scratch.txt"],
+      expect(harness.service.deleteFile("notes/scratch.md")).toEqual({
+        deletedFilePaths: ["notes/scratch.md"],
       });
       expect(
         harness.service.deleteDirectory("notes/patterns").deletedFilePaths,
@@ -255,12 +297,8 @@ describe("LocalWorkspaceService", () => {
     const harness = createHarness();
 
     try {
-      const originalPath = join(harness.workspaceDir, "notes", "scratch.txt");
-      const aliasPath = join(
-        harness.workspaceDir,
-        "notes",
-        "scratch-alias.txt",
-      );
+      const originalPath = join(harness.workspaceDir, "notes", "scratch.md");
+      const aliasPath = join(harness.workspaceDir, "notes", "scratch-alias.md");
       linkSync(originalPath, aliasPath);
 
       expect(pathsResolveToSameEntry(originalPath, aliasPath)).toBe(true);

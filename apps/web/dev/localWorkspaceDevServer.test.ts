@@ -27,7 +27,7 @@ describe("localWorkspaceDevServer", () => {
       ).toBe(true);
       expect(
         readFileSync(
-          join(workspaceDir, "notes", "archive", "recovery-notes.txt"),
+          join(workspaceDir, "notes", "archive", "recovery-notes.md"),
           "utf8",
         ),
       ).toContain("local-first client");

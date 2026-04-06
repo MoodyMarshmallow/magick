@@ -3,6 +3,7 @@ import type {
   LocalWorkspaceFileNode,
   LocalWorkspaceTreeNode,
 } from "@magick/shared/localWorkspace";
+import { getLocalWorkspaceFileTitle } from "@magick/shared/localWorkspace";
 
 export const workspaceRootItemId = "workspace-root";
 
@@ -46,7 +47,7 @@ const toFileItemData = (
 ): FileTreeFileItemData => ({
   id: node.id,
   type: "file",
-  name: node.name,
+  name: getLocalWorkspaceFileTitle(node.filePath),
   path: node.path,
   filePath: node.filePath,
 });

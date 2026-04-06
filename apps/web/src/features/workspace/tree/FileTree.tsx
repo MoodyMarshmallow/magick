@@ -6,6 +6,7 @@ import {
 } from "@headless-tree/core";
 import { useTree } from "@headless-tree/react";
 import type { LocalWorkspaceTreeNode } from "@magick/shared/localWorkspace";
+import { getLocalWorkspaceFileExtension } from "@magick/shared/localWorkspace";
 import {
   ChevronRight,
   EllipsisVertical,
@@ -287,7 +288,10 @@ function FileTreeNode({
     }
 
     if (itemData.type === "file") {
-      await onRenameFile(itemData.filePath, nextName);
+      await onRenameFile(
+        itemData.filePath,
+        `${nextName}${getLocalWorkspaceFileExtension(itemData.filePath)}`,
+      );
     } else {
       await onRenameDirectory(itemData.path, nextName);
     }

@@ -2,6 +2,25 @@ export type LocalThreadMessageAuthor = "human" | "ai";
 export type LocalThreadMessageStatus = "complete" | "streaming" | "failed";
 export type LocalThreadStatus = "open" | "resolved";
 
+const getPathLeafName = (path: string): string =>
+  path.split("/").at(-1) ?? path;
+
+export const getLocalWorkspaceFileExtension = (filePath: string): string => {
+  const fileName = getPathLeafName(filePath);
+  const extensionIndex = fileName.lastIndexOf(".");
+  if (extensionIndex <= 0) {
+    return "";
+  }
+
+  return fileName.slice(extensionIndex);
+};
+
+export const getLocalWorkspaceFileTitle = (filePath: string): string => {
+  const fileName = getPathLeafName(filePath);
+  const extension = getLocalWorkspaceFileExtension(filePath);
+  return extension ? fileName.slice(0, -extension.length) : fileName;
+};
+
 export interface LocalThreadMessage {
   readonly id: string;
   readonly author: LocalThreadMessageAuthor;

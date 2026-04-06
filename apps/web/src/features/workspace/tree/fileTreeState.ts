@@ -57,3 +57,21 @@ export const collectWorkspaceFilePaths = (
   visit(tree);
   return filePaths;
 };
+
+export const collectWorkspaceTreePaths = (
+  tree: readonly LocalWorkspaceTreeNode[],
+): readonly string[] => {
+  const paths: string[] = [];
+
+  const visit = (nodes: readonly LocalWorkspaceTreeNode[]) => {
+    for (const node of nodes) {
+      paths.push(node.path);
+      if (node.type === "directory") {
+        visit(node.children);
+      }
+    }
+  };
+
+  visit(tree);
+  return paths;
+};

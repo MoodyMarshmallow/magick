@@ -282,7 +282,17 @@ describe("localWorkspaceFileClient", () => {
     }
   });
 
-  it("rejects browser fallback rename collisions", async () => {
+  it("uses filename stems as browser fallback titles", async () => {
+    const client = createBrowserLocalWorkspaceFileClient();
+
+    await expect(
+      client.openFile("notes/studio/evergreen-systems-memo.md"),
+    ).resolves.toMatchObject({
+      title: "evergreen-systems-memo",
+    });
+  });
+
+  it("resolves browser fallback rename collisions with a numeric suffix", async () => {
     const client = createBrowserLocalWorkspaceFileClient();
 
     await expect(
@@ -290,7 +300,21 @@ describe("localWorkspaceFileClient", () => {
         "notes/studio/evergreen-systems-memo.md",
         "systems-garden-note.md",
       ),
-    ).rejects.toThrow("already exists");
+    ).resolves.toEqual({
+      previousFilePath: "notes/studio/evergreen-systems-memo.md",
+      filePath: "notes/studio/systems-garden-note 1.md",
+    });
+  });
+
+  it("preserves the original md extension when a browser fallback rename uses a dotted title", async () => {
+    const client = createBrowserLocalWorkspaceFileClient();
+
+    await expect(
+      client.renameFile("notes/research/layout-observations.md", "test.txt"),
+    ).resolves.toEqual({
+      previousFilePath: "notes/research/layout-observations.md",
+      filePath: "notes/research/test.txt.md",
+    });
   });
 
   it("supports root-level create operations in the browser fallback", async () => {

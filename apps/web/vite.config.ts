@@ -7,6 +7,10 @@ export default defineConfig({
   plugins: [react(), createLocalWorkspaceDevPlugin()],
   resolve: {
     alias: {
+      "@magick/shared/localWorkspace": resolve(
+        __dirname,
+        "../../packages/shared/src/localWorkspace.ts",
+      ),
       "@magick/shared/threadTitle": resolve(
         __dirname,
         "../../packages/shared/src/threadTitle.ts",

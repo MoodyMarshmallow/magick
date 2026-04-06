@@ -34,6 +34,7 @@ import type {
   LocalWorkspaceRenamedFile,
   LocalWorkspaceThread,
 } from "@magick/shared/localWorkspace";
+import { getLocalWorkspaceFileTitle } from "../../../../packages/shared/src/localWorkspace";
 import {
   createWorkspaceBootstrap,
   createWorkspaceFilesBootstrap,
@@ -44,19 +45,10 @@ interface LocalWorkspaceServiceOptions {
 }
 
 const ignoredDirectoryNames = new Set([".git", ".magick", "node_modules"]);
-const supportedFileExtensions = new Set([".md", ".mdx", ".txt"]);
+const supportedFileExtensions = new Set([".md"]);
 const legacyThreadStoreFileName = "workspace.json";
 
 const toPosixPath = (filePath: string): string => filePath.split(sep).join("/");
-
-const toTitleFromFilePath = (filePath: string): string => {
-  const fileName = basename(filePath, extname(filePath));
-  return fileName
-    .split(/[-_]+/)
-    .filter(Boolean)
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(" ");
-};
 
 const createThreadReply = (threadId: string): string =>
   `This reply stays in ${threadId}, which keeps the chat durable across local restarts.`;
@@ -173,7 +165,7 @@ export class LocalWorkspaceService {
 
     return {
       filePath,
-      title: toTitleFromFilePath(filePath),
+      title: getLocalWorkspaceFileTitle(filePath),
       markdown: readFileSync(absoluteFilePath, "utf8"),
     };
   }
@@ -239,9 +231,13 @@ export class LocalWorkspaceService {
       fallbackBaseName: "untitled",
       extension: extname(filePath),
     });
-    const absoluteRenamedPath = this.resolveWorkspaceSiblingPath(
+    const resolvedName = this.resolveAvailableSiblingFileName(
       absoluteFilePath,
       sanitizedName,
+    );
+    const absoluteRenamedPath = this.resolveWorkspaceSiblingPath(
+      absoluteFilePath,
+      resolvedName,
     );
 
     if (absoluteRenamedPath !== absoluteFilePath) {
@@ -541,14 +537,16 @@ export class LocalWorkspaceService {
       return leafName;
     }
 
-    const baseName =
-      basename(leafName, extname(leafName)) || args.fallbackBaseName;
-    const nextExtension = extname(leafName) || args.extension;
-    if (!supportedFileExtensions.has(nextExtension.toLowerCase())) {
-      throw new Error(`File extension '${nextExtension}' is not supported.`);
+    const normalizedExtension = args.extension.toLowerCase();
+    if (!supportedFileExtensions.has(normalizedExtension)) {
+      throw new Error(`File extension '${args.extension}' is not supported.`);
     }
 
-    return `${baseName}${nextExtension}`;
+    if (leafName.toLowerCase().endsWith(normalizedExtension)) {
+      return leafName;
+    }
+
+    return `${leafName || args.fallbackBaseName}${args.extension}`;
   }
 
   private resolveWorkspaceSiblingPath(
@@ -568,6 +566,37 @@ export class LocalWorkspaceService {
     }
 
     return resolvedSiblingPath;
+  }
+
+  private resolveAvailableSiblingFileName(
+    absoluteFilePath: string,
+    nextName: string,
+  ): string {
+    const fileExtension = extname(nextName);
+    const fileTitle = basename(nextName, fileExtension);
+    const absoluteDirectoryPath = dirname(absoluteFilePath);
+    const siblingEntries = readdirSync(absoluteDirectoryPath, {
+      withFileTypes: true,
+    });
+    const siblingFileNames = new Set(
+      siblingEntries
+        .filter((entry) => entry.isFile())
+        .map((entry) => entry.name)
+        .filter((entryName) => entryName !== basename(absoluteFilePath)),
+    );
+
+    let collisionIndex = 0;
+    while (true) {
+      const candidateName =
+        collisionIndex === 0
+          ? nextName
+          : `${fileTitle} ${collisionIndex}${fileExtension}`;
+      if (!siblingFileNames.has(candidateName)) {
+        return candidateName;
+      }
+
+      collisionIndex += 1;
+    }
   }
 
   private resolveUniqueChildName(

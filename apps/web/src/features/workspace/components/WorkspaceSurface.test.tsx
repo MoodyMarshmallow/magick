@@ -1,7 +1,14 @@
 // @vitest-environment jsdom
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, render, waitFor } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
+import { localWorkspaceFileClient } from "../data/localWorkspaceFileClient";
 import { useWorkspaceSessionStore } from "../state/workspaceSessionStore";
 import { WorkspaceSurface } from "./WorkspaceSurface";
 
@@ -21,8 +28,16 @@ vi.mock("../data/localWorkspaceFileClient", () => ({
     getWorkspaceBootstrap: vi.fn(),
     openFile: vi.fn(async (filePath: string) => ({
       filePath,
-      title: "Recovered File",
+      title:
+        filePath
+          .split("/")
+          .at(-1)
+          ?.replace(/\.[^.]+$/, "") ?? filePath,
       markdown: "Recovered markdown",
+    })),
+    renameFile: vi.fn(async (filePath: string, nextName: string) => ({
+      previousFilePath: filePath,
+      filePath: `${filePath.slice(0, filePath.lastIndexOf("/") + 1)}${nextName}`,
     })),
     saveFile: vi.fn(async () => undefined),
     onWorkspaceEvent: () => () => undefined,
@@ -37,7 +52,7 @@ describe("WorkspaceSurface", () => {
     act(() => {
       useWorkspaceSessionStore
         .getState()
-        .initialize("notes/archive/recovery-notes.txt");
+        .initialize("notes/archive/recovery-notes.md");
     });
 
     const queryClient = new QueryClient();
@@ -45,7 +60,7 @@ describe("WorkspaceSurface", () => {
       <QueryClientProvider client={queryClient}>
         <WorkspaceSurface
           dragItem={null}
-          initialDocumentId="notes/archive/recovery-notes.txt"
+          initialDocumentId="notes/archive/recovery-notes.md"
           onDragItemChange={() => undefined}
         />
       </QueryClientProvider>,
@@ -166,5 +181,195 @@ describe("WorkspaceSurface", () => {
     expect(panes[2]?.className).not.toContain(
       "workspace-pane--has-bottom-neighbor",
     );
+  });
+
+  it("renames the active document when the workspace title is edited", async () => {
+    vi.mocked(localWorkspaceFileClient.renameFile).mockClear();
+    useWorkspaceSessionStore.setState({
+      ...useWorkspaceSessionStore.getInitialState(),
+      rootPane: {
+        type: "leaf",
+        id: "pane_1",
+        tabIds: ["tab_1"],
+        activeTabId: "tab_1",
+      },
+      tabsById: {
+        tab_1: { id: "tab_1", documentId: "notes/test.md" },
+      },
+      draftsByDocumentId: {
+        "notes/test.md": {
+          title: "test",
+          markdown: "Body",
+          savedMarkdown: "Body",
+          isLoaded: true,
+        },
+      },
+      focusedPaneId: "pane_1",
+      focusedTabId: "tab_1",
+      lastFocusedTabIdByDocumentId: {
+        "notes/test.md": "tab_1",
+      },
+    });
+
+    const queryClient = new QueryClient();
+    const { container } = render(
+      <QueryClientProvider client={queryClient}>
+        <WorkspaceSurface
+          dragItem={null}
+          initialDocumentId="notes/test.md"
+          onDragItemChange={() => undefined}
+        />
+      </QueryClientProvider>,
+    );
+
+    const titleButton = container.querySelector<HTMLButtonElement>(
+      ".workspace__document-title-button",
+    );
+    if (!titleButton) {
+      throw new Error("Expected workspace title button to be present.");
+    }
+
+    fireEvent.click(titleButton);
+    const input = screen.getByLabelText("Rename test");
+    fireEvent.change(input, { target: { value: "renamed" } });
+    fireEvent.blur(input);
+
+    await waitFor(() => {
+      expect(localWorkspaceFileClient.renameFile).toHaveBeenCalledWith(
+        "notes/test.md",
+        "renamed.md",
+      );
+    });
+
+    await waitFor(() => {
+      expect(
+        container.querySelector(".workspace__document-title-button")
+          ?.textContent,
+      ).toBe("renamed");
+    });
+
+    expect(useWorkspaceSessionStore.getState().tabsById.tab_1?.documentId).toBe(
+      "notes/renamed.md",
+    );
+  });
+
+  it("treats a blank workspace title edit as a no-op", async () => {
+    vi.mocked(localWorkspaceFileClient.renameFile).mockClear();
+    useWorkspaceSessionStore.setState({
+      ...useWorkspaceSessionStore.getInitialState(),
+      rootPane: {
+        type: "leaf",
+        id: "pane_1",
+        tabIds: ["tab_1"],
+        activeTabId: "tab_1",
+      },
+      tabsById: {
+        tab_1: { id: "tab_1", documentId: "notes/test.md" },
+      },
+      draftsByDocumentId: {
+        "notes/test.md": {
+          title: "test",
+          markdown: "Body",
+          savedMarkdown: "Body",
+          isLoaded: true,
+        },
+      },
+      focusedPaneId: "pane_1",
+      focusedTabId: "tab_1",
+      lastFocusedTabIdByDocumentId: {
+        "notes/test.md": "tab_1",
+      },
+    });
+
+    const queryClient = new QueryClient();
+    const { container } = render(
+      <QueryClientProvider client={queryClient}>
+        <WorkspaceSurface
+          dragItem={null}
+          initialDocumentId="notes/test.md"
+          onDragItemChange={() => undefined}
+        />
+      </QueryClientProvider>,
+    );
+
+    const titleButton = container.querySelector<HTMLButtonElement>(
+      ".workspace__document-title-button",
+    );
+    if (!titleButton) {
+      throw new Error("Expected workspace title button to be present.");
+    }
+
+    fireEvent.click(titleButton);
+    const input = screen.getByLabelText("Rename test");
+    fireEvent.change(input, { target: { value: "   " } });
+    fireEvent.blur(input);
+
+    await waitFor(() => {
+      expect(
+        container.querySelector(".workspace__document-title-button")
+          ?.textContent,
+      ).toBe("test");
+    });
+
+    expect(localWorkspaceFileClient.renameFile).not.toHaveBeenCalled();
+  });
+
+  it("preserves the original extension when the title input contains dots", async () => {
+    vi.mocked(localWorkspaceFileClient.renameFile).mockClear();
+    useWorkspaceSessionStore.setState({
+      ...useWorkspaceSessionStore.getInitialState(),
+      rootPane: {
+        type: "leaf",
+        id: "pane_1",
+        tabIds: ["tab_1"],
+        activeTabId: "tab_1",
+      },
+      tabsById: {
+        tab_1: { id: "tab_1", documentId: "notes/test.md" },
+      },
+      draftsByDocumentId: {
+        "notes/test.md": {
+          title: "test",
+          markdown: "Body",
+          savedMarkdown: "Body",
+          isLoaded: true,
+        },
+      },
+      focusedPaneId: "pane_1",
+      focusedTabId: "tab_1",
+      lastFocusedTabIdByDocumentId: {
+        "notes/test.md": "tab_1",
+      },
+    });
+
+    const queryClient = new QueryClient();
+    const { container } = render(
+      <QueryClientProvider client={queryClient}>
+        <WorkspaceSurface
+          dragItem={null}
+          initialDocumentId="notes/test.md"
+          onDragItemChange={() => undefined}
+        />
+      </QueryClientProvider>,
+    );
+
+    const titleButton = container.querySelector<HTMLButtonElement>(
+      ".workspace__document-title-button",
+    );
+    if (!titleButton) {
+      throw new Error("Expected workspace title button to be present.");
+    }
+
+    fireEvent.click(titleButton);
+    const input = screen.getByLabelText("Rename test");
+    fireEvent.change(input, { target: { value: "test.txt" } });
+    fireEvent.blur(input);
+
+    await waitFor(() => {
+      expect(localWorkspaceFileClient.renameFile).toHaveBeenCalledWith(
+        "notes/test.md",
+        "test.txt.md",
+      );
+    });
   });
 });

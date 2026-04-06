@@ -14,13 +14,13 @@ describe("applyWorkspaceFileEvent", () => {
 
     await applyWorkspaceFileEvent(queryClient, {
       type: "workspace.files.changed",
-      filePaths: ["notes/guide.md", "notes/recovery.txt"],
+      filePaths: ["notes/guide.md", "notes/recovery.md"],
     });
 
     expect(invalidations).toEqual([
       ["workspace-files-bootstrap"],
       ["document", "notes/guide.md"],
-      ["document", "notes/recovery.txt"],
+      ["document", "notes/recovery.md"],
     ]);
   });
 

@@ -112,14 +112,14 @@ describe("LocalWorkspaceWatcher", () => {
       );
       requireListener(watchedListeners, join(root, "notes"))(
         "rename",
-        "notes.txt",
+        "notes.md",
       );
       timers.flushLatest();
 
       expect(emittedEvents).toEqual([
         {
           type: "workspace.files.changed",
-          filePaths: ["notes/guide.md", "notes/notes.txt"],
+          filePaths: ["notes/guide.md", "notes/notes.md"],
         },
       ]);
     } finally {

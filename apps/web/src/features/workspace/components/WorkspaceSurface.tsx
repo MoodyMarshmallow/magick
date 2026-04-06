@@ -1,8 +1,13 @@
-import { useQuery } from "@tanstack/react-query";
+import {
+  getLocalWorkspaceFileExtension,
+  getLocalWorkspaceFileTitle,
+} from "@magick/shared/localWorkspace";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { X } from "lucide-react";
 import {
   type CSSProperties,
   type DragEvent,
+  type KeyboardEvent,
   type PointerEvent,
   type WheelEvent,
   useEffect,
@@ -261,17 +266,124 @@ function WorkspaceLeafPaneView({
   const closeTab = useWorkspaceSessionStore((state) => state.closeTab);
   const moveTab = useWorkspaceSessionStore((state) => state.moveTab);
   const openDocument = useWorkspaceSessionStore((state) => state.openDocument);
+  const renameDocument = useWorkspaceSessionStore(
+    (state) => state.renameDocument,
+  );
   const splitWithDocument = useWorkspaceSessionStore(
     (state) => state.splitWithDocument,
   );
   const splitWithTab = useWorkspaceSessionStore((state) => state.splitWithTab);
+  const queryClient = useQueryClient();
   const activeTab = pane.activeTabId ? tabsById[pane.activeTabId] : null;
   const activeDraft = activeTab
     ? draftsByDocumentId[activeTab.documentId]
     : null;
+  const activeTitle = activeTab
+    ? (activeDraft?.title ?? getLocalWorkspaceFileTitle(activeTab.documentId))
+    : null;
   const [dropPosition, setDropPosition] =
     useState<WorkspaceDropPosition | null>(null);
+  const [editingDocumentId, setEditingDocumentId] = useState<string | null>(
+    null,
+  );
+  const [renamePendingDocumentId, setRenamePendingDocumentId] = useState<
+    string | null
+  >(null);
+  const [titleDraft, setTitleDraft] = useState("");
+  const skipNextRenameBlurRef = useRef(false);
   const tabStripRef = useRef<HTMLDivElement | null>(null);
+  const titleInputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    if (editingDocumentId && activeTab?.documentId !== editingDocumentId) {
+      setEditingDocumentId(null);
+      setRenamePendingDocumentId(null);
+      setTitleDraft("");
+    }
+  }, [activeTab?.documentId, editingDocumentId]);
+
+  useEffect(() => {
+    if (!editingDocumentId || activeTab?.documentId !== editingDocumentId) {
+      return;
+    }
+
+    titleInputRef.current?.focus();
+    titleInputRef.current?.select();
+  }, [activeTab?.documentId, editingDocumentId]);
+
+  const beginDocumentRename = () => {
+    if (!activeTab || !activeTitle) {
+      return;
+    }
+
+    skipNextRenameBlurRef.current = false;
+    setEditingDocumentId(activeTab.documentId);
+    setTitleDraft(activeTitle);
+  };
+
+  const cancelDocumentRename = () => {
+    setEditingDocumentId(null);
+    setRenamePendingDocumentId(null);
+    setTitleDraft("");
+  };
+
+  const commitDocumentRename = async () => {
+    if (!activeTab || !activeTitle) {
+      cancelDocumentRename();
+      return;
+    }
+
+    const nextTitle = titleDraft.trim() || activeTitle || "untitled";
+    if (nextTitle === activeTitle) {
+      cancelDocumentRename();
+      return;
+    }
+
+    const currentDocumentId = activeTab.documentId;
+    const nextFileName = `${nextTitle}${getLocalWorkspaceFileExtension(currentDocumentId)}`;
+    setRenamePendingDocumentId(currentDocumentId);
+
+    try {
+      const renamedFile = await localWorkspaceFileClient.renameFile(
+        currentDocumentId,
+        nextFileName,
+      );
+      renameDocument(currentDocumentId, renamedFile.filePath);
+      await Promise.all([
+        queryClient.invalidateQueries({
+          queryKey: ["workspace-files-bootstrap"],
+        }),
+        queryClient.invalidateQueries({
+          queryKey: ["document", renamedFile.filePath],
+        }),
+      ]);
+      setEditingDocumentId(null);
+      setTitleDraft("");
+    } catch (error) {
+      console.error("Failed to rename workspace file", error);
+    } finally {
+      setRenamePendingDocumentId((current) =>
+        current === currentDocumentId ? null : current,
+      );
+    }
+  };
+
+  const handleDocumentRenameKeyDown = (
+    event: KeyboardEvent<HTMLInputElement>,
+  ) => {
+    if (event.key === "Escape") {
+      skipNextRenameBlurRef.current = true;
+      cancelDocumentRename();
+      return;
+    }
+
+    if (event.key !== "Enter") {
+      return;
+    }
+
+    event.preventDefault();
+    event.currentTarget.blur();
+  };
 
   const getTabStripMetrics = (element: HTMLDivElement) => {
     const rect = element.getBoundingClientRect();
@@ -541,7 +653,8 @@ function WorkspaceLeafPaneView({
           }
 
           const draft = draftsByDocumentId[tab.documentId];
-          const title = draft?.title ?? tab.documentId;
+          const title =
+            draft?.title ?? getLocalWorkspaceFileTitle(tab.documentId);
           const isActive = pane.activeTabId === tabId;
 
           return (
@@ -712,12 +825,37 @@ function WorkspaceLeafPaneView({
         {activeTab ? (
           <>
             <div className="workspace__document-scroll">
-              <div
-                className="workspace__document-title"
-                title={activeDraft?.title ?? activeTab.documentId}
-              >
-                {activeDraft?.title ?? activeTab.documentId}
-              </div>
+              {activeTitle && editingDocumentId === activeTab.documentId ? (
+                <input
+                  aria-label={`Rename ${activeTitle}`}
+                  className="workspace__document-title-input"
+                  disabled={renamePendingDocumentId === activeTab.documentId}
+                  onBlur={() => {
+                    if (skipNextRenameBlurRef.current) {
+                      skipNextRenameBlurRef.current = false;
+                      return;
+                    }
+
+                    void commitDocumentRename();
+                  }}
+                  onChange={(event) => {
+                    setTitleDraft(event.target.value);
+                  }}
+                  onKeyDown={handleDocumentRenameKeyDown}
+                  ref={titleInputRef}
+                  type="text"
+                  value={titleDraft}
+                />
+              ) : (
+                <button
+                  className="workspace__document-title workspace__document-title-button"
+                  onClick={beginDocumentRename}
+                  title={activeTitle ?? activeTab.documentId}
+                  type="button"
+                >
+                  {activeTitle ?? activeTab.documentId}
+                </button>
+              )}
               <DocumentEditorHost
                 documentId={activeTab.documentId}
                 paneId={pane.id}

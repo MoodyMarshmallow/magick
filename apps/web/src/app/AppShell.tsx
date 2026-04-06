@@ -28,6 +28,7 @@ import type { WorkspaceDragItem } from "../features/workspace/state/workspaceSes
 import { FileTree } from "../features/workspace/tree/FileTree";
 import {
   collectWorkspaceFilePaths,
+  collectWorkspaceTreePaths,
   findFirstWorkspaceFilePath,
   reconcileExpandedDirectoryIds,
 } from "../features/workspace/tree/fileTreeState";
@@ -81,6 +82,9 @@ export function AppShell() {
       ? false
       : 2000,
   });
+  const fileTreeKey = fileBootstrapQuery.data
+    ? collectWorkspaceTreePaths(fileBootstrapQuery.data.tree).join("|")
+    : "workspace-tree";
 
   const threadBootstrapQuery = useQuery({
     queryKey: ["workspace-thread-bootstrap"],
@@ -323,6 +327,7 @@ export function AppShell() {
           <FileTree
             activeFilePath={focusedDocumentId}
             expandedIds={expandedTreeItemIds}
+            key={fileTreeKey}
             onExpandedIdsChange={setExpandedTreeItemIds}
             onCreateDirectory={async (directoryPath) => {
               await localWorkspaceFileClient.createDirectory(directoryPath);

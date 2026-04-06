@@ -3,7 +3,7 @@ import { extname, join, relative, resolve, sep } from "node:path";
 import type { LocalWorkspaceFileEvent } from "@magick/shared/localWorkspace";
 
 const ignoredDirectoryNames = new Set([".git", ".magick", "node_modules"]);
-const supportedFileExtensions = new Set([".md", ".mdx", ".txt"]);
+const supportedFileExtensions = new Set([".md"]);
 
 const toPosixPath = (filePath: string): string => filePath.split(sep).join("/");
 

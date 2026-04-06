@@ -5,7 +5,7 @@ import type { Connect, Plugin } from "vite";
 import { LocalWorkspaceService } from "../../desktop/src/main/localWorkspaceService";
 import { LocalWorkspaceWatcher } from "../../desktop/src/main/localWorkspaceWatcher";
 
-const supportedFileExtensions = new Set([".md", ".mdx", ".txt"]);
+const supportedFileExtensions = new Set([".md"]);
 
 const seedFiles = [
   {
@@ -24,7 +24,7 @@ const seedFiles = [
       "We should evaluate split affordances by how confidently a user can predict the resulting layout before they release the pointer.\n\nThis file exists so web:dev has a real nested local file to open.",
   },
   {
-    filePath: "notes/archive/recovery-notes.txt",
+    filePath: "notes/archive/recovery-notes.md",
     markdown:
       "A local-first client earns trust when restart and replay paths feel boring instead of magical.",
   },
