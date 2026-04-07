@@ -1,9 +1,10 @@
 // Coordinates thread lifecycle, provider execution, persistence, and event projection.
 
-import { Cause, Effect, Exit, Option, Stream } from "effect";
+import { Cause, Effect, Either, Exit, Option, Stream } from "effect";
 
 import type {
   DomainEvent,
+  FileDiffPreview,
   ThreadRecord,
   ThreadResolutionState,
   ThreadSummary,
@@ -39,7 +40,12 @@ import type {
   ProviderEvent,
   ProviderRegistryService,
   ProviderSessionRuntime,
+  ProviderToolDefinition,
 } from "../providers/providerTypes";
+import { buildToolExecutionContext } from "../tools/toolContextBuilder";
+import type { ToolExecutor } from "../tools/toolExecutor";
+import type { WebContentService } from "../tools/webContentService";
+import type { WorkspaceAccessService } from "../tools/workspaceAccessService";
 
 export interface CreateThreadInput {
   readonly workspaceId: string;
@@ -116,6 +122,9 @@ export class ThreadOrchestrator implements ThreadOrchestratorApi {
   readonly #runtimeState: RuntimeStateService;
   readonly #clock: ClockService;
   readonly #idGenerator: IdGeneratorService;
+  readonly #toolExecutor: ToolExecutor;
+  readonly #workspaceAccess: WorkspaceAccessService;
+  readonly #webContent: WebContentService;
 
   constructor(args: {
     providerRegistry: ProviderRegistryService;
@@ -126,6 +135,9 @@ export class ThreadOrchestrator implements ThreadOrchestratorApi {
     runtimeState: RuntimeStateService;
     clock: ClockService;
     idGenerator: IdGeneratorService;
+    toolExecutor: ToolExecutor;
+    workspaceAccess: WorkspaceAccessService;
+    webContent: WebContentService;
   }) {
     this.#providerRegistry = args.providerRegistry;
     this.#eventStore = args.eventStore;
@@ -135,6 +147,9 @@ export class ThreadOrchestrator implements ThreadOrchestratorApi {
     this.#runtimeState = args.runtimeState;
     this.#clock = args.clock;
     this.#idGenerator = args.idGenerator;
+    this.#toolExecutor = args.toolExecutor;
+    this.#workspaceAccess = args.workspaceAccess;
+    this.#webContent = args.webContent;
   }
 
   readonly #run = <A>(effect: Effect.Effect<A, BackendError>): Promise<A> =>
@@ -251,6 +266,134 @@ export class ThreadOrchestrator implements ThreadOrchestratorApi {
       }.bind(this),
     );
 
+  readonly #listProviderTools = (): readonly ProviderToolDefinition[] =>
+    this.#toolExecutor.listTools().map((tool) => ({
+      name: tool.id,
+      description: tool.description,
+      inputSchema: tool.inputSchemaJson,
+    }));
+
+  readonly #extractToolLocationMetadata = (input: unknown) => {
+    if (typeof input !== "object" || input === null) {
+      return { path: null, url: null } as const;
+    }
+
+    const record = input as Record<string, unknown>;
+    return {
+      path: typeof record.path === "string" ? record.path : null,
+      url: typeof record.url === "string" ? record.url : null,
+    } as const;
+  };
+
+  readonly #stringifyToolInput = (input: unknown): string | null => {
+    try {
+      return JSON.stringify(input);
+    } catch {
+      return null;
+    }
+  };
+
+  readonly #applyToolRequestedEvent = (
+    threadId: string,
+    providerSessionId: string,
+    providerEvent: Extract<
+      ProviderEvent,
+      { readonly type: "tool.call.requested" }
+    >,
+  ) => {
+    const metadata = this.#extractToolLocationMetadata(providerEvent.input);
+    return this.#persistAndProject(threadId, [
+      {
+        eventId: this.#idGenerator.next("event"),
+        threadId,
+        providerSessionId,
+        occurredAt: this.#clock.now(),
+        type: "tool.requested",
+        payload: {
+          turnId: providerEvent.turnId,
+          toolCallId: providerEvent.toolCallId,
+          toolName: providerEvent.toolName,
+          title: providerEvent.toolName,
+          argsPreview: this.#stringifyToolInput(providerEvent.input),
+          path: metadata.path,
+          url: metadata.url,
+        },
+      },
+    ]);
+  };
+
+  readonly #persistToolStarted = (
+    threadId: string,
+    providerSessionId: string,
+    turnId: string,
+    toolCallId: string,
+  ) =>
+    this.#persistAndProject(threadId, [
+      {
+        eventId: this.#idGenerator.next("event"),
+        threadId,
+        providerSessionId,
+        occurredAt: this.#clock.now(),
+        type: "tool.started",
+        payload: {
+          turnId,
+          toolCallId,
+        },
+      },
+    ]);
+
+  readonly #persistToolCompleted = (
+    threadId: string,
+    providerSessionId: string,
+    turnId: string,
+    toolCallId: string,
+    result: {
+      readonly resultPreview: string | null;
+      readonly path: string | null;
+      readonly url: string | null;
+      readonly diff: FileDiffPreview | null;
+    },
+  ) =>
+    this.#persistAndProject(threadId, [
+      {
+        eventId: this.#idGenerator.next("event"),
+        threadId,
+        providerSessionId,
+        occurredAt: this.#clock.now(),
+        type: "tool.completed",
+        payload: {
+          turnId,
+          toolCallId,
+          resultPreview: result.resultPreview,
+          path: result.path,
+          url: result.url,
+          diff: result.diff,
+        },
+      },
+    ]);
+
+  readonly #persistToolFailed = (
+    threadId: string,
+    providerSessionId: string,
+    turnId: string,
+    toolCallId: string,
+    error: string,
+  ) =>
+    this.#persistAndProject(threadId, [
+      {
+        eventId: this.#idGenerator.next("event"),
+        threadId,
+        providerSessionId,
+        occurredAt: this.#clock.now(),
+        type: "tool.failed",
+        payload: {
+          turnId,
+          toolCallId,
+          error,
+        },
+      },
+    ]);
+
   readonly #applyProviderEvent = (
     threadId: string,
     providerSessionId: string,
@@ -346,7 +489,103 @@ export class ThreadOrchestrator implements ThreadOrchestratorApi {
             ]),
           ),
         );
+      case "tool.call.requested":
+        return this.#applyToolRequestedEvent(
+          threadId,
+          providerSessionId,
+          providerEvent,
+        );
     }
+  };
+
+  readonly #processProviderEvent = (
+    thread: ThreadRecord,
+    runtime: ProviderSessionRuntime,
+    providerEvent: ProviderEvent,
+  ): Effect.Effect<void, BackendError> => {
+    if (providerEvent.type !== "tool.call.requested") {
+      return this.#applyProviderEvent(
+        thread.id,
+        thread.providerSessionId,
+        providerEvent,
+      ).pipe(Effect.asVoid);
+    }
+
+    return Effect.gen(
+      function* (this: ThreadOrchestrator) {
+        yield* this.#applyToolRequestedEvent(
+          thread.id,
+          thread.providerSessionId,
+          providerEvent,
+        ).pipe(Effect.asVoid);
+        yield* this.#persistToolStarted(
+          thread.id,
+          thread.providerSessionId,
+          providerEvent.turnId,
+          providerEvent.toolCallId,
+        ).pipe(Effect.asVoid);
+
+        const toolContext = buildToolExecutionContext({
+          workspaceId: thread.workspaceId,
+          threadId: thread.id,
+          turnId: providerEvent.turnId,
+          workspace: this.#workspaceAccess,
+          web: this.#webContent,
+        });
+
+        const toolResult = yield* Effect.either(
+          fromPromise(() =>
+            this.#toolExecutor.execute({
+              toolName: providerEvent.toolName,
+              input: providerEvent.input,
+              context: toolContext,
+            }),
+          ),
+        );
+
+        if (Either.isRight(toolResult)) {
+          yield* this.#persistToolCompleted(
+            thread.id,
+            thread.providerSessionId,
+            providerEvent.turnId,
+            providerEvent.toolCallId,
+            toolResult.right,
+          ).pipe(Effect.asVoid);
+
+          const continuation = yield* runtime.session.submitToolResult({
+            turnId: providerEvent.turnId,
+            toolCallId: providerEvent.toolCallId,
+            toolName: providerEvent.toolName,
+            output: toolResult.right.modelOutput,
+          });
+
+          yield* Stream.runForEach(continuation, (continuationEvent) =>
+            this.#processProviderEvent(thread, runtime, continuationEvent),
+          );
+          return;
+        }
+
+        const errorMessage = backendErrorMessage(toolResult.left);
+        yield* this.#persistToolFailed(
+          thread.id,
+          thread.providerSessionId,
+          providerEvent.turnId,
+          providerEvent.toolCallId,
+          errorMessage,
+        ).pipe(Effect.asVoid);
+
+        const continuation = yield* runtime.session.submitToolResult({
+          turnId: providerEvent.turnId,
+          toolCallId: providerEvent.toolCallId,
+          toolName: providerEvent.toolName,
+          output: `Tool execution failed: ${errorMessage}`,
+        });
+
+        yield* Stream.runForEach(continuation, (continuationEvent) =>
+          this.#processProviderEvent(thread, runtime, continuationEvent),
+        );
+      }.bind(this),
+    );
   };
 
   readonly #getOrCreateSessionRuntime = (thread: ThreadRecord) =>
@@ -613,14 +852,11 @@ export class ThreadOrchestrator implements ThreadOrchestratorApi {
           messageId: assistantMessageId,
           userMessage: content,
           contextMessages: this.#buildContextMessages(prelude.thread),
+          tools: this.#listProviderTools(),
         });
 
         yield* Stream.runForEach(stream, (providerEvent) =>
-          this.#applyProviderEvent(
-            threadId,
-            thread.providerSessionId,
-            providerEvent,
-          ).pipe(Effect.asVoid),
+          this.#processProviderEvent(thread, runtime, providerEvent),
         ).pipe(
           Effect.catchAll((error) =>
             this.#persistAndProject(threadId, [

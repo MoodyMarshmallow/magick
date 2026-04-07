@@ -2,6 +2,8 @@ import type {
   DomainEvent,
   ThreadSummary,
   ThreadViewModel,
+  ToolActivityView,
+  ToolApprovalView,
 } from "@magick/contracts/chat";
 
 export type CommentMessageAuthor = "human" | "ai";
@@ -14,6 +16,7 @@ export type CommentThreadStatus = "open" | "resolved";
 export type CommentThreadRuntimeState =
   | "idle"
   | "running"
+  | "awaiting_approval"
   | "interrupted"
   | "failed";
 
@@ -32,6 +35,8 @@ export interface CommentThread {
   readonly runtimeState: CommentThreadRuntimeState;
   readonly updatedAt: string;
   readonly messages: readonly CommentMessage[];
+  readonly toolActivities: readonly ToolActivityView[];
+  readonly pendingToolApproval: ToolApprovalView | null;
 }
 
 export type CommentThreadEvent =
@@ -100,6 +105,8 @@ const toCommentThreadSummary = (summary: ThreadSummary): CommentThread => ({
   runtimeState: summary.runtimeState,
   updatedAt: summary.updatedAt,
   messages: [],
+  toolActivities: [],
+  pendingToolApproval: null,
 });
 
 const toCommentThread = (thread: ThreadViewModel): CommentThread => ({
@@ -109,6 +116,8 @@ const toCommentThread = (thread: ThreadViewModel): CommentThread => ({
   runtimeState: thread.runtimeState,
   updatedAt: thread.updatedAt,
   messages: thread.messages.map(toCommentMessage),
+  toolActivities: thread.toolActivities,
+  pendingToolApproval: thread.pendingToolApproval,
 });
 
 const sortThreads = (
@@ -140,6 +149,12 @@ const upsertThread = (
               nextThread.messages.length > 0
                 ? nextThread.messages
                 : thread.messages,
+            toolActivities:
+              nextThread.toolActivities.length > 0
+                ? nextThread.toolActivities
+                : thread.toolActivities,
+            pendingToolApproval:
+              nextThread.pendingToolApproval ?? thread.pendingToolApproval,
           }
         : thread,
     ),
@@ -174,6 +189,8 @@ const ensureThread = (
       runtimeState: "idle",
       updatedAt: new Date(0).toISOString(),
       messages: [],
+      toolActivities: [],
+      pendingToolApproval: null,
     },
     ...threads,
   ];
@@ -240,6 +257,8 @@ export const projectThreadEvent = (
             runtimeState: "idle",
             updatedAt: domainEvent.occurredAt,
             messages: [],
+            toolActivities: [],
+            pendingToolApproval: null,
           });
         case "thread.renamed":
           return updateThread(nextThreads, event.threadId, (thread) => ({
@@ -264,6 +283,54 @@ export const projectThreadEvent = (
           return updateThread(nextThreads, event.threadId, (thread) => ({
             ...thread,
             runtimeState: "failed",
+            updatedAt: domainEvent.occurredAt,
+          }));
+        case "tool.approval.requested":
+          return updateThread(nextThreads, event.threadId, (thread) => ({
+            ...thread,
+            runtimeState: "awaiting_approval",
+            toolActivities: thread.toolActivities.map((toolActivity) =>
+              toolActivity.toolCallId === domainEvent.payload.toolCallId
+                ? {
+                    ...toolActivity,
+                    status: "awaiting_approval",
+                    updatedAt: domainEvent.occurredAt,
+                  }
+                : toolActivity,
+            ),
+            pendingToolApproval: {
+              toolCallId: domainEvent.payload.toolCallId,
+              toolName: domainEvent.payload.toolName,
+              path: domainEvent.payload.path,
+              reason: domainEvent.payload.reason,
+              requestedAt: domainEvent.occurredAt,
+            },
+            updatedAt: domainEvent.occurredAt,
+          }));
+        case "tool.approval.resolved":
+          return updateThread(nextThreads, event.threadId, (thread) => ({
+            ...thread,
+            runtimeState:
+              domainEvent.payload.decision === "approved"
+                ? "running"
+                : "failed",
+            toolActivities: thread.toolActivities.map((toolActivity) =>
+              toolActivity.toolCallId === domainEvent.payload.toolCallId
+                ? {
+                    ...toolActivity,
+                    status:
+                      domainEvent.payload.decision === "approved"
+                        ? "running"
+                        : "failed",
+                    error:
+                      domainEvent.payload.decision === "approved"
+                        ? toolActivity.error
+                        : "Tool execution was rejected.",
+                    updatedAt: domainEvent.occurredAt,
+                  }
+                : toolActivity,
+            ),
+            pendingToolApproval: null,
             updatedAt: domainEvent.occurredAt,
           }));
         case "turn.started":
@@ -299,6 +366,78 @@ export const projectThreadEvent = (
           return updateThread(nextThreads, event.threadId, (thread) => ({
             ...thread,
             updatedAt: domainEvent.occurredAt,
+          }));
+        case "tool.requested":
+          return updateThread(nextThreads, event.threadId, (thread) => ({
+            ...thread,
+            updatedAt: domainEvent.occurredAt,
+            toolActivities: [
+              ...thread.toolActivities.filter(
+                (toolActivity) =>
+                  toolActivity.toolCallId !== domainEvent.payload.toolCallId,
+              ),
+              {
+                toolCallId: domainEvent.payload.toolCallId,
+                toolName: domainEvent.payload.toolName,
+                title: domainEvent.payload.title,
+                status: "requested",
+                argsPreview: domainEvent.payload.argsPreview,
+                resultPreview: null,
+                path: domainEvent.payload.path,
+                url: domainEvent.payload.url,
+                diff: null,
+                error: null,
+                createdAt: domainEvent.occurredAt,
+                updatedAt: domainEvent.occurredAt,
+              },
+            ],
+          }));
+        case "tool.started":
+          return updateThread(nextThreads, event.threadId, (thread) => ({
+            ...thread,
+            updatedAt: domainEvent.occurredAt,
+            toolActivities: thread.toolActivities.map((toolActivity) =>
+              toolActivity.toolCallId === domainEvent.payload.toolCallId
+                ? {
+                    ...toolActivity,
+                    status: "running",
+                    updatedAt: domainEvent.occurredAt,
+                  }
+                : toolActivity,
+            ),
+          }));
+        case "tool.completed":
+          return updateThread(nextThreads, event.threadId, (thread) => ({
+            ...thread,
+            updatedAt: domainEvent.occurredAt,
+            toolActivities: thread.toolActivities.map((toolActivity) =>
+              toolActivity.toolCallId === domainEvent.payload.toolCallId
+                ? {
+                    ...toolActivity,
+                    status: "completed",
+                    resultPreview: domainEvent.payload.resultPreview,
+                    path: domainEvent.payload.path ?? toolActivity.path,
+                    url: domainEvent.payload.url ?? toolActivity.url,
+                    diff: domainEvent.payload.diff,
+                    updatedAt: domainEvent.occurredAt,
+                  }
+                : toolActivity,
+            ),
+          }));
+        case "tool.failed":
+          return updateThread(nextThreads, event.threadId, (thread) => ({
+            ...thread,
+            updatedAt: domainEvent.occurredAt,
+            toolActivities: thread.toolActivities.map((toolActivity) =>
+              toolActivity.toolCallId === domainEvent.payload.toolCallId
+                ? {
+                    ...toolActivity,
+                    status: "failed",
+                    error: domainEvent.payload.error,
+                    updatedAt: domainEvent.occurredAt,
+                  }
+                : toolActivity,
+            ),
           }));
         case "message.user.created":
           return updateThread(nextThreads, event.threadId, (thread) => ({

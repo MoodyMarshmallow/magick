@@ -17,6 +17,33 @@ import {
 import { RenderedMarkdown } from "../../document/components/RenderedMarkdown";
 import type { CommentThread } from "../state/threadProjector";
 
+const formatToolDiff = (
+  diff: CommentThread["toolActivities"][number]["diff"],
+) => {
+  if (!diff) {
+    return "";
+  }
+
+  const hunkLines = diff.hunks.flatMap((hunk) => [
+    `@@ -${hunk.oldStart},${hunk.oldLines} +${hunk.newStart},${hunk.newLines} @@`,
+    ...hunk.lines,
+  ]);
+  return [
+    `--- ${diff.kind === "created" ? "/dev/null" : diff.path}`,
+    `+++ ${diff.path}`,
+    ...hunkLines,
+    ...(diff.truncated ? ["... diff truncated ..."] : []),
+  ].join("\n");
+};
+
+type TimelineEntry =
+  | {
+      readonly type: "message";
+      readonly createdAt: string;
+      readonly id: string;
+    }
+  | { readonly type: "tool"; readonly createdAt: string; readonly id: string };
+
 interface CommentSidebarProps {
   readonly threads: readonly CommentThread[];
   readonly activeThreadId: string | null;
@@ -57,6 +84,20 @@ export function CommentSidebar({
   const visibleThreads = threads.filter((thread) =>
     showResolvedOnly ? thread.status === "resolved" : thread.status === "open",
   );
+  const activeThreadTimeline: readonly TimelineEntry[] = activeThread
+    ? [
+        ...activeThread.messages.map((message) => ({
+          type: "message" as const,
+          createdAt: message.createdAt,
+          id: message.id,
+        })),
+        ...activeThread.toolActivities.map((toolActivity) => ({
+          type: "tool" as const,
+          createdAt: toolActivity.createdAt,
+          id: toolActivity.toolCallId,
+        })),
+      ].sort((left, right) => left.createdAt.localeCompare(right.createdAt))
+    : [];
 
   useEffect(() => {
     if (
@@ -244,26 +285,116 @@ export function CommentSidebar({
           </header>
 
           <div className="thread-record__messages">
-            {activeThread.messages.map((message) => (
-              <article
-                className={`thread-record__message thread-record__message--${message.author}`}
-                key={message.id}
-              >
+            {activeThreadTimeline.map((entry) => {
+              if (entry.type === "message") {
+                const message = activeThread.messages.find(
+                  (candidate) => candidate.id === entry.id,
+                );
+                if (!message) {
+                  return null;
+                }
+
+                return (
+                  <article
+                    className={`thread-record__message thread-record__message--${message.author}`}
+                    key={message.id}
+                  >
+                    <header>
+                      <span>
+                        {message.author === "human" ? "you" : "magick"}
+                      </span>
+                      <span>
+                        {new Date(message.createdAt).toLocaleTimeString()}
+                      </span>
+                    </header>
+                    <div className="thread-record__message-body">
+                      {message.body ? (
+                        <RenderedMarkdown content={message.body} />
+                      ) : (
+                        <p>Streaming...</p>
+                      )}
+                    </div>
+                  </article>
+                );
+              }
+
+              const toolActivity = activeThread.toolActivities.find(
+                (candidate) => candidate.toolCallId === entry.id,
+              );
+              if (!toolActivity) {
+                return null;
+              }
+
+              return (
+                <article
+                  className={`thread-record__tool thread-record__tool--${toolActivity.status}`}
+                  key={toolActivity.toolCallId}
+                >
+                  <header>
+                    <span>{toolActivity.title || toolActivity.toolName}</span>
+                    <span>
+                      {new Date(toolActivity.updatedAt).toLocaleTimeString()}
+                    </span>
+                  </header>
+                  <div className="thread-record__tool-meta">
+                    {toolActivity.path ? (
+                      <span>{toolActivity.path}</span>
+                    ) : null}
+                    {toolActivity.url ? <span>{toolActivity.url}</span> : null}
+                    <span>{toolActivity.status.replaceAll("_", " ")}</span>
+                  </div>
+                  {toolActivity.argsPreview ||
+                  toolActivity.resultPreview ||
+                  toolActivity.diff ||
+                  toolActivity.error ? (
+                    <details className="thread-record__tool-details">
+                      <summary>Details</summary>
+                      {toolActivity.argsPreview ? (
+                        <pre className="thread-record__tool-pre">
+                          {toolActivity.argsPreview}
+                        </pre>
+                      ) : null}
+                      {toolActivity.diff ? (
+                        <pre className="thread-record__tool-pre">
+                          {formatToolDiff(toolActivity.diff)}
+                        </pre>
+                      ) : null}
+                      {!toolActivity.diff && toolActivity.resultPreview ? (
+                        <pre className="thread-record__tool-pre">
+                          {toolActivity.resultPreview}
+                        </pre>
+                      ) : null}
+                      {toolActivity.error ? (
+                        <p className="thread-record__tool-error">
+                          {toolActivity.error}
+                        </p>
+                      ) : null}
+                    </details>
+                  ) : null}
+                </article>
+              );
+            })}
+            {activeThread.pendingToolApproval ? (
+              <article className="thread-record__tool thread-record__tool--awaiting_approval">
                 <header>
-                  <span>{message.author === "human" ? "you" : "magick"}</span>
+                  <span>Approval needed</span>
                   <span>
-                    {new Date(message.createdAt).toLocaleTimeString()}
+                    {new Date(
+                      activeThread.pendingToolApproval.requestedAt,
+                    ).toLocaleTimeString()}
                   </span>
                 </header>
-                <div className="thread-record__message-body">
-                  {message.body ? (
-                    <RenderedMarkdown content={message.body} />
-                  ) : (
-                    <p>Streaming...</p>
-                  )}
+                <div className="thread-record__tool-meta">
+                  <span>{activeThread.pendingToolApproval.toolName}</span>
+                  {activeThread.pendingToolApproval.path ? (
+                    <span>{activeThread.pendingToolApproval.path}</span>
+                  ) : null}
                 </div>
+                <p className="thread-record__tool-error">
+                  {activeThread.pendingToolApproval.reason}
+                </p>
               </article>
-            ))}
+            ) : null}
           </div>
 
           <div className="thread-record__composer">

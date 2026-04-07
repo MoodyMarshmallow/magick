@@ -17,14 +17,29 @@ import { EventStore } from "../persistence/eventStore";
 import { ProviderSessionRepository } from "../persistence/providerSessionRepository";
 import { ThreadRepository } from "../persistence/threadRepository";
 import { FakeProviderAdapter } from "../providers/fake/fakeProviderAdapter";
+import { PathPresentationPolicy } from "../tools/pathPresentationPolicy";
+import { ToolExecutor } from "../tools/toolExecutor";
+import { WebContentService } from "../tools/webContentService";
+import { WorkspaceAccessService } from "../tools/workspaceAccessService";
+import { WorkspacePathPolicy } from "../tools/workspacePathPolicy";
 import { ConnectionRegistry } from "./connectionRegistry";
 import { WebSocketCommandServer } from "./wsServer";
+
+const createToolServices = () => ({
+  toolExecutor: new ToolExecutor(),
+  workspaceAccess: new WorkspaceAccessService({
+    pathPolicy: new WorkspacePathPolicy(process.cwd()),
+    presentationPolicy: new PathPresentationPolicy("workspace-relative"),
+  }),
+  webContent: new WebContentService(),
+});
 
 const makeServices = () => {
   const database = createDatabase();
   const adapter = new FakeProviderAdapter({ mode: "stateful" });
   const threadRepository = new ThreadRepository(database);
   const eventStore = new EventStore(database);
+  const toolServices = createToolServices();
 
   return {
     adapter,
@@ -60,6 +75,7 @@ const makeServices = () => {
       runtimeState: createRuntimeState(),
       clock: createClock(),
       idGenerator: createIdGenerator(),
+      ...toolServices,
     }),
   };
 };
@@ -155,6 +171,47 @@ describe("WebSocketCommandServer", () => {
         data: {
           kind: "accepted",
           threadId: thread.threadId,
+        },
+      },
+    });
+
+    await closeServer(server);
+  });
+
+  it("rejects approval responses until interactive approvals are wired", async () => {
+    const services = makeServices();
+    const server = createServer();
+    await listen(server);
+    const wsServer = new WebSocketCommandServer({
+      httpServer: server,
+      providerAuth: services.providerAuth,
+      providerRegistry: services.providerRegistry,
+      replayService: services.replayService,
+      threadOrchestrator: services.threadOrchestrator,
+      connections: new ConnectionRegistry(),
+    });
+
+    const response = await wsServer.handleCommand(
+      {
+        requestId: "req_tool_approval",
+        command: {
+          type: "tool.approval.respond",
+          payload: {
+            threadId: "thread_1",
+            toolCallId: "tool_1",
+            decision: "rejected",
+          },
+        },
+      },
+      "conn_1",
+    );
+
+    expect(response).toMatchObject({
+      requestId: "req_tool_approval",
+      result: {
+        ok: false,
+        error: {
+          code: "tool_approval_not_supported",
         },
       },
     });

@@ -21,6 +21,9 @@ describe("createBackendServices", () => {
     expect(services.providerRegistry.get("fake")).toMatchObject({
       key: "fake",
     });
+    expect(services.providerRegistry.get("fake-tools")).toMatchObject({
+      key: "fake-tools",
+    });
   });
 
   it("attaches the websocket server without throwing", () => {
@@ -45,6 +48,15 @@ describe("createBackendServices", () => {
     );
 
     removeTestDatabaseDirectory(join(process.cwd(), ".magick-test"));
+  });
+
+  it("creates the default local workspace directory when no workspace root is provided", () => {
+    const defaultWorkspaceDir = join(process.cwd(), ".magick", "workspace");
+    removeTestDatabaseDirectory(join(process.cwd(), ".magick"));
+
+    createBackendServices();
+
+    expect(existsSync(defaultWorkspaceDir)).toBe(true);
   });
 
   it("persists thread renames across backend restarts", async () => {

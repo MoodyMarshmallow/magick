@@ -1595,6 +1595,55 @@ textarea {
   background: transparent;
 }
 
+.thread-record__tool {
+  display: grid;
+  gap: 0.45rem;
+  padding: 0.7rem 0.8rem;
+  border: 1px solid var(--shell-border);
+  background: var(--bg-soft);
+}
+
+.thread-record__tool--failed,
+.thread-record__tool--awaiting_approval {
+  border-color: color-mix(in srgb, var(--red) 35%, var(--shell-border));
+}
+
+.thread-record__tool-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: var(--text-size-small);
+  color: var(--fg-dim);
+}
+
+.thread-record__tool-details {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.thread-record__tool-details summary {
+  cursor: pointer;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: var(--text-size-small);
+  color: var(--aqua);
+}
+
+.thread-record__tool-pre {
+  margin: 0;
+  padding: 0.7rem;
+  overflow: auto;
+  background: var(--bg-ink);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: var(--text-size-small);
+  white-space: pre-wrap;
+}
+
+.thread-record__tool-error {
+  margin: 0;
+  color: var(--red);
+}
+
 .thread-record__message--human {
   display: inline-flex;
   flex-direction: column;

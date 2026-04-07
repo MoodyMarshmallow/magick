@@ -25,6 +25,8 @@ interface MutableCommentThread {
   runtimeState: CommentThread["runtimeState"];
   updatedAt: string;
   messages: MutableCommentMessage[];
+  toolActivities: CommentThread["toolActivities"];
+  pendingToolApproval: CommentThread["pendingToolApproval"];
 }
 
 interface MutableBootstrap {
@@ -217,6 +219,8 @@ const createSeedThreads = (now: () => string): MutableCommentThread[] => {
           body: "Agreed. It also clarifies why replay correctness matters more than optimistic transcript tricks.",
         }),
       ],
+      toolActivities: [],
+      pendingToolApproval: null,
     },
     {
       threadId: "thread_seed_long",
@@ -228,6 +232,8 @@ const createSeedThreads = (now: () => string): MutableCommentThread[] => {
         ...message,
         createdAt: now(),
       })),
+      toolActivities: [],
+      pendingToolApproval: null,
     },
     ...Array.from({ length: 14 }, (_, index) => ({
       threadId: `thread_seed_${index + 2}`,
@@ -247,6 +253,8 @@ const createSeedThreads = (now: () => string): MutableCommentThread[] => {
           body: `Acknowledged. Chat ${index + 2} exists mostly as scroll ballast, but it should still read like a plausible conversation.`,
         }),
       ],
+      toolActivities: [],
+      pendingToolApproval: null,
     })),
   ];
 };
@@ -270,6 +278,18 @@ const clone = <T>(value: T): T => structuredClone(value);
 const toPublicThread = (thread: MutableCommentThread): CommentThread => ({
   ...clone(thread),
   messages: thread.messages.map((message) => ({ ...message })),
+  toolActivities: thread.toolActivities.map((toolActivity) => ({
+    ...toolActivity,
+    diff: toolActivity.diff
+      ? {
+          ...toolActivity.diff,
+          hunks: toolActivity.diff.hunks.map((hunk) => ({
+            ...hunk,
+            lines: [...hunk.lines],
+          })),
+        }
+      : null,
+  })),
 });
 
 export const createDemoMagickClient = (
@@ -427,6 +447,8 @@ export const createDemoMagickClient = (
             status: "complete",
           },
         ],
+        toolActivities: [],
+        pendingToolApproval: null,
       };
 
       state.threads = [thread, ...state.threads];

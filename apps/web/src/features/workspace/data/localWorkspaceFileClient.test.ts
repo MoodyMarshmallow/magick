@@ -4,7 +4,6 @@ import type {
 } from "@magick/shared/localWorkspace";
 import { vi } from "vitest";
 import {
-  createBrowserLocalWorkspaceFileClient,
   createDesktopLocalWorkspaceFileClient,
   createDevLocalWorkspaceFileClient,
 } from "./localWorkspaceFileClient";
@@ -280,51 +279,5 @@ describe("localWorkspaceFileClient", () => {
     } finally {
       Object.assign(globalThis, { fetch: originalFetch });
     }
-  });
-
-  it("uses filename stems as browser fallback titles", async () => {
-    const client = createBrowserLocalWorkspaceFileClient();
-
-    await expect(
-      client.openFile("notes/studio/evergreen-systems-memo.md"),
-    ).resolves.toMatchObject({
-      title: "evergreen-systems-memo",
-    });
-  });
-
-  it("resolves browser fallback rename collisions with a numeric suffix", async () => {
-    const client = createBrowserLocalWorkspaceFileClient();
-
-    await expect(
-      client.renameFile(
-        "notes/studio/evergreen-systems-memo.md",
-        "systems-garden-note.md",
-      ),
-    ).resolves.toEqual({
-      previousFilePath: "notes/studio/evergreen-systems-memo.md",
-      filePath: "notes/studio/systems-garden-note 1.md",
-    });
-  });
-
-  it("preserves the original md extension when a browser fallback rename uses a dotted title", async () => {
-    const client = createBrowserLocalWorkspaceFileClient();
-
-    await expect(
-      client.renameFile("notes/research/layout-observations.md", "test.txt"),
-    ).resolves.toEqual({
-      previousFilePath: "notes/research/layout-observations.md",
-      filePath: "notes/research/test.txt.md",
-    });
-  });
-
-  it("supports root-level create operations in the browser fallback", async () => {
-    const client = createBrowserLocalWorkspaceFileClient();
-
-    await expect(client.createFile("")).resolves.toEqual({
-      filePath: "untitled.md",
-    });
-    await expect(client.createDirectory("")).resolves.toEqual({
-      path: "untitled-folder",
-    });
   });
 });

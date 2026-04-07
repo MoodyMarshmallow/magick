@@ -55,6 +55,8 @@ const runningSeed: ThreadViewModel = {
       status: "streaming",
     },
   ],
+  toolActivities: [],
+  pendingToolApproval: null,
   activeTurnId: "turn_1",
   latestSequence: 3,
   lastError: null,
@@ -181,6 +183,7 @@ describe("projectThreadEvents", () => {
     const seed: ThreadViewModel = {
       ...runningSeed,
       messages: [...runningSeed.messages],
+      toolActivities: [...runningSeed.toolActivities],
     };
 
     const thread = projectThreadEvents(seed, [

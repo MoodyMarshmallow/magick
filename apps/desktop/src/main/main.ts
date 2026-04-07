@@ -1,6 +1,7 @@
 import { type Server, createServer } from "node:http";
 import { join } from "node:path";
 import { BrowserWindow, app, ipcMain } from "electron";
+import { resolveLocalWorkspaceDir } from "../../../../packages/shared/src/localWorkspaceNode";
 import {
   attachWebSocketServer,
   createBackendServices,
@@ -15,13 +16,16 @@ const fileEventChannel = "magick-desktop:file-event";
 let backendServer: Server | null = null;
 let backendUrl: string | null = null;
 
-const ensureBackendServer = async (databasePath: string): Promise<string> => {
+const ensureBackendServer = async (
+  databasePath: string,
+  workspaceRoot: string,
+): Promise<string> => {
   if (backendServer && backendUrl) {
     return backendUrl;
   }
 
   const httpServer = createServer();
-  const services = createBackendServices({ databasePath });
+  const services = createBackendServices({ databasePath, workspaceRoot });
   attachWebSocketServer(httpServer, services);
   await new Promise<void>((resolve, reject) => {
     httpServer.listen(0, "127.0.0.1", () => resolve());
@@ -40,7 +44,7 @@ const ensureBackendServer = async (databasePath: string): Promise<string> => {
 
 const createWorkspaceService = () =>
   new LocalWorkspaceService({
-    workspaceDir: process.env.MAGICK_WORKSPACE_DIR ?? process.cwd(),
+    workspaceDir: resolveLocalWorkspaceDir({ env: process.env }),
   });
 
 const registerIpc = (
@@ -150,13 +154,16 @@ const registerIpc = (
   ipcMain.handle("magick-desktop:getBackendUrl", async () => {
     return ensureBackendServer(
       resolveDesktopBackendDatabasePath(app.getPath("userData")),
+      resolveLocalWorkspaceDir({ env: process.env }),
     );
   });
 };
 
 const createWindow = async (): Promise<void> => {
+  const workspaceRoot = resolveLocalWorkspaceDir({ env: process.env });
   await ensureBackendServer(
     resolveDesktopBackendDatabasePath(app.getPath("userData")),
+    workspaceRoot,
   );
 
   const window = new BrowserWindow({
@@ -176,7 +183,7 @@ const createWindow = async (): Promise<void> => {
   registerIpc(window, workspaceService);
 
   const workspaceWatcher = new LocalWorkspaceWatcher({
-    workspaceDir: process.env.MAGICK_WORKSPACE_DIR ?? process.cwd(),
+    workspaceDir: workspaceRoot,
     onEvent: (event) => {
       if (!window.isDestroyed()) {
         window.webContents.send(fileEventChannel, event);

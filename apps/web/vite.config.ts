@@ -11,6 +11,10 @@ export default defineConfig({
         __dirname,
         "../../packages/shared/src/localWorkspace.ts",
       ),
+      "@magick/shared/localWorkspaceNode": resolve(
+        __dirname,
+        "../../packages/shared/src/localWorkspaceNode.ts",
+      ),
       "@magick/shared/threadTitle": resolve(
         __dirname,
         "../../packages/shared/src/threadTitle.ts",

@@ -1,74 +1,13 @@
-import { mkdirSync, readdirSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { mkdirSync } from "node:fs";
+import { resolve } from "node:path";
 import type { LocalWorkspaceFileEvent } from "@magick/shared/localWorkspace";
 import type { Connect, Plugin } from "vite";
+import { resolveLocalWorkspaceDir } from "../../../packages/shared/src/localWorkspaceNode";
 import { LocalWorkspaceService } from "../../desktop/src/main/localWorkspaceService";
 import { LocalWorkspaceWatcher } from "../../desktop/src/main/localWorkspaceWatcher";
 
-const supportedFileExtensions = new Set([".md"]);
-
-const seedFiles = [
-  {
-    filePath: "notes/studio/evergreen-systems-memo.md",
-    markdown:
-      "Magick should feel like a calm studio for thinking with AI.\n\nThe best interfaces keep momentum without hiding system state.\n\nUse shared contracts to keep streaming and replay predictable.",
-  },
-  {
-    filePath: "notes/studio/systems-garden-note.md",
-    markdown:
-      "Keep duplicate document views synchronized from one shared draft state.\n\nSplits should feel like moving paper around a desk, not launching a new mode.",
-  },
-  {
-    filePath: "notes/research/layout-observations.md",
-    markdown:
-      "We should evaluate split affordances by how confidently a user can predict the resulting layout before they release the pointer.\n\nThis file exists so web:dev has a real nested local file to open.",
-  },
-  {
-    filePath: "notes/archive/recovery-notes.md",
-    markdown:
-      "A local-first client earns trust when restart and replay paths feel boring instead of magical.",
-  },
-] as const;
-
-const hasSupportedWorkspaceFiles = (workspaceDir: string): boolean => {
-  const visit = (directoryPath: string): boolean => {
-    const entries = readdirSync(directoryPath, { withFileTypes: true });
-    for (const entry of entries) {
-      const nextPath = join(directoryPath, entry.name);
-      if (entry.isDirectory()) {
-        if (visit(nextPath)) {
-          return true;
-        }
-        continue;
-      }
-
-      if (entry.isFile()) {
-        const extension = entry.name
-          .slice(entry.name.lastIndexOf("."))
-          .toLowerCase();
-        if (supportedFileExtensions.has(extension)) {
-          return true;
-        }
-      }
-    }
-
-    return false;
-  };
-
-  return visit(workspaceDir);
-};
-
-export const ensureSeedWorkspaceFiles = (workspaceDir: string): void => {
+export const ensureWorkspaceDirectory = (workspaceDir: string): void => {
   mkdirSync(workspaceDir, { recursive: true });
-  if (hasSupportedWorkspaceFiles(workspaceDir)) {
-    return;
-  }
-
-  for (const seedFile of seedFiles) {
-    const absoluteFilePath = join(workspaceDir, seedFile.filePath);
-    mkdirSync(dirname(absoluteFilePath), { recursive: true });
-    writeFileSync(absoluteFilePath, seedFile.markdown, "utf8");
-  }
 };
 
 const readRequestBody = async (
@@ -113,15 +52,16 @@ interface LocalWorkspaceDevPluginOptions {
 export const createLocalWorkspaceDevPlugin = (
   options: LocalWorkspaceDevPluginOptions = {},
 ): Plugin => {
+  const repoRoot = resolve(import.meta.dirname, "../../..");
+
   return {
     name: "magick-local-workspace-dev-server",
     configureServer(server) {
       const workspaceDir =
         options.workspaceDir ??
-        process.env.MAGICK_WEB_WORKSPACE_DIR ??
-        join(process.cwd(), ".magick", "workspace");
+        resolveLocalWorkspaceDir({ env: process.env, cwd: repoRoot });
 
-      ensureSeedWorkspaceFiles(workspaceDir);
+      ensureWorkspaceDirectory(workspaceDir);
       const workspaceService =
         options.createWorkspaceService?.(workspaceDir) ??
         new LocalWorkspaceService({ workspaceDir });

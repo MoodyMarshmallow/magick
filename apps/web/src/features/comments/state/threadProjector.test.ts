@@ -30,6 +30,8 @@ const thread: ThreadViewModel = {
       status: "complete",
     },
   ],
+  toolActivities: [],
+  pendingToolApproval: null,
   activeTurnId: null,
   latestSequence: 1,
   lastError: null,
@@ -170,5 +172,85 @@ describe("projectThreadEvent", () => {
     });
 
     expect(deleted).toEqual([]);
+  });
+
+  it("projects approval requests and rejection states", () => {
+    const initial = projectThreadEvent([], {
+      type: "snapshot.loaded",
+      threads: [summary],
+      activeThread: thread,
+    });
+
+    const withTool = projectThreadEvent(initial, {
+      type: "domain.event",
+      threadId: "thread_1",
+      event: {
+        eventId: "event_tool_1",
+        threadId: "thread_1",
+        providerSessionId: "session_1",
+        sequence: 2,
+        occurredAt: "2026-04-02T10:03:00.000Z",
+        type: "tool.requested",
+        payload: {
+          turnId: "turn_1",
+          toolCallId: "tool_1",
+          toolName: "read",
+          title: "Read notes.md",
+          argsPreview: '{"path":"notes.md"}',
+          path: "notes.md",
+          url: null,
+        },
+      },
+    });
+
+    const awaiting = projectThreadEvent(withTool, {
+      type: "domain.event",
+      threadId: "thread_1",
+      event: {
+        eventId: "event_tool_2",
+        threadId: "thread_1",
+        providerSessionId: "session_1",
+        sequence: 3,
+        occurredAt: "2026-04-02T10:04:00.000Z",
+        type: "tool.approval.requested",
+        payload: {
+          turnId: "turn_1",
+          toolCallId: "tool_1",
+          toolName: "read",
+          path: "../outside.md",
+          reason: "Outside workspace root",
+        },
+      },
+    });
+
+    const rejected = projectThreadEvent(awaiting, {
+      type: "domain.event",
+      threadId: "thread_1",
+      event: {
+        eventId: "event_tool_3",
+        threadId: "thread_1",
+        providerSessionId: "session_1",
+        sequence: 4,
+        occurredAt: "2026-04-02T10:05:00.000Z",
+        type: "tool.approval.resolved",
+        payload: {
+          turnId: "turn_1",
+          toolCallId: "tool_1",
+          decision: "rejected",
+        },
+      },
+    });
+
+    expect(awaiting[0]?.runtimeState).toBe("awaiting_approval");
+    expect(awaiting[0]?.pendingToolApproval).toMatchObject({
+      toolCallId: "tool_1",
+      reason: "Outside workspace root",
+    });
+    expect(rejected[0]?.runtimeState).toBe("failed");
+    expect(rejected[0]?.pendingToolApproval).toBeNull();
+    expect(rejected[0]?.toolActivities[0]).toMatchObject({
+      status: "failed",
+      error: "Tool execution was rejected.",
+    });
   });
 });

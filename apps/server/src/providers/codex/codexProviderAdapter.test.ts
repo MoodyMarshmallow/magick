@@ -142,6 +142,7 @@ describe("CodexProviderAdapter", () => {
         messageId: "message_1",
         userMessage: "Hello",
         contextMessages: [],
+        tools: [],
       }),
     );
     const events = await Effect.runPromise(Stream.runCollect(stream));

@@ -30,6 +30,8 @@ const makeThread = (
   resolutionState: "open",
   runtimeState: "idle",
   messages: [],
+  toolActivities: [],
+  pendingToolApproval: null,
   activeTurnId: null,
   latestSequence: 1,
   lastError: null,

@@ -1,5 +1,8 @@
 // Exercises the orchestrator across create, send, replay, retry, and interrupt flows.
 
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { Cause, Effect, Exit, Option, Stream } from "effect";
 
 import {
@@ -16,16 +19,37 @@ import type {
   ProviderAdapter,
   ProviderSessionHandle,
 } from "../providers/providerTypes";
+import { PathPresentationPolicy } from "../tools/pathPresentationPolicy";
+import { ToolExecutor } from "../tools/toolExecutor";
+import { WebContentService } from "../tools/webContentService";
+import { WorkspaceAccessService } from "../tools/workspaceAccessService";
+import { WorkspacePathPolicy } from "../tools/workspacePathPolicy";
 import { ProviderRegistry } from "./providerRegistry";
 import { ReplayService } from "./replayService";
 import { ThreadOrchestrator } from "./threadOrchestrator";
 
 const run = <A, E>(effect: Effect.Effect<A, E>) => Effect.runPromise(effect);
 
-const createTestContext = (adapter: FakeProviderAdapter) => {
+const createToolServices = (workspaceRoot = process.cwd()) => {
+  const workspaceAccess = new WorkspaceAccessService({
+    pathPolicy: new WorkspacePathPolicy(workspaceRoot),
+    presentationPolicy: new PathPresentationPolicy("workspace-relative"),
+  });
+  return {
+    toolExecutor: new ToolExecutor(),
+    workspaceAccess,
+    webContent: new WebContentService(),
+  };
+};
+
+const createTestContext = (
+  adapter: FakeProviderAdapter,
+  options: { readonly workspaceRoot?: string } = {},
+) => {
   const database = createDatabase();
   const publishedEvents: string[] = [];
   const threadRepository = new ThreadRepository(database);
+  const toolServices = createToolServices(options.workspaceRoot);
 
   return {
     orchestrator: new ThreadOrchestrator({
@@ -41,6 +65,7 @@ const createTestContext = (adapter: FakeProviderAdapter) => {
       runtimeState: createRuntimeState(),
       clock: createClock(),
       idGenerator: createIdGenerator(),
+      ...toolServices,
     }),
     replayService: new ReplayService({
       eventStore: new EventStore(database),
@@ -51,9 +76,13 @@ const createTestContext = (adapter: FakeProviderAdapter) => {
   };
 };
 
-const createProviderContext = (adapter: ProviderAdapter) => {
+const createProviderContext = (
+  adapter: ProviderAdapter,
+  options: { readonly workspaceRoot?: string } = {},
+) => {
   const database = createDatabase();
   const threadRepository = new ThreadRepository(database);
+  const toolServices = createToolServices(options.workspaceRoot);
 
   return {
     orchestrator: new ThreadOrchestrator({
@@ -67,6 +96,7 @@ const createProviderContext = (adapter: ProviderAdapter) => {
       runtimeState: createRuntimeState(),
       clock: createClock(),
       idGenerator: createIdGenerator(),
+      ...toolServices,
     }),
   };
 };
@@ -297,6 +327,7 @@ describe("ThreadOrchestrator", () => {
                 },
               ]),
             ),
+          submitToolResult: () => Effect.succeed(Stream.empty),
           interruptTurn: () => Effect.void,
           dispose: () => Effect.void,
         } as unknown as ProviderSessionHandle),
@@ -306,6 +337,7 @@ describe("ThreadOrchestrator", () => {
           providerSessionRef: null,
           providerThreadRef: null,
           startTurn: () => Effect.die("unused"),
+          submitToolResult: () => Effect.succeed(Stream.empty),
           interruptTurn: () => Effect.void,
           dispose: () => Effect.void,
         } as unknown as ProviderSessionHandle),
@@ -323,5 +355,74 @@ describe("ThreadOrchestrator", () => {
 
     expect(result.runtimeState).toBe("failed");
     expect(result.lastError).toBe("boom");
+  });
+
+  it("executes a tool call and persists tool activity plus diff preview", async () => {
+    const workspaceRoot = mkdtempSync(join(tmpdir(), "magick-tools-"));
+    writeFileSync(join(workspaceRoot, "notes.md"), "hello\nworld\n", "utf8");
+    const adapter = new FakeProviderAdapter({
+      mode: "stateful",
+      responder: () => ({
+        toolName: "apply_patch",
+        input: {
+          path: "notes.md",
+          patches: [{ find: "world", replace: "magick" }],
+        },
+        onResult: (output) => `Tool finished.\n${output}`,
+      }),
+    });
+    const { orchestrator } = createTestContext(adapter, { workspaceRoot });
+
+    const thread = await orchestrator.createThread({
+      workspaceId: "workspace_1",
+      providerKey: adapter.key,
+    });
+
+    const updatedThread = await run(
+      orchestrator.sendMessage(thread.threadId, "Patch the note"),
+    );
+
+    expect(updatedThread.toolActivities).toHaveLength(1);
+    expect(updatedThread.toolActivities[0]).toMatchObject({
+      toolName: "apply_patch",
+      status: "completed",
+      path: "notes.md",
+    });
+    expect(updatedThread.toolActivities[0]?.diff?.hunks[0]?.lines).toContain(
+      "-world",
+    );
+    expect(updatedThread.messages.at(-1)?.content).toContain("Tool finished");
+  });
+
+  it("marks tool activity as failed when tool execution errors", async () => {
+    const workspaceRoot = mkdtempSync(join(tmpdir(), "magick-tools-"));
+    writeFileSync(join(workspaceRoot, "notes.md"), "hello\nworld\n", "utf8");
+    const adapter = new FakeProviderAdapter({
+      key: "fake-tools-regression",
+      mode: "stateful",
+      responder: () => ({
+        toolName: "read",
+        input: { path: "missing.md" },
+        onResult: () => "done",
+      }),
+    });
+    const { orchestrator } = createTestContext(adapter, { workspaceRoot });
+
+    const thread = await orchestrator.createThread({
+      workspaceId: "workspace_1",
+      providerKey: adapter.key,
+    });
+
+    const updatedThread = await run(
+      orchestrator.sendMessage(thread.threadId, "Read a missing file"),
+    );
+
+    expect(updatedThread.runtimeState).toBe("idle");
+    expect(updatedThread.toolActivities[0]).toMatchObject({
+      toolName: "read",
+      status: "failed",
+      error: expect.stringContaining("missing.md"),
+    });
+    expect(updatedThread.toolActivities[0]?.error).not.toContain(workspaceRoot);
   });
 });

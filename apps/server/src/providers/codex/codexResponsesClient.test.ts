@@ -69,7 +69,9 @@ describe("CodexResponsesClient", () => {
     const request = JSON.parse(
       String(fetchMock.mock.calls[0]?.[1]?.body ?? "{}"),
     );
-    expect(request.instructions).toContain("You are Codex, based on GPT-5");
+    expect(request.instructions).toContain(
+      "You are Magick's assistant for research, learning, and document work",
+    );
     expect(request.instructions).toContain("always use dollar-delimited LaTeX");
     expect(request.store).toBe(false);
     expect(request.input[0].content[0].type).toBe("input_text");
@@ -293,6 +295,131 @@ describe("CodexResponsesClient", () => {
     expect(Array.from(events)).toEqual([
       { type: "output.delta", delta: "Nested delta" },
       { type: "output.completed" },
+    ]);
+  });
+
+  it("parses function-call output items into tool request events", async () => {
+    const authRepository = {
+      get: vi.fn().mockReturnValue({
+        providerKey: "codex",
+        authMode: "chatgpt",
+        accessToken: "access",
+        refreshToken: "refresh",
+        expiresAt: Date.now() + 120_000,
+        accountId: null,
+        email: "user@example.com",
+        planType: null,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      }),
+      upsert: vi.fn(),
+      delete: vi.fn(),
+    };
+
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(
+          'data: {"type":"response.output_item.done","item":{"type":"function_call","call_id":"call_1","name":"read","arguments":"{\\"path\\":\\"notes.md\\"}"}}\n\n' +
+            'data: {"type":"response.completed"}\n\n',
+          { status: 200, headers: { "Content-Type": "text/event-stream" } },
+        ),
+      );
+
+    const client = new CodexResponsesClient({
+      authRepository: authRepository as never,
+      authClient: { refreshAccessToken: vi.fn() } as unknown as CodexAuthClient,
+      fetch: fetchMock as never,
+    });
+
+    const events = await Effect.runPromise(
+      Stream.runCollect(
+        client.streamResponse({
+          messages: [{ role: "user", content: "Hello" }],
+        }),
+      ),
+    );
+
+    expect(Array.from(events)).toEqual([
+      {
+        type: "tool.call.requested",
+        toolCallId: "call_1",
+        toolName: "read",
+        input: { path: "notes.md" },
+      },
+      { type: "output.completed" },
+    ]);
+  });
+
+  it("serializes tools and function_call_output continuation payloads", async () => {
+    const authRepository = {
+      get: vi.fn().mockReturnValue({
+        providerKey: "codex",
+        authMode: "chatgpt",
+        accessToken: "access",
+        refreshToken: "refresh",
+        expiresAt: Date.now() + 120_000,
+        accountId: null,
+        email: "user@example.com",
+        planType: null,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      }),
+      upsert: vi.fn(),
+      delete: vi.fn(),
+    };
+
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response("data: [DONE]\n\n", {
+        status: 200,
+        headers: { "Content-Type": "text/event-stream" },
+      }),
+    );
+
+    const client = new CodexResponsesClient({
+      authRepository: authRepository as never,
+      authClient: { refreshAccessToken: vi.fn() } as unknown as CodexAuthClient,
+      fetch: fetchMock as never,
+    });
+
+    await Effect.runPromise(
+      Stream.runCollect(
+        client.streamResponse({
+          messages: [
+            {
+              type: "function_call_output",
+              callId: "call_1",
+              output: "done",
+            },
+          ],
+          tools: [
+            {
+              name: "read",
+              description: "Read a file",
+              inputSchema: { type: "object" },
+            },
+          ],
+        }),
+      ),
+    );
+
+    const request = JSON.parse(
+      String(fetchMock.mock.calls[0]?.[1]?.body ?? "{}"),
+    );
+    expect(request.tools).toEqual([
+      {
+        type: "function",
+        name: "read",
+        description: "Read a file",
+        parameters: { type: "object" },
+      },
+    ]);
+    expect(request.input).toEqual([
+      {
+        type: "function_call_output",
+        call_id: "call_1",
+        output: "done",
+      },
     ]);
   });
 

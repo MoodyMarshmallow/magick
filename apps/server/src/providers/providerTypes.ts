@@ -33,6 +33,20 @@ export interface StartTurnInput {
   readonly messageId: string;
   readonly userMessage: string;
   readonly contextMessages: readonly ConversationContextMessage[];
+  readonly tools: readonly ProviderToolDefinition[];
+}
+
+export interface ProviderToolDefinition {
+  readonly name: string;
+  readonly description: string;
+  readonly inputSchema: Record<string, unknown>;
+}
+
+export interface SubmitToolResultInput {
+  readonly turnId: string;
+  readonly toolCallId: string;
+  readonly toolName: string;
+  readonly output: string;
 }
 
 export interface InterruptTurnInput {
@@ -51,6 +65,13 @@ export type ProviderEvent =
       readonly type: "output.completed";
       readonly turnId: string;
       readonly messageId: string;
+    }
+  | {
+      readonly type: "tool.call.requested";
+      readonly turnId: string;
+      readonly toolCallId: string;
+      readonly toolName: string;
+      readonly input: unknown;
     }
   | {
       readonly type: "turn.failed";
@@ -79,6 +100,12 @@ export interface ProviderSessionHandle {
   readonly interruptTurn: (
     input: InterruptTurnInput,
   ) => Effect.Effect<void, ProviderFailureError>;
+  readonly submitToolResult: (
+    input: SubmitToolResultInput,
+  ) => Effect.Effect<
+    Stream.Stream<ProviderEvent, ProviderFailureError>,
+    ProviderFailureError
+  >;
   readonly dispose: () => Effect.Effect<void>;
 }
 

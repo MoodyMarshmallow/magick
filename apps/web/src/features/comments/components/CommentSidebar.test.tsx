@@ -27,6 +27,8 @@ const threads: readonly CommentThread[] = [
         status: "complete",
       },
     ],
+    toolActivities: [],
+    pendingToolApproval: null,
   },
   {
     threadId: "thread_2",
@@ -35,6 +37,8 @@ const threads: readonly CommentThread[] = [
     runtimeState: "failed",
     updatedAt: "2026-04-02T10:01:00.000Z",
     messages: [],
+    toolActivities: [],
+    pendingToolApproval: null,
   },
 ];
 
@@ -267,6 +271,8 @@ describe("CommentSidebar", () => {
             status: "complete",
           },
         ],
+        toolActivities: [],
+        pendingToolApproval: null,
       },
     ];
 
@@ -285,5 +291,68 @@ describe("CommentSidebar", () => {
       screen.getByRole("link", { name: "link" }).getAttribute("href"),
     ).toBe("https://example.com");
     expect(container.querySelector(".katex")).toBeTruthy();
+  });
+
+  it("renders tool activity and inline diffs inside the active thread", () => {
+    const toolThreads: readonly CommentThread[] = [
+      {
+        threadId: "thread_tool",
+        title: "Tool chat",
+        status: "open",
+        runtimeState: "idle",
+        updatedAt: "2026-04-02T10:00:00.000Z",
+        messages: [],
+        toolActivities: [
+          {
+            toolCallId: "tool_1",
+            toolName: "apply_patch",
+            title: "Patched notes.md",
+            status: "completed",
+            argsPreview: '{"path":"notes.md"}',
+            resultPreview: null,
+            path: "notes.md",
+            url: null,
+            diff: {
+              kind: "updated",
+              path: "notes.md",
+              truncated: false,
+              hunks: [
+                {
+                  oldStart: 1,
+                  oldLines: 1,
+                  newStart: 1,
+                  newLines: 1,
+                  lines: ["-world", "+magick"],
+                },
+              ],
+            },
+            error: null,
+            createdAt: "2026-04-02T10:00:00.000Z",
+            updatedAt: "2026-04-02T10:00:01.000Z",
+          },
+        ],
+        pendingToolApproval: null,
+      },
+    ];
+
+    render(
+      <CommentSidebar
+        {...baseProps}
+        activeThreadId="thread_tool"
+        threads={toolThreads}
+      />,
+    );
+
+    fireEvent.click(screen.getByText("Details"));
+
+    expect(screen.getByText("Patched notes.md")).toBeTruthy();
+    const diffBlock = screen.getByText(
+      (content) =>
+        content.includes("--- notes.md") &&
+        content.includes("+++ notes.md") &&
+        content.includes("-world") &&
+        content.includes("+magick"),
+    );
+    expect(diffBlock).toBeTruthy();
   });
 });

@@ -1,6 +1,7 @@
 import { mkdirSync } from "node:fs";
 import type { Server } from "node:http";
 import { dirname, join } from "node:path";
+import { resolveLocalWorkspaceDir } from "../../../packages/shared/src/localWorkspaceNode";
 
 import { ProviderAuthService } from "./application/providerAuthService";
 import { ProviderRegistry } from "./application/providerRegistry";
@@ -22,6 +23,11 @@ import {
   createCodexRuntimeFactory,
 } from "./providers/codex/codexProviderAdapter";
 import { FakeProviderAdapter } from "./providers/fake/fakeProviderAdapter";
+import { PathPresentationPolicy } from "./tools/pathPresentationPolicy";
+import { ToolExecutor } from "./tools/toolExecutor";
+import { WebContentService } from "./tools/webContentService";
+import { WorkspaceAccessService } from "./tools/workspaceAccessService";
+import { WorkspacePathPolicy } from "./tools/workspacePathPolicy";
 import { ConnectionRegistry } from "./transport/connectionRegistry";
 import { WebSocketCommandServer } from "./transport/wsServer";
 
@@ -37,6 +43,7 @@ export interface BackendServices {
 
 export interface BackendServiceOptions {
   readonly databasePath?: string;
+  readonly workspaceRoot?: string;
 }
 
 const defaultDatabasePath = (): string => {
@@ -49,7 +56,10 @@ export const createBackendServices = (
   options: BackendServiceOptions = {},
 ): BackendServices => {
   const databasePath = options.databasePath ?? defaultDatabasePath();
+  const workspaceRoot =
+    options.workspaceRoot ?? resolveLocalWorkspaceDir({ env: process.env });
   mkdirSync(dirname(databasePath), { recursive: true });
+  mkdirSync(workspaceRoot, { recursive: true });
 
   const database = createDatabase(databasePath);
   const connections = new ConnectionRegistry();
@@ -61,6 +71,12 @@ export const createBackendServices = (
   const providerAuthRepository = new ProviderAuthRepositoryClient(database);
   const threadRepository = new ThreadRepository(database);
   const providerSessionRepository = new ProviderSessionRepository(database);
+  const workspaceAccess = new WorkspaceAccessService({
+    pathPolicy: new WorkspacePathPolicy(workspaceRoot),
+    presentationPolicy: new PathPresentationPolicy("workspace-relative"),
+  });
+  const webContent = new WebContentService();
+  const toolExecutor = new ToolExecutor();
   const providerRegistry = new ProviderRegistry([
     new CodexProviderAdapter(
       createCodexRuntimeFactory({
@@ -68,6 +84,43 @@ export const createBackendServices = (
       }),
     ),
     new FakeProviderAdapter({ mode: "stateful" }),
+    new FakeProviderAdapter({
+      key: "fake-tools",
+      mode: "stateful",
+      responder: ({ userMessage }) => {
+        const normalizedMessage = userMessage.toLowerCase();
+        if (normalizedMessage.includes("patch")) {
+          return {
+            toolName: "apply_patch",
+            input: {
+              path: "notes.md",
+              patches: [{ find: "world", replace: "magick" }],
+            },
+            onResult: (output) => `Patched workspace note.\n${output}`,
+          };
+        }
+        if (normalizedMessage.includes("read missing")) {
+          return {
+            toolName: "read",
+            input: { path: "missing.md" },
+            onResult: (output) => `Read attempt finished.\n${output}`,
+          };
+        }
+        if (normalizedMessage.includes("fetch fail")) {
+          return {
+            toolName: "fetch",
+            input: { url: "http://127.0.0.1:9/unreachable" },
+            onResult: (output) => `Fetch attempt finished.\n${output}`,
+          };
+        }
+
+        return {
+          toolName: "read",
+          input: { path: "notes.md" },
+          onResult: (output) => `Read workspace note.\n${output}`,
+        };
+      },
+    }),
     new FakeProviderAdapter({ key: "fake-stateless", mode: "stateless" }),
   ]);
 
@@ -101,6 +154,9 @@ export const createBackendServices = (
     runtimeState,
     clock,
     idGenerator,
+    toolExecutor,
+    workspaceAccess,
+    webContent,
   });
 
   return {

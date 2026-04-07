@@ -2,7 +2,56 @@
 
 import type { ProviderKey, ResumeStrategy } from "./provider";
 
-export type ThreadRuntimeState = "idle" | "running" | "interrupted" | "failed";
+export type ThreadRuntimeState =
+  | "idle"
+  | "running"
+  | "awaiting_approval"
+  | "interrupted"
+  | "failed";
+export type ToolActivityStatus =
+  | "requested"
+  | "running"
+  | "completed"
+  | "failed"
+  | "awaiting_approval";
+
+export interface FileDiffHunk {
+  readonly oldStart: number;
+  readonly oldLines: number;
+  readonly newStart: number;
+  readonly newLines: number;
+  readonly lines: readonly string[];
+}
+
+export interface FileDiffPreview {
+  readonly kind: "created" | "updated";
+  readonly path: string;
+  readonly hunks: readonly FileDiffHunk[];
+  readonly truncated: boolean;
+}
+
+export interface ToolActivityView {
+  readonly toolCallId: string;
+  readonly toolName: string;
+  readonly title: string;
+  readonly status: ToolActivityStatus;
+  readonly argsPreview: string | null;
+  readonly resultPreview: string | null;
+  readonly path: string | null;
+  readonly url: string | null;
+  readonly diff: FileDiffPreview | null;
+  readonly error: string | null;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
+export interface ToolApprovalView {
+  readonly toolCallId: string;
+  readonly toolName: string;
+  readonly path: string | null;
+  readonly reason: string;
+  readonly requestedAt: string;
+}
 
 export type ThreadResolutionState = "open" | "resolved";
 
@@ -34,6 +83,8 @@ export interface ThreadViewModel {
   readonly resolutionState: ThreadResolutionState;
   readonly runtimeState: ThreadRuntimeState;
   readonly messages: readonly TranscriptMessage[];
+  readonly toolActivities: readonly ToolActivityView[];
+  readonly pendingToolApproval: ToolApprovalView | null;
   readonly activeTurnId: string | null;
   readonly latestSequence: number;
   readonly lastError: string | null;
@@ -89,6 +140,56 @@ export type DomainEvent =
   | EventBase<"turn.completed", { turnId: string; messageId: string }>
   | EventBase<"turn.interrupted", { turnId: string; reason: string }>
   | EventBase<"turn.failed", { turnId: string; error: string }>
+  | EventBase<
+      "tool.requested",
+      {
+        turnId: string;
+        toolCallId: string;
+        toolName: string;
+        title: string;
+        argsPreview: string | null;
+        path: string | null;
+        url: string | null;
+      }
+    >
+  | EventBase<"tool.started", { turnId: string; toolCallId: string }>
+  | EventBase<
+      "tool.completed",
+      {
+        turnId: string;
+        toolCallId: string;
+        resultPreview: string | null;
+        path: string | null;
+        url: string | null;
+        diff: FileDiffPreview | null;
+      }
+    >
+  | EventBase<
+      "tool.failed",
+      {
+        turnId: string;
+        toolCallId: string;
+        error: string;
+      }
+    >
+  | EventBase<
+      "tool.approval.requested",
+      {
+        turnId: string;
+        toolCallId: string;
+        toolName: string;
+        path: string | null;
+        reason: string;
+      }
+    >
+  | EventBase<
+      "tool.approval.resolved",
+      {
+        turnId: string;
+        toolCallId: string;
+        decision: "approved" | "rejected";
+      }
+    >
   | EventBase<"thread.resolved", Record<string, never>>
   | EventBase<"thread.reopened", Record<string, never>>;
 
@@ -144,6 +245,14 @@ export type ClientCommand =
   | {
       readonly type: "thread.resume";
       readonly payload: { threadId: string; afterSequence?: number };
+    }
+  | {
+      readonly type: "tool.approval.respond";
+      readonly payload: {
+        threadId: string;
+        toolCallId: string;
+        decision: "approved" | "rejected";
+      };
     }
   | {
       readonly type: "provider.auth.read";

@@ -11,7 +11,7 @@ import type { CodexAuthClient } from "./codexAuthClient";
 const CODEX_API_ENDPOINT = "https://chatgpt.com/backend-api/codex/responses";
 const REFRESH_SAFETY_MARGIN_MS = 60_000;
 const CODEX_SYSTEM_PROMPT =
-  "You are Codex, based on GPT-5. You are running as a coding agent in the Codex CLI on a user's computer. When writing math in markdown, always use dollar-delimited LaTeX: `$...$` for inline math and `$$...$$` for display math. Do not use `\\(...\\)` or `\\[...\\]` delimiters.";
+  "You are Magick's assistant for research, learning, and document work inside the user's workspace. Use tools sparingly, keep file paths relative to the workspace root, and present concise, provenance-aware results. When writing math in markdown, always use dollar-delimited LaTeX: `$...$` for inline math and `$$...$$` for display math. Do not use `\\(...\\)` or `\\[...\\]` delimiters.";
 
 export interface CodexResponsesClientOptions {
   readonly fetch?: typeof fetch;
@@ -24,7 +24,30 @@ export interface CodexResponsesClientOptions {
 type CodexStreamEvent =
   | { readonly type: "output.delta"; readonly delta: string }
   | { readonly type: "output.completed" }
+  | {
+      readonly type: "tool.call.requested";
+      readonly toolCallId: string;
+      readonly toolName: string;
+      readonly input: unknown;
+    }
   | { readonly type: "turn.failed"; readonly error: string };
+
+interface CodexConversationMessage {
+  readonly role: "user" | "assistant";
+  readonly content: string;
+}
+
+interface CodexToolResultMessage {
+  readonly type: "function_call_output";
+  readonly callId: string;
+  readonly output: string;
+}
+
+interface CodexToolDefinition {
+  readonly name: string;
+  readonly description: string;
+  readonly inputSchema: Record<string, unknown>;
+}
 
 type SseMessage = {
   readonly event: string | null;
@@ -193,7 +216,6 @@ const parseCodexStreamMessage = (
     case "response.created":
     case "response.in_progress":
     case "response.output_item.added":
-    case "response.output_item.done":
     case "response.content_part.added":
     case "response.content_part.done":
       return [];
@@ -205,6 +227,34 @@ const parseCodexStreamMessage = (
     }
     case "response.completed":
       return [{ type: "output.completed" }];
+    case "response.output_item.done": {
+      const item =
+        typeof parsed.item === "object" && parsed.item !== null
+          ? (parsed.item as Record<string, unknown>)
+          : null;
+      if (item?.type !== "function_call") {
+        return [];
+      }
+
+      const rawArguments =
+        typeof item.arguments === "string" ? item.arguments : "{}";
+      let input: unknown = {};
+      try {
+        input = JSON.parse(rawArguments);
+      } catch {
+        input = { rawArguments };
+      }
+
+      return [
+        {
+          type: "tool.call.requested",
+          toolCallId:
+            extractString(item, ["call_id", "id"]) ?? crypto.randomUUID(),
+          toolName: extractString(item, ["name"]) ?? "unknown",
+          input,
+        },
+      ];
+    }
     case "response.text.done":
       return [];
     case "response.failed":
@@ -322,10 +372,11 @@ export class CodexResponsesClient {
   }
 
   streamResponse(input: {
-    readonly messages: readonly {
-      readonly role: string;
-      readonly content: string;
-    }[];
+    readonly messages: readonly (
+      | CodexConversationMessage
+      | CodexToolResultMessage
+    )[];
+    readonly tools?: readonly CodexToolDefinition[];
     readonly signal?: AbortSignal;
   }): Stream.Stream<CodexStreamEvent, ProviderFailureError> {
     const execute = this.ensureAuthenticated().pipe(
@@ -346,18 +397,35 @@ export class CodexResponsesClient {
                 stream: true,
                 store: false,
                 instructions: CODEX_SYSTEM_PROMPT,
-                input: input.messages.map((message) => ({
-                  role: message.role,
-                  content: [
-                    {
-                      type:
-                        message.role === "assistant"
-                          ? "output_text"
-                          : "input_text",
-                      text: message.content,
-                    },
-                  ],
-                })),
+                tools:
+                  input.tools?.map((tool) => ({
+                    type: "function",
+                    name: tool.name,
+                    description: tool.description,
+                    parameters: tool.inputSchema,
+                  })) ?? [],
+                input: input.messages.map((message) => {
+                  if ("type" in message) {
+                    return {
+                      type: "function_call_output",
+                      call_id: message.callId,
+                      output: message.output,
+                    };
+                  }
+
+                  return {
+                    role: message.role,
+                    content: [
+                      {
+                        type:
+                          message.role === "assistant"
+                            ? "output_text"
+                            : "input_text",
+                        text: message.content,
+                      },
+                    ],
+                  };
+                }),
               }),
               ...(input.signal ? { signal: input.signal } : {}),
             });

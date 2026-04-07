@@ -4,6 +4,7 @@ import type {
   DomainEvent,
   ThreadSummary,
   ThreadViewModel,
+  ToolActivityView,
   TranscriptMessage,
 } from "@magick/contracts/chat";
 
@@ -45,6 +46,8 @@ const cloneThread = (thread: ThreadViewModel): MutableThreadViewModel => {
     resolutionState: thread.resolutionState,
     runtimeState: thread.runtimeState,
     messages: [...thread.messages],
+    toolActivities: [...thread.toolActivities],
+    pendingToolApproval: thread.pendingToolApproval,
     activeTurnId: thread.activeTurnId,
     latestSequence: thread.latestSequence,
     lastError: thread.lastError,
@@ -53,6 +56,31 @@ const cloneThread = (thread: ThreadViewModel): MutableThreadViewModel => {
     latestActivityAt: thread.latestActivityAt,
     updatedAt: thread.updatedAt,
   };
+};
+
+const upsertToolActivity = (
+  toolActivities: readonly ToolActivityView[],
+  nextActivity: ToolActivityView,
+): readonly ToolActivityView[] => {
+  const existingIndex = toolActivities.findIndex(
+    (toolActivity) => toolActivity.toolCallId === nextActivity.toolCallId,
+  );
+  if (existingIndex === -1) {
+    return [...toolActivities, nextActivity];
+  }
+
+  const nextToolActivities = [...toolActivities];
+  nextToolActivities[existingIndex] = nextActivity;
+  return nextToolActivities;
+};
+
+const findToolActivity = (
+  state: ThreadViewModel,
+  toolCallId: string,
+): ToolActivityView | undefined => {
+  return state.toolActivities.find(
+    (toolActivity) => toolActivity.toolCallId === toolCallId,
+  );
 };
 
 export const projectThreadEvents = (
@@ -82,6 +110,8 @@ export const projectThreadEvents = (
         resolutionState: "open",
         runtimeState: "idle",
         messages: [],
+        toolActivities: [],
+        pendingToolApproval: null,
         activeTurnId: null,
         latestSequence: event.sequence,
         lastError: null,
@@ -146,6 +176,7 @@ export const projectThreadEvents = (
         break;
       case "turn.started":
         state.runtimeState = "running";
+        state.pendingToolApproval = null;
         state.activeTurnId = event.payload.turnId;
         state.latestSequence = event.sequence;
         state.latestActivityAt = event.occurredAt;
@@ -225,6 +256,122 @@ export const projectThreadEvents = (
         state.latestActivityAt = event.occurredAt;
         state.updatedAt = event.occurredAt;
         state.lastError = event.payload.error;
+        break;
+      }
+      case "tool.requested": {
+        state.toolActivities = upsertToolActivity(state.toolActivities, {
+          toolCallId: event.payload.toolCallId,
+          toolName: event.payload.toolName,
+          title: event.payload.title,
+          status: "requested",
+          argsPreview: event.payload.argsPreview,
+          resultPreview: null,
+          path: event.payload.path,
+          url: event.payload.url,
+          diff: null,
+          error: null,
+          createdAt: event.occurredAt,
+          updatedAt: event.occurredAt,
+        });
+        state.latestSequence = event.sequence;
+        state.latestActivityAt = event.occurredAt;
+        state.updatedAt = event.occurredAt;
+        break;
+      }
+      case "tool.started": {
+        const existing = findToolActivity(state, event.payload.toolCallId);
+        if (existing) {
+          state.toolActivities = upsertToolActivity(state.toolActivities, {
+            ...existing,
+            status: "running",
+            updatedAt: event.occurredAt,
+          });
+        }
+        state.latestSequence = event.sequence;
+        state.latestActivityAt = event.occurredAt;
+        state.updatedAt = event.occurredAt;
+        break;
+      }
+      case "tool.completed": {
+        const existing = findToolActivity(state, event.payload.toolCallId);
+        if (existing) {
+          state.toolActivities = upsertToolActivity(state.toolActivities, {
+            ...existing,
+            status: "completed",
+            resultPreview: event.payload.resultPreview,
+            path: event.payload.path ?? existing.path,
+            url: event.payload.url ?? existing.url,
+            diff: event.payload.diff,
+            updatedAt: event.occurredAt,
+          });
+        }
+        state.runtimeState = "running";
+        state.latestSequence = event.sequence;
+        state.latestActivityAt = event.occurredAt;
+        state.updatedAt = event.occurredAt;
+        break;
+      }
+      case "tool.failed": {
+        const existing = findToolActivity(state, event.payload.toolCallId);
+        if (existing) {
+          state.toolActivities = upsertToolActivity(state.toolActivities, {
+            ...existing,
+            status: "failed",
+            error: event.payload.error,
+            updatedAt: event.occurredAt,
+          });
+        }
+        state.latestSequence = event.sequence;
+        state.latestActivityAt = event.occurredAt;
+        state.updatedAt = event.occurredAt;
+        state.lastError = event.payload.error;
+        break;
+      }
+      case "tool.approval.requested": {
+        const existing = findToolActivity(state, event.payload.toolCallId);
+        if (existing) {
+          state.toolActivities = upsertToolActivity(state.toolActivities, {
+            ...existing,
+            status: "awaiting_approval",
+            updatedAt: event.occurredAt,
+          });
+        }
+        state.runtimeState = "awaiting_approval";
+        state.pendingToolApproval = {
+          toolCallId: event.payload.toolCallId,
+          toolName: event.payload.toolName,
+          path: event.payload.path,
+          reason: event.payload.reason,
+          requestedAt: event.occurredAt,
+        };
+        state.latestSequence = event.sequence;
+        state.latestActivityAt = event.occurredAt;
+        state.updatedAt = event.occurredAt;
+        break;
+      }
+      case "tool.approval.resolved": {
+        const existing = findToolActivity(state, event.payload.toolCallId);
+        if (existing) {
+          state.toolActivities = upsertToolActivity(state.toolActivities, {
+            ...existing,
+            status:
+              event.payload.decision === "approved" ? "running" : "failed",
+            error:
+              event.payload.decision === "approved"
+                ? existing.error
+                : "Tool execution was rejected.",
+            updatedAt: event.occurredAt,
+          });
+        }
+        state.runtimeState =
+          event.payload.decision === "approved" ? "running" : "failed";
+        state.pendingToolApproval = null;
+        state.latestSequence = event.sequence;
+        state.latestActivityAt = event.occurredAt;
+        state.updatedAt = event.occurredAt;
+        if (event.payload.decision === "rejected") {
+          state.lastError = "Tool execution was rejected.";
+        }
         break;
       }
     }

@@ -13,6 +13,7 @@ import type {
   ProviderSessionHandle,
   ResumeProviderSessionInput,
   StartTurnInput,
+  SubmitToolResultInput,
 } from "../providerTypes";
 import {
   CodexAuthClient,
@@ -77,6 +78,11 @@ class CodexSessionHandle implements ProviderSessionHandle {
               content: input.userMessage,
             },
           ],
+          tools: input.tools.map((tool) => ({
+            name: tool.name,
+            description: tool.description,
+            inputSchema: tool.inputSchema,
+          })),
           signal: this.#activeAbortController.signal,
         })
         .pipe(
@@ -95,6 +101,14 @@ class CodexSessionHandle implements ProviderSessionHandle {
                   turnId: input.turnId,
                   messageId: input.messageId,
                 };
+              case "tool.call.requested":
+                return {
+                  type: "tool.call.requested" as const,
+                  turnId: input.turnId,
+                  toolCallId: event.toolCallId,
+                  toolName: event.toolName,
+                  input: event.input,
+                };
               case "turn.failed":
                 return {
                   type: "turn.failed" as const,
@@ -111,6 +125,58 @@ class CodexSessionHandle implements ProviderSessionHandle {
           ),
         );
     });
+
+  readonly submitToolResult = (
+    input: SubmitToolResultInput,
+  ): Effect.Effect<
+    Stream.Stream<ProviderEvent, ProviderFailureError>,
+    ProviderFailureError
+  > =>
+    Effect.sync(() =>
+      this.#responsesClient
+        .streamResponse({
+          messages: [
+            {
+              type: "function_call_output",
+              callId: input.toolCallId,
+              output: input.output,
+            },
+          ],
+        })
+        .pipe(
+          Stream.map((event) => {
+            switch (event.type) {
+              case "output.delta":
+                return {
+                  type: "output.delta" as const,
+                  turnId: input.turnId,
+                  messageId: `${input.turnId}:assistant`,
+                  delta: event.delta,
+                };
+              case "output.completed":
+                return {
+                  type: "output.completed" as const,
+                  turnId: input.turnId,
+                  messageId: `${input.turnId}:assistant`,
+                };
+              case "tool.call.requested":
+                return {
+                  type: "tool.call.requested" as const,
+                  turnId: input.turnId,
+                  toolCallId: event.toolCallId,
+                  toolName: event.toolName,
+                  input: event.input,
+                };
+              case "turn.failed":
+                return {
+                  type: "turn.failed" as const,
+                  turnId: input.turnId,
+                  error: event.error,
+                };
+            }
+          }),
+        ),
+    );
 
   readonly interruptTurn = (
     input: InterruptTurnInput,

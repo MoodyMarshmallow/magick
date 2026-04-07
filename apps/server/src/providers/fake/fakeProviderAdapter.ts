@@ -11,15 +11,24 @@ import type {
   ProviderSessionHandle,
   ResumeProviderSessionInput,
   StartTurnInput,
+  SubmitToolResultInput,
 } from "../providerTypes";
 
 type FakeProviderMode = "stateful" | "stateless";
+
+export type FakeProviderResponse =
+  | string
+  | {
+      readonly toolName: string;
+      readonly input: Record<string, unknown>;
+      readonly onResult: (output: string) => FakeProviderResponse;
+    };
 
 export interface FakeProviderAdapterOptions {
   readonly key?: string;
   readonly mode: FakeProviderMode;
   readonly chunkDelayMs?: number;
-  readonly responder?: (input: StartTurnInput) => string;
+  readonly responder?: (input: StartTurnInput) => FakeProviderResponse;
 }
 
 class FakeProviderSession implements ProviderSessionHandle {
@@ -27,8 +36,16 @@ class FakeProviderSession implements ProviderSessionHandle {
   readonly providerSessionRef: string | null;
   readonly providerThreadRef: string | null;
   readonly #interruptedTurns = new Set<string>();
+  readonly #pendingToolContinuations = new Map<
+    string,
+    {
+      readonly toolCallId: string;
+      readonly toolName: string;
+      readonly onResult: (output: string) => FakeProviderResponse;
+    }
+  >();
   readonly #chunkDelayMs: number;
-  readonly #responder: (input: StartTurnInput) => string;
+  readonly #responder: (input: StartTurnInput) => FakeProviderResponse;
   readonly observedInputs: StartTurnInput[] = [];
 
   constructor(
@@ -36,7 +53,7 @@ class FakeProviderSession implements ProviderSessionHandle {
     providerSessionRef: string | null,
     providerThreadRef: string | null,
     chunkDelayMs: number,
-    responder: (input: StartTurnInput) => string,
+    responder: (input: StartTurnInput) => FakeProviderResponse,
   ) {
     this.sessionId = sessionId;
     this.providerSessionRef = providerSessionRef;
@@ -44,6 +61,79 @@ class FakeProviderSession implements ProviderSessionHandle {
     this.#chunkDelayMs = chunkDelayMs;
     this.#responder = responder;
   }
+
+  readonly #streamTextResponse = (
+    turnId: string,
+    messageId: string,
+    content: string,
+  ): Stream.Stream<ProviderEvent, ProviderFailureError> => {
+    const chunks = content.match(/.{1,8}/g) ?? [content];
+
+    const deltas = Stream.fromIterable(chunks).pipe(
+      Stream.mapEffect((chunk) =>
+        Effect.sleep(`${this.#chunkDelayMs} millis`).pipe(
+          Effect.zipRight(
+            Effect.sync(() => {
+              if (this.#interruptedTurns.has(turnId)) {
+                return null;
+              }
+
+              return {
+                type: "output.delta" as const,
+                turnId,
+                messageId,
+                delta: chunk,
+              } satisfies ProviderEvent;
+            }),
+          ),
+        ),
+      ),
+      Stream.filterMap((event) =>
+        event === null ? Option.none() : Option.some(event),
+      ),
+    );
+
+    const completed = Stream.unwrap(
+      Effect.sync(() => {
+        if (this.#interruptedTurns.has(turnId)) {
+          return Stream.empty;
+        }
+
+        return Stream.succeed({
+          type: "output.completed" as const,
+          turnId,
+          messageId,
+        } satisfies ProviderEvent);
+      }),
+    );
+
+    return Stream.concat(deltas, completed);
+  };
+
+  readonly #streamResponse = (
+    turnId: string,
+    messageId: string,
+    response: FakeProviderResponse,
+  ): Stream.Stream<ProviderEvent, ProviderFailureError> => {
+    if (typeof response === "string") {
+      return this.#streamTextResponse(turnId, messageId, response);
+    }
+
+    const toolCallId = `${turnId}:tool:${response.toolName}`;
+    this.#pendingToolContinuations.set(turnId, {
+      toolCallId,
+      toolName: response.toolName,
+      onResult: response.onResult,
+    });
+
+    return Stream.succeed({
+      type: "tool.call.requested" as const,
+      turnId,
+      toolCallId,
+      toolName: response.toolName,
+      input: response.input,
+    } satisfies ProviderEvent);
+  };
 
   readonly startTurn = (
     input: StartTurnInput,
@@ -53,48 +143,41 @@ class FakeProviderSession implements ProviderSessionHandle {
   > =>
     Effect.sync(() => {
       this.observedInputs.push(input);
-      const content = this.#responder(input);
-      const chunks = content.match(/.{1,8}/g) ?? [content];
-
-      const deltas = Stream.fromIterable(chunks).pipe(
-        Stream.mapEffect((chunk) =>
-          Effect.sleep(`${this.#chunkDelayMs} millis`).pipe(
-            Effect.zipRight(
-              Effect.sync(() => {
-                if (this.#interruptedTurns.has(input.turnId)) {
-                  return null;
-                }
-
-                return {
-                  type: "output.delta" as const,
-                  turnId: input.turnId,
-                  messageId: input.messageId,
-                  delta: chunk,
-                } satisfies ProviderEvent;
-              }),
-            ),
-          ),
-        ),
-        Stream.filterMap((event) =>
-          event === null ? Option.none() : Option.some(event),
-        ),
+      return this.#streamResponse(
+        input.turnId,
+        input.messageId,
+        this.#responder(input),
       );
+    });
 
-      const completed = Stream.unwrap(
-        Effect.sync(() => {
-          if (this.#interruptedTurns.has(input.turnId)) {
-            return Stream.empty;
-          }
-
-          return Stream.succeed({
-            type: "output.completed" as const,
-            turnId: input.turnId,
-            messageId: input.messageId,
-          } satisfies ProviderEvent);
-        }),
+  readonly submitToolResult = (
+    input: SubmitToolResultInput,
+  ): Effect.Effect<
+    Stream.Stream<ProviderEvent, ProviderFailureError>,
+    ProviderFailureError
+  > =>
+    Effect.sync(() => {
+      const pendingContinuation = this.#pendingToolContinuations.get(
+        input.turnId,
       );
+      if (
+        !pendingContinuation ||
+        pendingContinuation.toolCallId !== input.toolCallId ||
+        pendingContinuation.toolName !== input.toolName
+      ) {
+        return Stream.succeed({
+          type: "turn.failed" as const,
+          turnId: input.turnId,
+          error: `Missing pending tool continuation for '${input.toolCallId}'.`,
+        } satisfies ProviderEvent);
+      }
 
-      return Stream.concat(deltas, completed);
+      this.#pendingToolContinuations.delete(input.turnId);
+      return this.#streamResponse(
+        input.turnId,
+        `${input.turnId}:assistant`,
+        pendingContinuation.onResult(input.output),
+      );
     });
 
   readonly interruptTurn = (
@@ -111,7 +194,7 @@ export class FakeProviderAdapter implements ProviderAdapter {
   readonly key: string;
   readonly #mode: FakeProviderMode;
   readonly #chunkDelayMs: number;
-  readonly #responder: (input: StartTurnInput) => string;
+  readonly #responder: (input: StartTurnInput) => FakeProviderResponse;
   readonly sessions = new Map<string, FakeProviderSession>();
 
   constructor(options: FakeProviderAdapterOptions) {
@@ -128,7 +211,7 @@ export class FakeProviderAdapter implements ProviderAdapter {
     supportsNativeResume: this.#mode === "stateful",
     supportsInterrupt: true,
     supportsAttachments: false,
-    supportsToolCalls: false,
+    supportsToolCalls: true,
     supportsApprovals: false,
     supportsServerSideSessions: this.#mode === "stateful",
   });

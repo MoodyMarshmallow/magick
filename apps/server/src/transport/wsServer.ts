@@ -400,6 +400,11 @@ export class WebSocketCommandServer {
               },
             },
           } satisfies CommandResponseEnvelope;
+        case "tool.approval.respond":
+          throw new InvalidStateError({
+            code: "tool_approval_not_supported",
+            detail: "Interactive tool approvals are not wired yet.",
+          });
         case "thread.resume": {
           connections.subscribeThread(
             connectionId,
@@ -489,6 +494,11 @@ export class WebSocketCommandServer {
             },
           } satisfies CommandResponseEnvelope;
         }
+        default:
+          throw new InvalidStateError({
+            code: "unsupported_command",
+            detail: `Unsupported command '${(envelope.command as { type: string }).type}'.`,
+          });
       }
     } catch (error) {
       const backendError = toBackendError(error);

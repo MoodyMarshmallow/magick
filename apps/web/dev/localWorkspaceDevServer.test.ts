@@ -1,63 +1,38 @@
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import {
   createLocalWorkspaceDevPlugin,
-  ensureSeedWorkspaceFiles,
+  ensureWorkspaceDirectory,
 } from "./localWorkspaceDevServer";
 
 describe("localWorkspaceDevServer", () => {
-  it("seeds example workspace files when the workspace is empty", () => {
+  it("creates an empty workspace directory when the workspace is empty", () => {
     const workspaceDir = mkdtempSync(join(tmpdir(), "magick-web-workspace-"));
 
     try {
-      ensureSeedWorkspaceFiles(workspaceDir);
+      ensureWorkspaceDirectory(workspaceDir);
 
-      expect(
-        existsSync(
-          join(workspaceDir, "notes", "research", "layout-observations.md"),
-        ),
-      ).toBe(true);
-      expect(
-        readFileSync(
-          join(workspaceDir, "notes", "archive", "recovery-notes.md"),
-          "utf8",
-        ),
-      ).toContain("local-first client");
+      expect(existsSync(workspaceDir)).toBe(true);
+      expect(readdirSync(workspaceDir)).toEqual([]);
     } finally {
       rmSync(workspaceDir, { force: true, recursive: true });
     }
   });
 
-  it("does not overwrite an existing supported workspace file", () => {
+  it("does not populate files when the workspace already exists", () => {
     const workspaceDir = mkdtempSync(join(tmpdir(), "magick-web-workspace-"));
 
     try {
-      const filePath = join(workspaceDir, "notes", "studio", "custom.md");
-      mkdirSync(dirname(filePath), { recursive: true });
-      writeFileSync(filePath, "custom workspace file", "utf8");
+      ensureWorkspaceDirectory(workspaceDir);
 
-      ensureSeedWorkspaceFiles(workspaceDir);
-
-      expect(readFileSync(filePath, "utf8")).toBe("custom workspace file");
-      expect(
-        existsSync(
-          join(workspaceDir, "notes", "research", "layout-observations.md"),
-        ),
-      ).toBe(false);
+      expect(readdirSync(workspaceDir)).toEqual([]);
     } finally {
       rmSync(workspaceDir, { force: true, recursive: true });
     }
   });
 
-  it("does not seed files or start watching until the dev server is configured", () => {
+  it("does not create files or start watching until the dev server is configured", () => {
     const workspaceDir = mkdtempSync(join(tmpdir(), "magick-web-workspace-"));
     let watcherStarted = 0;
     let watcherStopped = 0;
@@ -74,7 +49,7 @@ describe("localWorkspaceDevServer", () => {
     });
 
     try {
-      expect(existsSync(join(workspaceDir, "notes"))).toBe(false);
+      expect(readdirSync(workspaceDir)).toEqual([]);
       expect(watcherStarted).toBe(0);
 
       const closeHandlers: Array<() => void> = [];
@@ -104,7 +79,7 @@ describe("localWorkspaceDevServer", () => {
         } as never,
       );
 
-      expect(existsSync(join(workspaceDir, "notes"))).toBe(true);
+      expect(readdirSync(workspaceDir)).toEqual([".magick"]);
       expect(watcherStarted).toBe(1);
 
       closeHandlers[0]?.();

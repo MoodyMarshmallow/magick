@@ -34,11 +34,60 @@ describe("FakeProviderAdapter", () => {
         messageId: "message_1",
         userMessage: "Hello",
         contextMessages: [],
+        tools: [],
       }),
     );
     const events = await Effect.runPromise(Stream.runCollect(stream));
 
     expect(Array.from(events).map((event) => event.type)).toContain(
+      "output.completed",
+    );
+  });
+
+  it("requests a tool and continues once the tool result is submitted", async () => {
+    const adapter = new FakeProviderAdapter({
+      mode: "stateful",
+      responder: () => ({
+        toolName: "read",
+        input: { path: "notes.md" },
+        onResult: (output) => `Result: ${output}`,
+      }),
+    });
+    const session = await Effect.runPromise(
+      adapter.createSession({
+        workspaceId: "workspace_1",
+        sessionId: "session_1",
+      }),
+    );
+
+    const startStream = await Effect.runPromise(
+      session.startTurn({
+        threadId: "thread_1",
+        turnId: "turn_1",
+        messageId: "message_1",
+        userMessage: "Hello",
+        contextMessages: [],
+        tools: [],
+      }),
+    );
+    const startEvents = await Effect.runPromise(Stream.runCollect(startStream));
+    expect(Array.from(startEvents)[0]).toMatchObject({
+      type: "tool.call.requested",
+      toolName: "read",
+    });
+
+    const continuation = await Effect.runPromise(
+      session.submitToolResult({
+        turnId: "turn_1",
+        toolCallId: "turn_1:tool:read",
+        toolName: "read",
+        output: "content",
+      }),
+    );
+    const continuationEvents = await Effect.runPromise(
+      Stream.runCollect(continuation),
+    );
+    expect(Array.from(continuationEvents).map((event) => event.type)).toContain(
       "output.completed",
     );
   });
