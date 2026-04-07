@@ -137,16 +137,22 @@ export class LocalWorkspaceService {
   }
 
   public getWorkspaceBootstrap(): LocalWorkspaceBootstrap {
+    const workspaceEntries = this.listWorkspaceEntries();
+
     return createWorkspaceBootstrap({
-      documents: this.listWorkspaceDocuments(),
+      documents: workspaceEntries.documents,
+      directories: workspaceEntries.directories,
       threads: this.toPublicThreads(),
       workspaceRoot: this.workspaceDir,
     });
   }
 
   public getFileWorkspaceBootstrap(): LocalWorkspaceFilesBootstrap {
+    const workspaceEntries = this.listWorkspaceEntries();
+
     return createWorkspaceFilesBootstrap({
-      documents: this.listWorkspaceDocuments(),
+      documents: workspaceEntries.documents,
+      directories: workspaceEntries.directories,
       workspaceRoot: this.workspaceDir,
     });
   }
@@ -401,20 +407,27 @@ export class LocalWorkspaceService {
     };
   }
 
-  private listWorkspaceDocuments(): readonly { readonly filePath: string }[] {
+  private listWorkspaceEntries(): {
+    readonly documents: readonly { readonly filePath: string }[];
+    readonly directories: readonly { readonly directoryPath: string }[];
+  } {
     const documents: { filePath: string }[] = [];
+    const directories: { directoryPath: string }[] = [];
     const visitDirectory = (directoryPath: string) => {
       const entries = readdirSync(directoryPath, { withFileTypes: true }).sort(
         (left, right) => left.name.localeCompare(right.name),
       );
 
       for (const entry of entries) {
+        const nextPath = join(directoryPath, entry.name);
+
         if (entry.isDirectory()) {
           if (ignoredDirectoryNames.has(entry.name)) {
             continue;
           }
 
-          visitDirectory(join(directoryPath, entry.name));
+          directories.push({ directoryPath: nextPath });
+          visitDirectory(nextPath);
           continue;
         }
 
@@ -422,7 +435,6 @@ export class LocalWorkspaceService {
           continue;
         }
 
-        const nextPath = join(directoryPath, entry.name);
         if (!supportedFileExtensions.has(extname(nextPath).toLowerCase())) {
           continue;
         }
@@ -434,7 +446,10 @@ export class LocalWorkspaceService {
     };
 
     visitDirectory(this.workspaceDir);
-    return documents;
+    return {
+      documents,
+      directories,
+    };
   }
 
   private resolveWorkspaceFile(filePath: string): string {

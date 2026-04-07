@@ -48,6 +48,17 @@ const sampleTree: readonly LocalWorkspaceTreeNode[] = [
   },
 ];
 
+const treeWithEmptyDirectory: readonly LocalWorkspaceTreeNode[] = [
+  ...sampleTree,
+  {
+    id: "directory:empty",
+    type: "directory",
+    name: "empty",
+    path: "empty",
+    children: [],
+  },
+];
+
 function FileTreeHarness() {
   const [activeFilePath, setActiveFilePath] = useState<string | null>(
     "codex/manifesto.md",
@@ -272,5 +283,26 @@ describe("FileTree", () => {
 
     expect(onCreateFile).toHaveBeenCalledWith("");
     expect(onCreateDirectory).toHaveBeenCalledWith("");
+  });
+
+  it("renders empty folders that are present in the workspace tree", () => {
+    render(
+      <FileTree
+        activeFilePath={null}
+        expandedIds={[]}
+        onExpandedIdsChange={() => undefined}
+        onCreateDirectory={async () => undefined}
+        onCreateFile={async () => undefined}
+        onDeleteDirectory={async () => undefined}
+        onDeleteFile={async () => undefined}
+        onOpenFile={() => undefined}
+        onRenameDirectory={async () => undefined}
+        onRenameFile={async () => undefined}
+        onStartDragFile={() => undefined}
+        tree={treeWithEmptyDirectory}
+      />,
+    );
+
+    expect(screen.getByRole("treeitem", { name: /empty/i })).toBeTruthy();
   });
 });

@@ -12,6 +12,10 @@ export interface LocalWorkspaceTreeDocument {
   readonly filePath: string;
 }
 
+export interface LocalWorkspaceTreeDirectory {
+  readonly directoryPath: string;
+}
+
 interface MutableDirectoryNode {
   readonly id: string;
   readonly name: string;
@@ -61,10 +65,48 @@ const toSortedTree = (
 
 export const createWorkspaceTree = (args: {
   documents: readonly LocalWorkspaceTreeDocument[];
+  directories?: readonly LocalWorkspaceTreeDirectory[];
   documentsDir: string;
 }): readonly LocalWorkspaceTreeNode[] => {
   const rootNodes: LocalWorkspaceTreeNode[] = [];
   const directories = new Map<string, MutableDirectoryNode>();
+
+  const ensureDirectory = (
+    directoryPath: string,
+  ): MutableDirectoryNode | null => {
+    const relativePath = toRelativeWorkspacePath(
+      args.documentsDir,
+      directoryPath,
+    );
+    const pathSegments = relativePath.split("/").filter(Boolean);
+    if (pathSegments.length === 0) {
+      return null;
+    }
+
+    let parentChildren = rootNodes;
+    let currentPath = "";
+    let currentDirectory: MutableDirectoryNode | null = null;
+
+    for (const segment of pathSegments) {
+      currentPath = currentPath ? `${currentPath}/${segment}` : segment;
+      let directory = directories.get(currentPath);
+
+      if (!directory) {
+        directory = createDirectoryNode(segment, currentPath);
+        directories.set(currentPath, directory);
+        parentChildren.push(directory);
+      }
+
+      currentDirectory = directory;
+      parentChildren = directory.children;
+    }
+
+    return currentDirectory;
+  };
+
+  for (const directory of args.directories ?? []) {
+    ensureDirectory(directory.directoryPath);
+  }
 
   for (const document of args.documents) {
     const relativePath = toRelativeWorkspacePath(
@@ -79,21 +121,13 @@ export const createWorkspaceTree = (args: {
     const fileName =
       pathSegments[pathSegments.length - 1] ?? basename(relativePath);
     const directorySegments = pathSegments.slice(0, -1);
-    let parentChildren = rootNodes;
-    let currentPath = "";
-
-    for (const segment of directorySegments) {
-      currentPath = currentPath ? `${currentPath}/${segment}` : segment;
-      let directory = directories.get(currentPath);
-
-      if (!directory) {
-        directory = createDirectoryNode(segment, currentPath);
-        directories.set(currentPath, directory);
-        parentChildren.push(directory);
-      }
-
-      parentChildren = directory.children;
-    }
+    const parentDirectoryPath = directorySegments.join("/");
+    const parentChildren = parentDirectoryPath
+      ? ((
+          directories.get(parentDirectoryPath) ??
+          ensureDirectory(`${args.documentsDir}/${parentDirectoryPath}`)
+        )?.children ?? rootNodes)
+      : rootNodes;
 
     const fileNode: LocalWorkspaceFileNode = {
       id: `file:${relativePath}`,
@@ -110,26 +144,38 @@ export const createWorkspaceTree = (args: {
 
 export const createWorkspaceBootstrap = (args: {
   documents: readonly LocalWorkspaceTreeDocument[];
+  directories?: readonly LocalWorkspaceTreeDirectory[];
   threads: readonly LocalWorkspaceThread[];
   workspaceRoot: string;
-}): LocalWorkspaceBootstrap => ({
-  tree: createWorkspaceTree({
+}): LocalWorkspaceBootstrap => {
+  const treeArgs = {
     documents: args.documents,
     documentsDir: args.workspaceRoot,
-  }),
-  threads: args.threads,
-});
+    ...(args.directories ? { directories: args.directories } : {}),
+  };
+
+  return {
+    tree: createWorkspaceTree(treeArgs),
+    threads: args.threads,
+  };
+};
 
 export const createWorkspaceFilesBootstrap = (args: {
   documents: readonly LocalWorkspaceTreeDocument[];
+  directories?: readonly LocalWorkspaceTreeDirectory[];
   workspaceRoot: string;
-}): LocalWorkspaceFilesBootstrap => ({
-  workspaceRoot: args.workspaceRoot,
-  tree: createWorkspaceTree({
+}): LocalWorkspaceFilesBootstrap => {
+  const treeArgs = {
     documents: args.documents,
     documentsDir: args.workspaceRoot,
-  }),
-});
+    ...(args.directories ? { directories: args.directories } : {}),
+  };
+
+  return {
+    workspaceRoot: args.workspaceRoot,
+    tree: createWorkspaceTree(treeArgs),
+  };
+};
 
 export const findFirstFilePathInTree = (
   tree: readonly LocalWorkspaceTreeNode[],

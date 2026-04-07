@@ -6,6 +6,14 @@ import {
 describe("localWorkspaceTree", () => {
   it("builds nested directories and file metadata from document paths", () => {
     const bootstrap = createWorkspaceBootstrap({
+      directories: [
+        {
+          directoryPath: "/tmp/workspace/empty",
+        },
+        {
+          directoryPath: "/tmp/workspace/notes/archive",
+        },
+      ],
       documents: [
         {
           filePath: "/tmp/workspace/codex/manifesto.md",
@@ -43,11 +51,25 @@ describe("localWorkspaceTree", () => {
         ],
       },
       {
+        id: "directory:empty",
+        type: "directory",
+        name: "empty",
+        path: "empty",
+        children: [],
+      },
+      {
         id: "directory:notes",
         type: "directory",
         name: "notes",
         path: "notes",
         children: [
+          {
+            id: "directory:notes/archive",
+            type: "directory",
+            name: "archive",
+            path: "notes/archive",
+            children: [],
+          },
           {
             id: "directory:notes/patterns",
             type: "directory",

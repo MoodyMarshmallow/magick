@@ -18,7 +18,9 @@ const createHarness = () => {
   const workspaceDir = join(root, "workspace");
 
   mkdirSync(join(workspaceDir, "notes", "patterns"), { recursive: true });
+  mkdirSync(join(workspaceDir, "notes", "archive"), { recursive: true });
   mkdirSync(join(workspaceDir, "codex"), { recursive: true });
+  mkdirSync(join(workspaceDir, "empty"), { recursive: true });
   mkdirSync(join(workspaceDir, "node_modules", "ignored"), { recursive: true });
 
   writeFileSync(
@@ -77,11 +79,25 @@ describe("LocalWorkspaceService", () => {
           ],
         },
         {
+          id: "directory:empty",
+          type: "directory",
+          name: "empty",
+          path: "empty",
+          children: [],
+        },
+        {
           id: "directory:notes",
           type: "directory",
           name: "notes",
           path: "notes",
           children: [
+            {
+              id: "directory:notes/archive",
+              type: "directory",
+              name: "archive",
+              path: "notes/archive",
+              children: [],
+            },
             {
               id: "directory:notes/patterns",
               type: "directory",
