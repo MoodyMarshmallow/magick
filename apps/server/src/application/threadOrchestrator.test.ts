@@ -158,6 +158,56 @@ describe("ThreadOrchestrator", () => {
     expect(lastInput?.userMessage).toBe("Second");
   });
 
+  it("rebuilds prior tool calls and tool results into the next user turn history", async () => {
+    const workspaceRoot = mkdtempSync(join(tmpdir(), "magick-tool-history-"));
+    writeFileSync(join(workspaceRoot, "notes.md"), "hello\nworld\n", "utf8");
+    const adapter = new FakeProviderAdapter({
+      mode: "stateful",
+      responder: ({ userMessage }) =>
+        userMessage === "First"
+          ? {
+              toolName: "read",
+              input: { path: "notes.md" },
+              onResult: (output) => `Tool saw: ${output}`,
+            }
+          : "Second reply",
+    });
+    const { orchestrator } = createTestContext(adapter, { workspaceRoot });
+
+    const thread = await orchestrator.createThread({
+      workspaceId: "workspace_1",
+      providerKey: adapter.key,
+    });
+
+    await run(orchestrator.sendMessage(thread.threadId, "First"));
+    await run(orchestrator.sendMessage(thread.threadId, "Second"));
+
+    const sessionRuntime = adapter.sessions.get(thread.providerSessionId);
+    expect(sessionRuntime?.observedInputs.at(-1)?.historyItems).toEqual([
+      {
+        type: "message",
+        role: "user",
+        content: "First",
+      },
+      {
+        type: "tool_call",
+        toolCallId: expect.any(String),
+        toolName: "read",
+        input: { path: "notes.md" },
+      },
+      {
+        type: "tool_result",
+        toolCallId: expect.any(String),
+        output: "hello\nworld\n",
+      },
+      {
+        type: "message",
+        role: "assistant",
+        content: "Tool saw: helloworld",
+      },
+    ]);
+  });
+
   it("interrupts an active turn and records an interrupted state", async () => {
     const adapter = new FakeProviderAdapter({
       mode: "stateful",

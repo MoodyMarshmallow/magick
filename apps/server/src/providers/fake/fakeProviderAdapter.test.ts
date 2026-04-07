@@ -34,6 +34,7 @@ describe("FakeProviderAdapter", () => {
         messageId: "message_1",
         userMessage: "Hello",
         contextMessages: [],
+        historyItems: [],
         tools: [],
       }),
     );
@@ -67,6 +68,7 @@ describe("FakeProviderAdapter", () => {
         messageId: "message_1",
         userMessage: "Hello",
         contextMessages: [],
+        historyItems: [],
         tools: [],
       }),
     );
@@ -82,6 +84,8 @@ describe("FakeProviderAdapter", () => {
         toolCallId: "turn_1:tool:read",
         toolName: "read",
         output: "content",
+        historyItems: [],
+        tools: [],
       }),
     );
     const continuationEvents = await Effect.runPromise(

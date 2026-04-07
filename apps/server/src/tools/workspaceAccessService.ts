@@ -8,6 +8,17 @@ import type { WorkspacePathPolicy } from "./workspacePathPolicy";
 
 const execFileAsync = promisify(execFile);
 
+type ExecFileResult = {
+  readonly stdout: string;
+  readonly stderr: string;
+};
+
+type ExecFileRunner = (
+  file: string,
+  args: readonly string[],
+  options: { readonly cwd: string },
+) => Promise<ExecFileResult>;
+
 export interface WorkspaceGrepMatch {
   readonly path: string;
   readonly line: number;
@@ -43,16 +54,40 @@ export class WorkspaceAccessError extends Error {
 }
 
 const globPatternToRegex = (pattern: string): RegExp => {
-  const escaped = pattern
-    .split("**")
-    .map((segment) => escapeRegex(segment).replace(/\\\*/g, "[^/]*"))
-    .join(".*");
-  return new RegExp(`^${escaped}$`);
+  let regex = "^";
+
+  for (let index = 0; index < pattern.length; index += 1) {
+    const char = pattern[index];
+    const nextChar = pattern[index + 1];
+    const thirdChar = pattern[index + 2];
+
+    if (char === "*" && nextChar === "*" && thirdChar === "/") {
+      regex += "(?:.*/)?";
+      index += 2;
+      continue;
+    }
+
+    if (char === "*" && nextChar === "*") {
+      regex += ".*";
+      index += 1;
+      continue;
+    }
+
+    if (char === "*") {
+      regex += "[^/]*";
+      continue;
+    }
+
+    regex += escapeRegex(char ?? "");
+  }
+
+  return new RegExp(`${regex}$`);
 };
 
 export class WorkspaceAccessService {
   readonly #pathPolicy: WorkspacePathPolicy;
   readonly #presentationPolicy: PathPresentationPolicy;
+  readonly #execFile: ExecFileRunner;
   readonly #ignoredListPatterns = [
     ".git/**",
     ".magick/**",
@@ -62,9 +97,11 @@ export class WorkspaceAccessService {
   constructor(args: {
     readonly pathPolicy: WorkspacePathPolicy;
     readonly presentationPolicy: PathPresentationPolicy;
+    readonly execFile?: ExecFileRunner;
   }) {
     this.#pathPolicy = args.pathPolicy;
     this.#presentationPolicy = args.presentationPolicy;
+    this.#execFile = args.execFile ?? execFileAsync;
   }
 
   get workspaceRoot(): string {
@@ -107,6 +144,8 @@ export class WorkspaceAccessService {
   }): Promise<WorkspaceListTreeResult> => {
     try {
       const searchPath = this.resolveDirectory(input.path ?? "");
+      const searchRootRelativePath =
+        toPosixPath(relative(this.workspaceRoot, searchPath)) || ".";
       const args = ["--files"];
       if (input.follow) {
         args.push("--follow");
@@ -125,10 +164,15 @@ export class WorkspaceAccessService {
       for (const ignorePattern of ignoreGlobs) {
         args.push(`--glob=!${ignorePattern}`);
       }
+      if (searchRootRelativePath !== ".") {
+        args.push(searchRootRelativePath);
+      }
 
       let stdout = "";
       try {
-        const result = await execFileAsync("rg", args, { cwd: searchPath });
+        const result = await this.#execFile("rg", args, {
+          cwd: this.workspaceRoot,
+        });
         stdout = result.stdout;
       } catch (error) {
         if (
@@ -147,7 +191,18 @@ export class WorkspaceAccessService {
       const files = stdout
         .split(/\r?\n/)
         .map((line) => line.trim())
-        .filter((line) => line.length > 0);
+        .filter((line) => line.length > 0)
+        .map((line) => {
+          const normalizedLine = toPosixPath(line);
+          if (searchRootRelativePath === ".") {
+            return normalizedLine;
+          }
+
+          const searchPrefix = `${searchRootRelativePath}/`;
+          return normalizedLine.startsWith(searchPrefix)
+            ? normalizedLine.slice(searchPrefix.length)
+            : normalizedLine;
+        });
       const limit = input.limit ?? 100;
       const limitedFiles = files.slice(0, limit);
 

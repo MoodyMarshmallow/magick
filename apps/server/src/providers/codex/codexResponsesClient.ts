@@ -37,6 +37,13 @@ interface CodexConversationMessage {
   readonly content: string;
 }
 
+interface CodexToolCallMessage {
+  readonly type: "function_call";
+  readonly callId: string;
+  readonly name: string;
+  readonly input: unknown;
+}
+
 interface CodexToolResultMessage {
   readonly type: "function_call_output";
   readonly callId: string;
@@ -71,6 +78,23 @@ const logDebug = (label: string, payload: unknown): void => {
 
   console.debug(`[codex-stream] ${label}`, payload);
 };
+
+const summarizeRequestMessages = (
+  messages: readonly (
+    | CodexConversationMessage
+    | CodexToolCallMessage
+    | CodexToolResultMessage
+  )[],
+): readonly string[] =>
+  messages.map((message) => {
+    if ("type" in message) {
+      return message.type === "function_call"
+        ? `tool_call:${message.name}`
+        : `tool_result:${message.callId}`;
+    }
+
+    return `${message.role}:${message.content.slice(0, 40)}`;
+  });
 
 const parseSseMessages = async function* (
   stream: ReadableStream<Uint8Array>,
@@ -374,11 +398,21 @@ export class CodexResponsesClient {
   streamResponse(input: {
     readonly messages: readonly (
       | CodexConversationMessage
+      | CodexToolCallMessage
       | CodexToolResultMessage
     )[];
     readonly tools?: readonly CodexToolDefinition[];
     readonly signal?: AbortSignal;
   }): Stream.Stream<CodexStreamEvent, ProviderFailureError> {
+    logDebug("request", {
+      messageCount: input.messages.length,
+      messages: summarizeRequestMessages(input.messages),
+      toolNames: input.tools?.map((tool) => tool.name) ?? [],
+      continuation:
+        input.messages.length > 0 &&
+        input.messages.every((message) => "type" in message),
+    });
+
     const execute = this.ensureAuthenticated().pipe(
       Effect.flatMap((auth) =>
         Effect.tryPromise({
@@ -406,6 +440,15 @@ export class CodexResponsesClient {
                   })) ?? [],
                 input: input.messages.map((message) => {
                   if ("type" in message) {
+                    if (message.type === "function_call") {
+                      return {
+                        type: "function_call",
+                        call_id: message.callId,
+                        name: message.name,
+                        arguments: JSON.stringify(message.input ?? {}),
+                      };
+                    }
+
                     return {
                       type: "function_call_output",
                       call_id: message.callId,

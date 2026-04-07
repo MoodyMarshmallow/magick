@@ -37,6 +37,7 @@ import {
 } from "../projections/threadProjector";
 import type {
   ConversationContextMessage,
+  ConversationHistoryItem,
   ProviderEvent,
   ProviderRegistryService,
   ProviderSessionRuntime,
@@ -233,6 +234,97 @@ export class ThreadOrchestrator implements ThreadOrchestratorApi {
     }));
   };
 
+  readonly #parseToolInput = (
+    value: string | null,
+    fallback: unknown,
+  ): unknown => {
+    if (fallback !== undefined) {
+      return fallback;
+    }
+    if (!value) {
+      return {};
+    }
+
+    try {
+      return JSON.parse(value);
+    } catch {
+      return { rawInput: value };
+    }
+  };
+
+  readonly #buildConversationHistory = (
+    threadId: string,
+  ): readonly ConversationHistoryItem[] => {
+    const events = this.#eventStore.listThreadEvents(threadId);
+    const history: ConversationHistoryItem[] = [];
+    type MutableAssistantHistoryMessage = {
+      type: "message";
+      role: "assistant";
+      content: string;
+    };
+    const assistantMessages = new Map<string, MutableAssistantHistoryMessage>();
+
+    for (const event of events) {
+      switch (event.type) {
+        case "message.user.created":
+          history.push({
+            type: "message",
+            role: "user",
+            content: event.payload.content,
+          });
+          break;
+        case "turn.delta": {
+          const assistantMessage = assistantMessages.get(
+            event.payload.messageId,
+          );
+          if (assistantMessage) {
+            assistantMessage.content += event.payload.delta;
+            break;
+          }
+
+          const nextMessage: MutableAssistantHistoryMessage = {
+            type: "message",
+            role: "assistant",
+            content: event.payload.delta,
+          };
+          assistantMessages.set(event.payload.messageId, nextMessage);
+          history.push(nextMessage);
+          break;
+        }
+        case "tool.requested":
+          history.push({
+            type: "tool_call",
+            toolCallId: event.payload.toolCallId,
+            toolName: event.payload.toolName,
+            input: this.#parseToolInput(
+              event.payload.argsPreview,
+              event.payload.input,
+            ),
+          });
+          break;
+        case "tool.completed":
+          history.push({
+            type: "tool_result",
+            toolCallId: event.payload.toolCallId,
+            output:
+              event.payload.modelOutput ?? event.payload.resultPreview ?? "",
+          });
+          break;
+        case "tool.failed":
+          history.push({
+            type: "tool_result",
+            toolCallId: event.payload.toolCallId,
+            output:
+              event.payload.modelOutput ??
+              `Tool execution failed: ${event.payload.error}`,
+          });
+          break;
+      }
+    }
+
+    return history;
+  };
+
   readonly #persistAndProject = (
     threadId: string,
     events: readonly Omit<DomainEvent, "sequence">[],
@@ -315,6 +407,7 @@ export class ThreadOrchestrator implements ThreadOrchestratorApi {
           toolName: providerEvent.toolName,
           title: providerEvent.toolName,
           argsPreview: this.#stringifyToolInput(providerEvent.input),
+          input: providerEvent.input,
           path: metadata.path,
           url: metadata.url,
         },
@@ -349,6 +442,7 @@ export class ThreadOrchestrator implements ThreadOrchestratorApi {
     toolCallId: string,
     result: {
       readonly resultPreview: string | null;
+      readonly modelOutput: string;
       readonly path: string | null;
       readonly url: string | null;
       readonly diff: FileDiffPreview | null;
@@ -365,6 +459,7 @@ export class ThreadOrchestrator implements ThreadOrchestratorApi {
           turnId,
           toolCallId,
           resultPreview: result.resultPreview,
+          modelOutput: result.modelOutput,
           path: result.path,
           url: result.url,
           diff: result.diff,
@@ -378,6 +473,7 @@ export class ThreadOrchestrator implements ThreadOrchestratorApi {
     turnId: string,
     toolCallId: string,
     error: string,
+    modelOutput: string,
   ) =>
     this.#persistAndProject(threadId, [
       {
@@ -390,6 +486,7 @@ export class ThreadOrchestrator implements ThreadOrchestratorApi {
           turnId,
           toolCallId,
           error,
+          modelOutput,
         },
       },
     ]);
@@ -557,6 +654,8 @@ export class ThreadOrchestrator implements ThreadOrchestratorApi {
             toolCallId: providerEvent.toolCallId,
             toolName: providerEvent.toolName,
             output: toolResult.right.modelOutput,
+            historyItems: this.#buildConversationHistory(thread.id),
+            tools: this.#listProviderTools(),
           });
 
           yield* Stream.runForEach(continuation, (continuationEvent) =>
@@ -566,19 +665,23 @@ export class ThreadOrchestrator implements ThreadOrchestratorApi {
         }
 
         const errorMessage = backendErrorMessage(toolResult.left);
+        const toolFailureOutput = `Tool execution failed: ${errorMessage}`;
         yield* this.#persistToolFailed(
           thread.id,
           thread.providerSessionId,
           providerEvent.turnId,
           providerEvent.toolCallId,
           errorMessage,
+          toolFailureOutput,
         ).pipe(Effect.asVoid);
 
         const continuation = yield* runtime.session.submitToolResult({
           turnId: providerEvent.turnId,
           toolCallId: providerEvent.toolCallId,
           toolName: providerEvent.toolName,
-          output: `Tool execution failed: ${errorMessage}`,
+          output: toolFailureOutput,
+          historyItems: this.#buildConversationHistory(thread.id),
+          tools: this.#listProviderTools(),
         });
 
         yield* Stream.runForEach(continuation, (continuationEvent) =>
@@ -815,6 +918,7 @@ export class ThreadOrchestrator implements ThreadOrchestratorApi {
         const turnId = this.#idGenerator.next("turn");
         const assistantMessageId = this.#idGenerator.next("message");
         const now = this.#clock.now();
+        const historyItems = this.#buildConversationHistory(threadId);
 
         const prelude = yield* this.#persistAndProject(threadId, [
           {
@@ -851,7 +955,8 @@ export class ThreadOrchestrator implements ThreadOrchestratorApi {
           turnId,
           messageId: assistantMessageId,
           userMessage: content,
-          contextMessages: this.#buildContextMessages(prelude.thread),
+          contextMessages: this.#buildContextMessages(snapshot),
+          historyItems,
           tools: this.#listProviderTools(),
         });
 

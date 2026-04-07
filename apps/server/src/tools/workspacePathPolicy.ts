@@ -1,4 +1,4 @@
-import { realpathSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 import { dirname, extname, isAbsolute, resolve } from "node:path";
 
 const supportedFileExtensions = new Set([".md"]);
@@ -31,6 +31,30 @@ export class WorkspacePathPolicy {
     return this.#workspaceRoot;
   }
 
+  #ensureResolvedPathInsideRoot(absolutePath: string): void {
+    const resolvedPath = realpathSync(absolutePath);
+    if (!pathIsInsideRoot(this.#workspaceRoot, resolvedPath)) {
+      throw new WorkspacePathPolicyError(
+        "Requested path is outside the workspace root.",
+      );
+    }
+  }
+
+  #ensureExistingAncestorInsideRoot(absolutePath: string): void {
+    let currentPath = absolutePath;
+    while (!existsSync(currentPath)) {
+      const parentPath = dirname(currentPath);
+      if (parentPath === currentPath) {
+        throw new WorkspacePathPolicyError(
+          "Requested path is outside the workspace root.",
+        );
+      }
+      currentPath = parentPath;
+    }
+
+    this.#ensureResolvedPathInsideRoot(currentPath);
+  }
+
   resolvePath(
     pathWithinWorkspace: string,
     options?: { readonly allowRoot?: boolean },
@@ -54,7 +78,11 @@ export class WorkspacePathPolicy {
   }
 
   resolveDirectory(pathWithinWorkspace: string): string {
-    return this.resolvePath(pathWithinWorkspace, { allowRoot: true });
+    const absolutePath = this.resolvePath(pathWithinWorkspace, {
+      allowRoot: true,
+    });
+    this.#ensureExistingAncestorInsideRoot(absolutePath);
+    return absolutePath;
   }
 
   resolveFile(pathWithinWorkspace: string): string {
@@ -65,6 +93,8 @@ export class WorkspacePathPolicy {
         `Only markdown files are supported. Received '${extension || "<none>"}'.`,
       );
     }
+
+    this.#ensureResolvedPathInsideRoot(absolutePath);
 
     return absolutePath;
   }
@@ -78,11 +108,10 @@ export class WorkspacePathPolicy {
       );
     }
 
-    const absoluteParentPath = dirname(absolutePath);
-    if (!pathIsInsideRoot(this.#workspaceRoot, absoluteParentPath)) {
-      throw new WorkspacePathPolicyError(
-        "Requested file path is outside the workspace root.",
-      );
+    this.#ensureExistingAncestorInsideRoot(dirname(absolutePath));
+
+    if (existsSync(absolutePath)) {
+      this.#ensureResolvedPathInsideRoot(absolutePath);
     }
 
     return absolutePath;

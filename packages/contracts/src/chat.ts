@@ -148,6 +148,7 @@ export type DomainEvent =
         toolName: string;
         title: string;
         argsPreview: string | null;
+        input?: unknown;
         path: string | null;
         url: string | null;
       }
@@ -159,6 +160,7 @@ export type DomainEvent =
         turnId: string;
         toolCallId: string;
         resultPreview: string | null;
+        modelOutput?: string | null;
         path: string | null;
         url: string | null;
         diff: FileDiffPreview | null;
@@ -170,6 +172,7 @@ export type DomainEvent =
         turnId: string;
         toolCallId: string;
         error: string;
+        modelOutput?: string | null;
       }
     >
   | EventBase<

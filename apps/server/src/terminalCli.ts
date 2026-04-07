@@ -29,7 +29,7 @@ type ParsedCommand =
   | { readonly type: "quit" }
   | { readonly type: "bootstrap" }
   | { readonly type: "threads" }
-  | { readonly type: "new"; readonly providerKey: string }
+  | { readonly type: "new"; readonly providerKey: "codex" }
   | { readonly type: "open"; readonly threadId: string }
   | { readonly type: "send"; readonly content: string }
   | { readonly type: "stop" }
@@ -43,7 +43,7 @@ const helpText = `
 Commands:
   /help                     Show this help.
   /threads                  List threads for the current workspace.
-  /new [provider]           Create a new thread. Defaults to codex.
+  /new                      Create a new Codex thread.
   /open <threadId>          Open an existing thread.
   /send <message>           Send a user message to the active thread.
   /stop                     Stop the active turn.
@@ -81,7 +81,10 @@ const parseCommand = (line: string): ParsedCommand => {
     case "threads":
       return { type: "threads" };
     case "new":
-      return { type: "new", providerKey: argument || "codex" };
+      if (argument && argument !== "codex") {
+        throw new Error("Usage: /new (Codex only)");
+      }
+      return { type: "new", providerKey: "codex" };
     case "open":
       if (!argument) {
         throw new Error("Usage: /open <threadId>");

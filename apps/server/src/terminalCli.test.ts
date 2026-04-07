@@ -74,14 +74,15 @@ describe("parseCommand", () => {
   it("parses slash commands and plain text sends", () => {
     expect(parseCommand("hello")).toEqual({ type: "send", content: "hello" });
     expect(parseCommand("/threads")).toEqual({ type: "threads" });
-    expect(parseCommand("/new fake")).toEqual({
+    expect(parseCommand("/new")).toEqual({
       type: "new",
-      providerKey: "fake",
+      providerKey: "codex",
     });
     expect(parseCommand("/login")).toEqual({ type: "login" });
   });
 
   it("rejects invalid or incomplete commands", () => {
+    expect(() => parseCommand("/new fake")).toThrow("Usage: /new (Codex only)");
     expect(() => parseCommand("/open")).toThrow("Usage: /open <threadId>");
     expect(() => parseCommand("/send")).toThrow("Usage: /send <message>");
     expect(() => parseCommand("/wat")).toThrow("Unknown command '/wat'");

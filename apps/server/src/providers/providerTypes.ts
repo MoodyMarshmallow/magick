@@ -17,6 +17,24 @@ export interface ConversationContextMessage {
   readonly content: string;
 }
 
+export type ConversationHistoryItem =
+  | {
+      readonly type: "message";
+      readonly role: "user" | "assistant";
+      readonly content: string;
+    }
+  | {
+      readonly type: "tool_call";
+      readonly toolCallId: string;
+      readonly toolName: string;
+      readonly input: unknown;
+    }
+  | {
+      readonly type: "tool_result";
+      readonly toolCallId: string;
+      readonly output: string;
+    };
+
 export interface CreateProviderSessionInput {
   readonly workspaceId: string;
   readonly sessionId: string;
@@ -33,6 +51,7 @@ export interface StartTurnInput {
   readonly messageId: string;
   readonly userMessage: string;
   readonly contextMessages: readonly ConversationContextMessage[];
+  readonly historyItems: readonly ConversationHistoryItem[];
   readonly tools: readonly ProviderToolDefinition[];
 }
 
@@ -47,6 +66,8 @@ export interface SubmitToolResultInput {
   readonly toolCallId: string;
   readonly toolName: string;
   readonly output: string;
+  readonly historyItems: readonly ConversationHistoryItem[];
+  readonly tools: readonly ProviderToolDefinition[];
 }
 
 export interface InterruptTurnInput {

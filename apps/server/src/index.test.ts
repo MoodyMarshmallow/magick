@@ -2,7 +2,13 @@ import { existsSync, rmSync } from "node:fs";
 import { createServer } from "node:http";
 import { join } from "node:path";
 
-import { attachWebSocketServer, createBackendServices } from "./index";
+import {
+  attachWebSocketServer,
+  createBackendServices,
+  resolveBackendRepoRoot,
+  resolveDefaultDatabasePath,
+  resolveDefaultWorkspaceRoot,
+} from "./index";
 
 const removeTestDatabaseDirectory = (directoryPath: string) => {
   rmSync(directoryPath, {
@@ -12,8 +18,18 @@ const removeTestDatabaseDirectory = (directoryPath: string) => {
 };
 
 describe("createBackendServices", () => {
-  it("builds services with fake and codex providers registered", () => {
+  it("builds services with only the real provider by default", () => {
     const services = createBackendServices();
+
+    expect(services.providerRegistry.get("codex")).toMatchObject({
+      key: "codex",
+    });
+    expect(() => services.providerRegistry.get("fake")).toThrow();
+    expect(() => services.providerRegistry.get("fake-tools")).toThrow();
+  });
+
+  it("can include fake providers for tests when requested", () => {
+    const services = createBackendServices({ includeFakeProviders: true });
 
     expect(services.providerRegistry.get("codex")).toMatchObject({
       key: "codex",
@@ -42,21 +58,26 @@ describe("createBackendServices", () => {
     expect(custom.databasePath).toBe(customPath);
     expect(existsSync(customPath)).toBe(true);
 
-    const defaultServices = createBackendServices();
-    expect(defaultServices.databasePath.endsWith(".magick/backend.db")).toBe(
-      true,
+    expect(resolveDefaultDatabasePath()).toBe(
+      join(resolveBackendRepoRoot(), ".magick", "backend.db"),
     );
 
     removeTestDatabaseDirectory(join(process.cwd(), ".magick-test"));
   });
 
-  it("creates the default local workspace directory when no workspace root is provided", () => {
-    const defaultWorkspaceDir = join(process.cwd(), ".magick", "workspace");
-    removeTestDatabaseDirectory(join(process.cwd(), ".magick"));
+  it("resolves the default local workspace directory from the repo root", () => {
+    expect(resolveDefaultWorkspaceRoot()).toBe(
+      join(resolveBackendRepoRoot(), ".magick", "workspace"),
+    );
+  });
 
-    createBackendServices();
-
-    expect(existsSync(defaultWorkspaceDir)).toBe(true);
+  it("resolves the default workspace root from the repo root instead of the package cwd", () => {
+    expect(resolveDefaultDatabasePath()).toBe(
+      join(resolveBackendRepoRoot(), ".magick", "backend.db"),
+    );
+    expect(resolveDefaultWorkspaceRoot()).toBe(
+      join(resolveBackendRepoRoot(), ".magick", "workspace"),
+    );
   });
 
   it("persists thread renames across backend restarts", async () => {
@@ -67,7 +88,7 @@ describe("createBackendServices", () => {
     const firstServices = createBackendServices({ databasePath });
     const createdThread = await firstServices.threadOrchestrator.createThread({
       workspaceId: "workspace_1",
-      providerKey: "fake",
+      providerKey: "codex",
       title: "Original chat",
     });
 
@@ -103,7 +124,7 @@ describe("createBackendServices", () => {
     const firstServices = createBackendServices({ databasePath });
     const createdThread = await firstServices.threadOrchestrator.createThread({
       workspaceId: "workspace_1",
-      providerKey: "fake",
+      providerKey: "codex",
       title: "Disposable chat",
     });
 

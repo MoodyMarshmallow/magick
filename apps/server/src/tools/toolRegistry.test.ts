@@ -2,6 +2,23 @@ import { ToolExecutor } from "./toolExecutor";
 import { ToolRegistry } from "./toolRegistry";
 
 describe("ToolRegistry", () => {
+  it("exposes only the concrete built-in tool set", () => {
+    const toolIds = new ToolRegistry()
+      .list()
+      .map((tool) => tool.id)
+      .sort((left, right) => left.localeCompare(right));
+
+    expect(toolIds).toEqual([
+      "apply_patch",
+      "fetch",
+      "glob",
+      "grep",
+      "list",
+      "read",
+      "write",
+    ]);
+  });
+
   it("derives provider-facing JSON schema from Zod", () => {
     const readTool = new ToolRegistry()
       .list()

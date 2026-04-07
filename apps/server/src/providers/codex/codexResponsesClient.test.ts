@@ -423,6 +423,90 @@ describe("CodexResponsesClient", () => {
     ]);
   });
 
+  it("serializes prior tool calls and tool results in the rebuilt input chain", async () => {
+    const authRepository = {
+      get: vi.fn().mockReturnValue({
+        providerKey: "codex",
+        authMode: "chatgpt",
+        accessToken: "access",
+        refreshToken: "refresh",
+        expiresAt: Date.now() + 120_000,
+        accountId: null,
+        email: "user@example.com",
+        planType: null,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      }),
+      upsert: vi.fn(),
+      delete: vi.fn(),
+    };
+
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response("data: [DONE]\n\n", {
+        status: 200,
+        headers: { "Content-Type": "text/event-stream" },
+      }),
+    );
+
+    const client = new CodexResponsesClient({
+      authRepository: authRepository as never,
+      authClient: { refreshAccessToken: vi.fn() } as unknown as CodexAuthClient,
+      fetch: fetchMock as never,
+    });
+
+    await Effect.runPromise(
+      Stream.runCollect(
+        client.streamResponse({
+          messages: [
+            { role: "user", content: "First" },
+            {
+              type: "function_call",
+              callId: "call_1",
+              name: "read",
+              input: { path: "notes.md" },
+            },
+            {
+              type: "function_call_output",
+              callId: "call_1",
+              output: "hello\nworld\n",
+            },
+            { role: "assistant", content: "Tool saw the note" },
+            { role: "user", content: "Second" },
+          ],
+        }),
+      ),
+    );
+
+    const request = JSON.parse(
+      String(fetchMock.mock.calls[0]?.[1]?.body ?? "{}"),
+    );
+    expect(request.input).toEqual([
+      {
+        role: "user",
+        content: [{ type: "input_text", text: "First" }],
+      },
+      {
+        type: "function_call",
+        call_id: "call_1",
+        name: "read",
+        arguments: '{"path":"notes.md"}',
+      },
+      {
+        type: "function_call_output",
+        call_id: "call_1",
+        output: "hello\nworld\n",
+      },
+      {
+        role: "assistant",
+        content: [{ type: "output_text", text: "Tool saw the note" }],
+      },
+      {
+        role: "user",
+        content: [{ type: "input_text", text: "Second" }],
+      },
+    ]);
+  });
+
   it("deletes auth when refresh fails", async () => {
     const authRepository = {
       get: vi.fn().mockReturnValue({

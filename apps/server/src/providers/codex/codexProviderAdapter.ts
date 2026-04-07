@@ -6,6 +6,7 @@ import type { ProviderCapabilities } from "@magick/contracts/provider";
 import type { ProviderFailureError } from "../../core/errors";
 import type { ProviderAuthRepositoryClient } from "../../persistence/providerAuthRepository";
 import type {
+  ConversationHistoryItem,
   CreateProviderSessionInput,
   InterruptTurnInput,
   ProviderAdapter,
@@ -56,6 +57,54 @@ class CodexSessionHandle implements ProviderSessionHandle {
     this.#responsesClient = args.responsesClient;
   }
 
+  readonly #toCodexMessages = (args: {
+    readonly historyItems: readonly ConversationHistoryItem[];
+    readonly contextMessages: readonly {
+      readonly role: "user" | "assistant";
+      readonly content: string;
+    }[];
+    readonly userMessage?: string;
+  }) => {
+    const historyMessages =
+      args.historyItems.length > 0
+        ? args.historyItems.map((item) => {
+            switch (item.type) {
+              case "message":
+                return {
+                  role: item.role,
+                  content: item.content,
+                };
+              case "tool_call":
+                return {
+                  type: "function_call" as const,
+                  callId: item.toolCallId,
+                  name: item.toolName,
+                  input: item.input,
+                };
+              case "tool_result":
+                return {
+                  type: "function_call_output" as const,
+                  callId: item.toolCallId,
+                  output: item.output,
+                };
+            }
+          })
+        : args.contextMessages.map((message) => ({
+            role: message.role,
+            content: message.content,
+          }));
+
+    return args.userMessage
+      ? [
+          ...historyMessages,
+          {
+            role: "user" as const,
+            content: args.userMessage,
+          },
+        ]
+      : historyMessages;
+  };
+
   readonly startTurn = (
     input: StartTurnInput,
   ): Effect.Effect<
@@ -68,16 +117,11 @@ class CodexSessionHandle implements ProviderSessionHandle {
 
       return this.#responsesClient
         .streamResponse({
-          messages: [
-            ...input.contextMessages.map((message) => ({
-              role: message.role,
-              content: message.content,
-            })),
-            {
-              role: "user",
-              content: input.userMessage,
-            },
-          ],
+          messages: this.#toCodexMessages({
+            historyItems: input.historyItems,
+            contextMessages: input.contextMessages,
+            userMessage: input.userMessage,
+          }),
           tools: input.tools.map((tool) => ({
             name: tool.name,
             description: tool.description,
@@ -94,13 +138,13 @@ class CodexSessionHandle implements ProviderSessionHandle {
                   turnId: input.turnId,
                   messageId: input.messageId,
                   delta: event.delta,
-                };
+                } satisfies ProviderEvent;
               case "output.completed":
                 return {
                   type: "output.completed" as const,
                   turnId: input.turnId,
                   messageId: input.messageId,
-                };
+                } satisfies ProviderEvent;
               case "tool.call.requested":
                 return {
                   type: "tool.call.requested" as const,
@@ -108,13 +152,13 @@ class CodexSessionHandle implements ProviderSessionHandle {
                   toolCallId: event.toolCallId,
                   toolName: event.toolName,
                   input: event.input,
-                };
+                } satisfies ProviderEvent;
               case "turn.failed":
                 return {
                   type: "turn.failed" as const,
                   turnId: input.turnId,
                   error: event.error,
-                };
+                } satisfies ProviderEvent;
             }
           }),
           Stream.ensuring(
@@ -135,13 +179,15 @@ class CodexSessionHandle implements ProviderSessionHandle {
     Effect.sync(() =>
       this.#responsesClient
         .streamResponse({
-          messages: [
-            {
-              type: "function_call_output",
-              callId: input.toolCallId,
-              output: input.output,
-            },
-          ],
+          messages: this.#toCodexMessages({
+            historyItems: input.historyItems,
+            contextMessages: [],
+          }),
+          tools: input.tools.map((tool) => ({
+            name: tool.name,
+            description: tool.description,
+            inputSchema: tool.inputSchema,
+          })),
         })
         .pipe(
           Stream.map((event) => {
@@ -152,13 +198,13 @@ class CodexSessionHandle implements ProviderSessionHandle {
                   turnId: input.turnId,
                   messageId: `${input.turnId}:assistant`,
                   delta: event.delta,
-                };
+                } satisfies ProviderEvent;
               case "output.completed":
                 return {
                   type: "output.completed" as const,
                   turnId: input.turnId,
                   messageId: `${input.turnId}:assistant`,
-                };
+                } satisfies ProviderEvent;
               case "tool.call.requested":
                 return {
                   type: "tool.call.requested" as const,
@@ -166,13 +212,13 @@ class CodexSessionHandle implements ProviderSessionHandle {
                   toolCallId: event.toolCallId,
                   toolName: event.toolName,
                   input: event.input,
-                };
+                } satisfies ProviderEvent;
               case "turn.failed":
                 return {
                   type: "turn.failed" as const,
                   turnId: input.turnId,
                   error: event.error,
-                };
+                } satisfies ProviderEvent;
             }
           }),
         ),
