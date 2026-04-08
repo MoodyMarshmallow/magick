@@ -1,6 +1,6 @@
 # Magick
 
-Claude Code but for deep learning and thinking. Still a VERY EARLY WIP. Built on Codex.
+Claude Code but for deep learning and thinking. Still a VERY EARLY WIP.
 
 Current focus:
 - Better frontend experience
