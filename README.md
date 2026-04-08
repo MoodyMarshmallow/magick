@@ -1,7 +1,19 @@
 # Magick
-- ChatGPT but better.
+
+Claude Code but for deep learning and thinking. Still a VERY EARLY WIP. Built on Codex.
+
+Current focus:
+- Better frontend experience
+- Agent that actually works well
+- Cleaninng up the code
 
 ## Running
+
+```bash
+npm run dev
+```
+
+Starts the default local development flow from the repo root.
 
 ```bash
 bun run desktop:dev
@@ -26,3 +38,9 @@ bun run web:dev
 ```
 
 Starts only the renderer on `http://localhost:4173`.
+
+```bash
+bun run server:start
+```
+
+Starts the local backend server on `ws://127.0.0.1:8787`.
