@@ -11,7 +11,7 @@ import {
 import type {
   EditorCommandName,
   EditorFormatState,
-} from "../../document/components/EditorSurface";
+} from "../../document/editor/editorTypes";
 
 export const defaultEditorFormatState: EditorFormatState = {
   paragraph: true,

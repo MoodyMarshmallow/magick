@@ -8,12 +8,35 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
+import { forwardRef, useImperativeHandle } from "react";
 import { localWorkspaceFileClient } from "../data/localWorkspaceFileClient";
 import { useWorkspaceSessionStore } from "../state/workspaceSessionStore";
 import { WorkspaceSurface } from "./WorkspaceSurface";
 
+const { editorHandle, latestEditorProps } = vi.hoisted(() => ({
+  editorHandle: {
+    runCommand: vi.fn(),
+  },
+  latestEditorProps: {
+    current: null as null | {
+      onFormatStateChange: (state: unknown) => void;
+    },
+  },
+}));
+
 vi.mock("../../document/components/EditorSurface", () => ({
-  EditorSurface: () => <div data-testid="editor-surface" />,
+  EditorSurface: forwardRef(
+    (
+      props: {
+        onFormatStateChange: (state: unknown) => void;
+      },
+      ref,
+    ) => {
+      latestEditorProps.current = props;
+      useImperativeHandle(ref, () => editorHandle);
+      return <div data-testid="editor-surface" />;
+    },
+  ),
 }));
 
 vi.mock("../../comments/state/commentUiStore", () => ({
@@ -45,6 +68,11 @@ vi.mock("../data/localWorkspaceFileClient", () => ({
 }));
 
 describe("WorkspaceSurface", () => {
+  beforeEach(() => {
+    editorHandle.runCommand.mockClear();
+    latestEditorProps.current = null;
+  });
+
   it("reinitializes the first file when the workspace becomes empty with the same initial document", async () => {
     useWorkspaceSessionStore.setState({
       ...useWorkspaceSessionStore.getInitialState(),
@@ -370,6 +398,118 @@ describe("WorkspaceSurface", () => {
         "notes/test.md",
         "test.txt.md",
       );
+    });
+  });
+
+  it("routes toolbar button clicks to the focused editor", () => {
+    useWorkspaceSessionStore.setState({
+      ...useWorkspaceSessionStore.getInitialState(),
+      rootPane: {
+        type: "leaf",
+        id: "pane_1",
+        tabIds: ["tab_1"],
+        activeTabId: "tab_1",
+      },
+      tabsById: {
+        tab_1: { id: "tab_1", documentId: "notes/test.md" },
+      },
+      draftsByDocumentId: {
+        "notes/test.md": {
+          title: "test",
+          markdown: "Body",
+          savedMarkdown: "Body",
+          isLoaded: true,
+        },
+      },
+      focusedPaneId: "pane_1",
+      focusedTabId: "tab_1",
+      lastFocusedTabIdByDocumentId: {
+        "notes/test.md": "tab_1",
+      },
+    });
+
+    const queryClient = new QueryClient();
+    render(
+      <QueryClientProvider client={queryClient}>
+        <WorkspaceSurface
+          dragItem={null}
+          initialDocumentId="notes/test.md"
+          onDragItemChange={() => undefined}
+        />
+      </QueryClientProvider>,
+    );
+
+    fireEvent.click(screen.getByLabelText("Bold"));
+
+    expect(editorHandle.runCommand).toHaveBeenCalledWith(
+      "toggleBold",
+      undefined,
+    );
+    expect(screen.getByLabelText("Bold").getAttribute("aria-pressed")).toBe(
+      "false",
+    );
+  });
+
+  it("reflects editor format state back into the toolbar", async () => {
+    useWorkspaceSessionStore.setState({
+      ...useWorkspaceSessionStore.getInitialState(),
+      rootPane: {
+        type: "leaf",
+        id: "pane_1",
+        tabIds: ["tab_1"],
+        activeTabId: "tab_1",
+      },
+      tabsById: {
+        tab_1: { id: "tab_1", documentId: "notes/test.md" },
+      },
+      draftsByDocumentId: {
+        "notes/test.md": {
+          title: "test",
+          markdown: "Body",
+          savedMarkdown: "Body",
+          isLoaded: true,
+        },
+      },
+      focusedPaneId: "pane_1",
+      focusedTabId: "tab_1",
+      lastFocusedTabIdByDocumentId: {
+        "notes/test.md": "tab_1",
+      },
+    });
+
+    const queryClient = new QueryClient();
+    render(
+      <QueryClientProvider client={queryClient}>
+        <WorkspaceSurface
+          dragItem={null}
+          initialDocumentId="notes/test.md"
+          onDragItemChange={() => undefined}
+        />
+      </QueryClientProvider>,
+    );
+
+    act(() => {
+      latestEditorProps.current?.onFormatStateChange({
+        blockquote: false,
+        bold: true,
+        bulletList: false,
+        code: false,
+        headingLevel: 2,
+        italic: false,
+        orderedList: false,
+        paragraph: false,
+        strike: false,
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("Bold").className).toContain("is-active");
+      expect(screen.getByLabelText("Bold").getAttribute("aria-pressed")).toBe(
+        "true",
+      );
+      expect(
+        screen.getByLabelText("Heading").getAttribute("aria-expanded"),
+      ).toBe("true");
     });
   });
 });

@@ -932,6 +932,25 @@ button:disabled {
   line-height: 1.7;
 }
 
+.rendered-mermaid {
+  overflow-x: auto;
+  margin: 0.2rem 0 0;
+  padding: 0.75rem 0.9rem;
+  border: 1px solid var(--line);
+  background: var(--bg-soft);
+}
+
+.rendered-mermaid svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
+.rendered-mermaid__error {
+  margin: 0 0 0.6rem;
+  color: var(--red);
+}
+
 .rendered-markdown a,
 .thread-record__message-body a,
 .editor-surface__prose a {
@@ -1064,8 +1083,23 @@ button:disabled {
   color: var(--fg-soft);
 }
 
+.workspace__toolbar-button:focus {
+  outline: none;
+}
+
+.workspace__toolbar-button:focus-visible {
+  background: var(--hover);
+  color: var(--fg-soft);
+}
+
 .workspace__toolbar-button.is-active {
   background: rgba(167, 192, 128, 0.12);
+  color: var(--green);
+}
+
+.workspace__toolbar-button.is-active:hover,
+.workspace__toolbar-button.is-active:focus-visible {
+  background: rgba(167, 192, 128, 0.18);
   color: var(--green);
 }
 
@@ -1158,12 +1192,18 @@ button:disabled {
 }
 
 .workspace__document-scroll {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
   min-height: 0;
   height: 100%;
   overflow-x: auto;
   overflow-y: scroll;
   scrollbar-gutter: stable;
   padding: 0;
+}
+
+.workspace__document-scroll > :last-child {
+  min-height: 0;
 }
 
 .workspace-split {
@@ -1400,19 +1440,35 @@ button:disabled {
 
 .editor-surface {
   min-height: 100%;
+  height: 100%;
+}
+
+.editor-surface__root {
+  min-height: 100%;
+  height: 100%;
 }
 
 .is-workspace-dragging .editor-surface,
+.is-workspace-dragging .editor-surface__root,
 .is-workspace-dragging .editor-surface__prose {
   pointer-events: none;
 }
 
 .editor-surface__prose {
+  display: flex;
+  flex-direction: column;
   min-height: 100%;
+  height: 100%;
   padding: 0 var(--workspace-pane-padding-inline);
   font-size: var(--text-size-body);
   line-height: 1.9;
   color: var(--fg-soft);
+}
+
+.editor-surface__prose .ProseMirror {
+  flex: 1;
+  min-height: 100%;
+  outline: none;
 }
 
 .editor-surface__prose > :first-child {

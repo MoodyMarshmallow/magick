@@ -8,6 +8,7 @@ import {
   type CSSProperties,
   type DragEvent,
   type KeyboardEvent,
+  type MouseEvent,
   type PointerEvent,
   type WheelEvent,
   useEffect,
@@ -872,6 +873,12 @@ function WorkspaceLeafPaneView({
   );
 }
 
+const handleToolbarMouseDown = (event: MouseEvent<HTMLButtonElement>) => {
+  // Keep focus and selection inside the editor so command state tracks the
+  // active markdown selection instead of the toolbar button.
+  event.preventDefault();
+};
+
 function WorkspacePaneNodeView({
   node,
   borderState,
@@ -1045,10 +1052,12 @@ export function WorkspaceSurface({
               return (
                 <button
                   aria-label={action.label}
+                  aria-pressed={action.isActive(activeFormatState)}
                   className={`workspace__toolbar-button${
                     action.isActive(activeFormatState) ? " is-active" : ""
                   }`}
                   key={action.commandName}
+                  onMouseDown={handleToolbarMouseDown}
                   onClick={() => runFocusedEditorCommand(action.commandName)}
                   type="button"
                 >

@@ -16,6 +16,9 @@ describe("WorkspaceHeadingControl", () => {
     fireEvent.click(screen.getByLabelText("Heading"));
 
     expect(handleCommand).toHaveBeenCalledWith("toggleHeading", { level: 1 });
+    expect(screen.getByLabelText("Heading").getAttribute("aria-pressed")).toBe(
+      "false",
+    );
 
     rerender(
       <WorkspaceHeadingControl
@@ -25,6 +28,9 @@ describe("WorkspaceHeadingControl", () => {
     );
 
     expect(screen.getByLabelText("Heading level").textContent).toBe("1");
+    expect(screen.getByLabelText("Heading").getAttribute("aria-pressed")).toBe(
+      "true",
+    );
   });
 
   it("moves to a larger heading number with the down arrow", () => {

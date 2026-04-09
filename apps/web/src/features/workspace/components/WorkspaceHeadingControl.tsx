@@ -1,5 +1,6 @@
 import { ChevronDown, ChevronUp, Heading } from "lucide-react";
 import {
+  type MouseEvent,
   type WheelEvent,
   useCallback,
   useEffect,
@@ -12,7 +13,7 @@ import { appIconSize } from "../../../app/appIconSize";
 import type {
   EditorCommandName,
   EditorHeadingLevel,
-} from "../../document/components/EditorSurface";
+} from "../../document/editor/editorTypes";
 
 const minHeadingLevel: EditorHeadingLevel = 1;
 const maxHeadingLevel: EditorHeadingLevel = 6;
@@ -106,6 +107,10 @@ export function WorkspaceHeadingControl({
     onCommand("toggleHeading", { level: selectedLevel });
   };
 
+  const handleToolbarMouseDown = (event: MouseEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+  };
+
   const handleLevelChange = (delta: -1 | 1) => {
     const nextLevel = clampHeadingLevel(selectedLevel + delta);
     if (nextLevel === selectedLevel) {
@@ -130,9 +135,11 @@ export function WorkspaceHeadingControl({
       <button
         aria-expanded={isHeadingActive}
         aria-label="Heading"
+        aria-pressed={isHeadingActive}
         className={`workspace__toolbar-button${
           isHeadingActive ? " is-active" : ""
         }`}
+        onMouseDown={handleToolbarMouseDown}
         onClick={handleToggleClick}
         ref={toggleRef}
         type="button"
@@ -152,6 +159,7 @@ export function WorkspaceHeadingControl({
               <button
                 aria-label="Previous heading level"
                 className="workspace__toolbar-heading-step"
+                onMouseDown={handleToolbarMouseDown}
                 onClick={() => handleLevelChange(-1)}
                 type="button"
               >
@@ -166,6 +174,7 @@ export function WorkspaceHeadingControl({
               <button
                 aria-label="Next heading level"
                 className="workspace__toolbar-heading-step"
+                onMouseDown={handleToolbarMouseDown}
                 onClick={() => handleLevelChange(1)}
                 type="button"
               >
