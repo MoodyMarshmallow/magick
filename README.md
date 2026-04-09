@@ -1,5 +1,7 @@
 # Magick
 
+![Screenshot of the Magick software UI](screenshot.png)
+
 Claude Code but for deep learning and thinking. Still a VERY EARLY WIP.
 
 Current focus:
