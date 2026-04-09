@@ -37,6 +37,7 @@ type ResizeSide = "left" | "right";
 
 const defaultWorkspaceId = "workspace_default";
 const defaultProviderKey = "codex";
+const draftThreadId = "draft:new-chat";
 
 interface ResizeState {
   readonly side: ResizeSide;
@@ -58,6 +59,18 @@ export function AppShell() {
     Record<string, ProviderAuthState>
   >({});
   const { activeThreadId, setActiveThreadId } = useCommentUiStore();
+  const draftThread: CommentThread = {
+    threadId: draftThreadId,
+    title: "New chat",
+    status: "open",
+    runtimeState: "idle",
+    updatedAt: new Date(0).toISOString(),
+    messages: [],
+    toolActivities: [],
+    pendingToolApproval: null,
+  };
+  const sidebarThreads =
+    activeThreadId === draftThreadId ? [draftThread, ...threads] : threads;
   const focusedDocumentId = useWorkspaceSessionStore((state) =>
     state.focusedTabId
       ? (state.tabsById[state.focusedTabId]?.documentId ?? null)
@@ -91,7 +104,9 @@ export function AppShell() {
     queryFn: () =>
       chatClient.getBootstrap({
         workspaceId: defaultWorkspaceId,
-        ...(activeThreadId ? { threadId: activeThreadId } : {}),
+        ...(activeThreadId && activeThreadId !== draftThreadId
+          ? { threadId: activeThreadId }
+          : {}),
       }),
   });
 
@@ -144,6 +159,7 @@ export function AppShell() {
     setProviderAuthByKey(threadBootstrapQuery.data.providerAuth);
     if (
       activeThreadIdRef.current &&
+      activeThreadIdRef.current !== draftThreadId &&
       !threadBootstrapQuery.data.threads.some(
         (thread) => thread.threadId === activeThreadIdRef.current,
       )
@@ -477,19 +493,12 @@ export function AppShell() {
       />
 
       <CommentSidebar
-        threads={threads}
+        threads={sidebarThreads}
         activeThreadId={activeThreadId}
+        activeThreadIsDraft={activeThreadId === draftThreadId}
         onActivateThread={handleSelectThread}
         onCreateThread={async () => {
-          const thread = await chatClient.createThread({
-            workspaceId: defaultWorkspaceId,
-            providerKey: defaultProviderKey,
-          });
-          dispatch({
-            type: "thread.loaded",
-            thread,
-          });
-          setActiveThreadId(thread.threadId);
+          setActiveThreadId(draftThreadId);
         }}
         onDeleteThread={async (threadId: string) => {
           await chatClient.deleteThread(threadId);
@@ -510,6 +519,20 @@ export function AppShell() {
         }}
         onShowLedger={() => setActiveThreadId(null)}
         onSendReply={async (threadId: string, message: string) => {
+          if (threadId === draftThreadId) {
+            const thread = await chatClient.createThread({
+              workspaceId: defaultWorkspaceId,
+              providerKey: defaultProviderKey,
+            });
+            dispatch({
+              type: "thread.loaded",
+              thread,
+            });
+            setActiveThreadId(thread.threadId);
+            await chatClient.sendThreadMessage(thread.threadId, message);
+            return;
+          }
+
           await chatClient.sendThreadMessage(threadId, message);
           setActiveThreadId(threadId);
         }}

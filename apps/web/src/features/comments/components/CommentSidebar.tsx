@@ -47,6 +47,7 @@ type TimelineEntry =
 interface CommentSidebarProps {
   readonly threads: readonly CommentThread[];
   readonly activeThreadId: string | null;
+  readonly activeThreadIsDraft?: boolean;
   readonly onActivateThread: (threadId: string) => void;
   readonly onCreateThread: () => Promise<void>;
   readonly onDeleteThread: (threadId: string) => Promise<void>;
@@ -59,6 +60,7 @@ interface CommentSidebarProps {
 export function CommentSidebar({
   threads,
   activeThreadId,
+  activeThreadIsDraft = false,
   onActivateThread,
   onCreateThread,
   onDeleteThread,
@@ -253,6 +255,7 @@ export function CommentSidebar({
               ) : (
                 <button
                   className="thread-record__header-title-button"
+                  disabled={activeThreadIsDraft}
                   onClick={() => {
                     beginThreadRename(activeThread);
                   }}
@@ -271,6 +274,7 @@ export function CommentSidebar({
                   : `Reopen ${activeThread.title}`
               }
               className="flat-button thread-record__status"
+              disabled={activeThreadIsDraft}
               onClick={async () => {
                 await onToggleResolved(activeThread.threadId);
               }}

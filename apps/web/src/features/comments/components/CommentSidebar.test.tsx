@@ -254,6 +254,46 @@ describe("CommentSidebar", () => {
     });
   });
 
+  it("disables persisted-thread actions for a draft active thread", () => {
+    const handleRenameThread = vi.fn(async () => undefined);
+    const handleToggleResolved = vi.fn(async () => undefined);
+    const draftThreads: readonly CommentThread[] = [
+      {
+        threadId: "draft:new-chat",
+        title: "New chat",
+        status: "open",
+        runtimeState: "idle",
+        updatedAt: "1970-01-01T00:00:00.000Z",
+        messages: [],
+        toolActivities: [],
+        pendingToolApproval: null,
+      },
+    ];
+
+    render(
+      <CommentSidebar
+        {...baseProps}
+        activeThreadId="draft:new-chat"
+        activeThreadIsDraft
+        onRenameThread={handleRenameThread}
+        onToggleResolved={handleToggleResolved}
+        threads={draftThreads}
+      />,
+    );
+
+    const titleButton = screen.getByRole("button", { name: "New chat" });
+    const statusButton = screen.getByLabelText("Resolve New chat");
+
+    expect(titleButton.getAttribute("disabled")).not.toBeNull();
+    expect(statusButton.getAttribute("disabled")).not.toBeNull();
+
+    fireEvent.click(titleButton);
+    fireEvent.click(statusButton);
+
+    expect(handleRenameThread).not.toHaveBeenCalled();
+    expect(handleToggleResolved).not.toHaveBeenCalled();
+  });
+
   it("renders markdown formatting and LaTeX in active thread messages", () => {
     const markdownThreads: readonly CommentThread[] = [
       {
