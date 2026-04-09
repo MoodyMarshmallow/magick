@@ -253,4 +253,106 @@ describe("projectThreadEvent", () => {
       error: "Tool execution was rejected.",
     });
   });
+
+  it("splits assistant messages around tool requests in the same turn", () => {
+    const initial = projectThreadEvent([], {
+      type: "snapshot.loaded",
+      threads: [summary],
+      activeThread: null,
+    });
+
+    const withFirstDelta = projectThreadEvent(initial, {
+      type: "domain.event",
+      threadId: "thread_1",
+      event: {
+        eventId: "event_2",
+        threadId: "thread_1",
+        providerSessionId: "session_1",
+        sequence: 2,
+        occurredAt: "2026-04-02T10:01:00.000Z",
+        type: "turn.delta",
+        payload: {
+          turnId: "turn_1",
+          messageId: "assistant_1",
+          delta: "Before tool. ",
+        },
+      },
+    });
+
+    const withTool = projectThreadEvent(withFirstDelta, {
+      type: "domain.event",
+      threadId: "thread_1",
+      event: {
+        eventId: "event_3",
+        threadId: "thread_1",
+        providerSessionId: "session_1",
+        sequence: 3,
+        occurredAt: "2026-04-02T10:02:00.000Z",
+        type: "tool.requested",
+        payload: {
+          turnId: "turn_1",
+          toolCallId: "tool_1",
+          toolName: "read",
+          title: "Read notes.md",
+          argsPreview: '{"path":"notes.md"}',
+          path: "notes.md",
+          url: null,
+        },
+      },
+    });
+
+    const withSecondDelta = projectThreadEvent(withTool, {
+      type: "domain.event",
+      threadId: "thread_1",
+      event: {
+        eventId: "event_4",
+        threadId: "thread_1",
+        providerSessionId: "session_1",
+        sequence: 4,
+        occurredAt: "2026-04-02T10:03:00.000Z",
+        type: "turn.delta",
+        payload: {
+          turnId: "turn_1",
+          messageId: "assistant_1",
+          delta: "After tool.",
+        },
+      },
+    });
+
+    const completed = projectThreadEvent(withSecondDelta, {
+      type: "domain.event",
+      threadId: "thread_1",
+      event: {
+        eventId: "event_5",
+        threadId: "thread_1",
+        providerSessionId: "session_1",
+        sequence: 5,
+        occurredAt: "2026-04-02T10:04:00.000Z",
+        type: "turn.completed",
+        payload: {
+          turnId: "turn_1",
+          messageId: "assistant_1",
+        },
+      },
+    });
+
+    expect(completed[0]?.messages).toEqual([
+      expect.objectContaining({
+        id: "turn_1:assistant:0",
+        body: "Before tool. ",
+        status: "complete",
+      }),
+      expect.objectContaining({
+        id: "turn_1:assistant:1",
+        body: "After tool.",
+        status: "complete",
+      }),
+    ]);
+    expect(completed[0]?.toolActivities).toEqual([
+      expect.objectContaining({
+        toolCallId: "tool_1",
+        createdAt: "2026-04-02T10:02:00.000Z",
+      }),
+    ]);
+  });
 });

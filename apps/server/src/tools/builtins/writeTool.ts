@@ -17,7 +17,7 @@ const writeToolSchema = z.object({
 });
 
 export const writeTool: ToolDefinition<typeof writeToolSchema> = {
-  id: "write",
+  id: "write_file",
   description: "Write one markdown file",
   schema: writeToolSchema,
   execute: async (args, context) => {

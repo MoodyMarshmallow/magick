@@ -79,7 +79,7 @@ describe("CodexProviderAdapter", () => {
         }),
       } as unknown as CodexAuthClient,
       fetch: fetchMock as unknown as typeof fetch,
-      defaultModel: "gpt-5.3-codex",
+      defaultModel: "gpt-5.4",
     });
 
     const session = await Effect.runPromise(
@@ -132,7 +132,7 @@ describe("CodexProviderAdapter", () => {
         }),
       } as unknown as CodexAuthClient,
       fetch: fetchMock as unknown as typeof fetch,
-      defaultModel: "gpt-5.3-codex",
+      defaultModel: "gpt-5.4",
     });
 
     const session = await Effect.runPromise(
@@ -211,7 +211,7 @@ describe("CodexProviderAdapter", () => {
         }),
       } as unknown as CodexAuthClient,
       fetch: fetchMock as unknown as typeof fetch,
-      defaultModel: "gpt-5.3-codex",
+      defaultModel: "gpt-5.4",
     });
 
     const session = await Effect.runPromise(
@@ -320,7 +320,7 @@ describe("CodexProviderAdapter", () => {
         }),
       } as unknown as CodexAuthClient,
       fetch: fetchMock as unknown as typeof fetch,
-      defaultModel: "gpt-5.3-codex",
+      defaultModel: "gpt-5.4",
     });
 
     const session = await Effect.runPromise(

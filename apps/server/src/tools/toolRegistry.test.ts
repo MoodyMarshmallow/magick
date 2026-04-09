@@ -15,7 +15,7 @@ describe("ToolRegistry", () => {
       "grep",
       "list",
       "read",
-      "write",
+      "write_file",
     ]);
   });
 
@@ -56,6 +56,7 @@ describe("ToolRegistry", () => {
       },
     });
   });
+
 });
 
 describe("ToolExecutor", () => {

@@ -29,11 +29,59 @@ const upsertMessage = (
   return nextMessages;
 };
 
-const findAssistantMessageByTurn = (
+const assistantMessageIdPrefix = (turnId: string) => `${turnId}:assistant`;
+
+const isAssistantMessageForTurn = (
+  messageId: string,
+  turnId: string,
+): boolean => {
+  return (
+    messageId === assistantMessageIdPrefix(turnId) ||
+    messageId.startsWith(`${assistantMessageIdPrefix(turnId)}:`)
+  );
+};
+
+const getAssistantSegmentIndex = (
+  messageId: string,
+  turnId: string,
+): number => {
+  const prefix = assistantMessageIdPrefix(turnId);
+  if (messageId === prefix) {
+    return 0;
+  }
+
+  const suffix = messageId.slice(prefix.length + 1);
+  const parsed = Number.parseInt(suffix, 10);
+  return Number.isNaN(parsed) ? 0 : parsed;
+};
+
+const findLatestAssistantMessageByTurn = (
   state: ThreadViewModel,
   turnId: string,
 ): TranscriptMessage | undefined => {
-  return state.messages.find((message) => message.id === `${turnId}:assistant`);
+  for (let index = state.messages.length - 1; index >= 0; index -= 1) {
+    const message = state.messages[index];
+    if (message && isAssistantMessageForTurn(message.id, turnId)) {
+      return message;
+    }
+  }
+
+  return undefined;
+};
+
+const createNextAssistantMessageId = (
+  messages: readonly TranscriptMessage[],
+  turnId: string,
+): string => {
+  const highestSegmentIndex = messages.reduce((highest, message) => {
+    if (!isAssistantMessageForTurn(message.id, turnId)) {
+      return highest;
+    }
+
+    return Math.max(highest, getAssistantSegmentIndex(message.id, turnId));
+  }, -1);
+
+  return `${assistantMessageIdPrefix(turnId)}:${highestSegmentIndex + 1}`;
 };
 
 const cloneThread = (thread: ThreadViewModel): MutableThreadViewModel => {
@@ -184,17 +232,31 @@ export const projectThreadEvents = (
         state.lastError = null;
         break;
       case "turn.delta": {
-        const existing = findAssistantMessageByTurn(
+        const existing = findLatestAssistantMessageByTurn(
           state,
           event.payload.turnId,
         );
-        state.messages = upsertMessage(state.messages, {
-          id: `${event.payload.turnId}:assistant`,
-          role: "assistant",
-          content: `${existing?.content ?? ""}${event.payload.delta}`,
-          createdAt: existing?.createdAt ?? event.occurredAt,
-          status: "streaming",
-        });
+
+        if (existing?.status === "streaming") {
+          state.messages = upsertMessage(state.messages, {
+            ...existing,
+            content: `${existing.content}${event.payload.delta}`,
+          });
+        } else {
+          state.messages = [
+            ...state.messages,
+            {
+              id: createNextAssistantMessageId(
+                state.messages,
+                event.payload.turnId,
+              ),
+              role: "assistant",
+              content: event.payload.delta,
+              createdAt: event.occurredAt,
+              status: "streaming",
+            },
+          ];
+        }
         state.latestSequence = event.sequence;
         state.latestActivityAt = event.occurredAt;
         state.updatedAt = event.occurredAt;
@@ -202,7 +264,7 @@ export const projectThreadEvents = (
         break;
       }
       case "turn.completed": {
-        const existing = findAssistantMessageByTurn(
+        const existing = findLatestAssistantMessageByTurn(
           state,
           event.payload.turnId,
         );
@@ -221,7 +283,7 @@ export const projectThreadEvents = (
         break;
       }
       case "turn.interrupted": {
-        const existing = findAssistantMessageByTurn(
+        const existing = findLatestAssistantMessageByTurn(
           state,
           event.payload.turnId,
         );
@@ -240,7 +302,7 @@ export const projectThreadEvents = (
         break;
       }
       case "turn.failed": {
-        const existing = findAssistantMessageByTurn(
+        const existing = findLatestAssistantMessageByTurn(
           state,
           event.payload.turnId,
         );
@@ -259,6 +321,16 @@ export const projectThreadEvents = (
         break;
       }
       case "tool.requested": {
+        const existingAssistantMessage = findLatestAssistantMessageByTurn(
+          state,
+          event.payload.turnId,
+        );
+        if (existingAssistantMessage?.status === "streaming") {
+          state.messages = upsertMessage(state.messages, {
+            ...existingAssistantMessage,
+            status: "complete",
+          });
+        }
         state.toolActivities = upsertToolActivity(state.toolActivities, {
           toolCallId: event.payload.toolCallId,
           toolName: event.payload.toolName,

@@ -12,7 +12,7 @@ import type { CodexAuthClient } from "./codexAuthClient";
 const CODEX_API_ENDPOINT = "https://chatgpt.com/backend-api/codex/responses";
 const REFRESH_SAFETY_MARGIN_MS = 60_000;
 const CODEX_SYSTEM_PROMPT =
-  "You are Magick's assistant for research, learning, and document work inside the user's workspace. Use tools sparingly, keep file paths relative to the workspace root, and present concise, provenance-aware results. When writing math in markdown, always use dollar-delimited LaTeX: `$...$` for inline math and `$$...$$` for display math. Do not use `\\(...\\)` or `\\[...\\]` delimiters.";
+  "You are Magick's assistant for research, learning, and document work inside the user's workspace. Proactively call tools when they are needed to inspect the workspace, gather context, or complete the user's request instead of only describing what you would do. Keep file paths relative to the workspace root, avoid unnecessary tool calls, and present concise, provenance-aware results. When writing math in markdown, always use dollar-delimited LaTeX: `$...$` for inline math and `$$...$$` for display math. Do not use `\\(...\\)` or `\\[...\\]` delimiters.";
 const THREAD_TITLE_SYSTEM_PROMPT = `Generate a concise chat title from the user's first message. Return only the title text with no quotes, markdown, prefix, or explanation. Keep it under ${maxThreadTitleLength} characters.`;
 
 export interface CodexResponsesClientOptions {
@@ -314,7 +314,7 @@ export class CodexResponsesClient {
   constructor(options: CodexResponsesClientOptions) {
     this.#fetch = options.fetch ?? fetch;
     this.#endpoint = options.endpoint ?? CODEX_API_ENDPOINT;
-    this.#defaultModel = options.defaultModel ?? "gpt-5.3-codex";
+    this.#defaultModel = options.defaultModel ?? "gpt-5.4";
     this.#authRepository = options.authRepository;
     this.#authClient = options.authClient;
   }

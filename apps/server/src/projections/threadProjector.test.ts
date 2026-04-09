@@ -211,6 +211,75 @@ describe("projectThreadEvents", () => {
       status: "complete",
     });
   });
+
+  it("splits assistant output around tool requests within the same turn", () => {
+    const thread = projectThreadEvents(null, [
+      createdEvent(),
+      makeEvent({
+        sequence: 2,
+        occurredAt: "2026-01-01T00:00:01.000Z",
+        type: "turn.started",
+        payload: { turnId: "turn_1", parentTurnId: null },
+      }),
+      makeEvent({
+        sequence: 3,
+        occurredAt: "2026-01-01T00:00:02.000Z",
+        type: "turn.delta",
+        payload: {
+          turnId: "turn_1",
+          messageId: "assistant_1",
+          delta: "Before tool. ",
+        },
+      }),
+      makeEvent({
+        sequence: 4,
+        occurredAt: "2026-01-01T00:00:03.000Z",
+        type: "tool.requested",
+        payload: {
+          turnId: "turn_1",
+          toolCallId: "tool_1",
+          toolName: "read",
+          title: "Read notes.md",
+          argsPreview: '{"path":"notes.md"}',
+          path: "notes.md",
+          url: null,
+        },
+      }),
+      makeEvent({
+        sequence: 5,
+        occurredAt: "2026-01-01T00:00:04.000Z",
+        type: "turn.delta",
+        payload: {
+          turnId: "turn_1",
+          messageId: "assistant_1",
+          delta: "After tool.",
+        },
+      }),
+      makeEvent({
+        sequence: 6,
+        occurredAt: "2026-01-01T00:00:05.000Z",
+        type: "turn.completed",
+        payload: { turnId: "turn_1", messageId: "assistant_1" },
+      }),
+    ]);
+
+    expect(thread.messages).toEqual([
+      expect.objectContaining({
+        id: "turn_1:assistant:0",
+        content: "Before tool. ",
+        status: "complete",
+      }),
+      expect.objectContaining({
+        id: "turn_1:assistant:1",
+        content: "After tool.",
+        status: "complete",
+      }),
+    ]);
+    expect(thread.toolActivities[0]).toMatchObject({
+      toolCallId: "tool_1",
+      createdAt: "2026-01-01T00:00:03.000Z",
+    });
+  });
 });
 
 describe("toThreadSummary", () => {

@@ -34,6 +34,7 @@ Long term maintainability is a core priority. If you add new functionality, firs
 - For streaming or async behavior, make tests deterministic by controlling time, ids, scheduling, and network or provider boundaries with test doubles.
 - Keep tests close to the logic they verify, and structure them so a future contributor can understand the intended behavior from the test file alone.
 - Avoid shallow tests that only assert implementation details. Focus on observable behavior, invariants, and contract guarantees.
+- Do not write tests that pin prompt wording or other prompt text verbatim. Prompts are implementation detail unless user-visible behavior or request shape depends on a specific field being present.
 - If you add a new bug fix, add or update a regression test that would have failed before the fix.
 - If a change affects UI, always verify it with Playwright against the running app, not just unit tests.
 - For UI verification with Playwright, inspect the result both structurally and visually: read extracted DOM/text state with Playwright code or snapshots, and capture a targeted screenshot of the changed area.
