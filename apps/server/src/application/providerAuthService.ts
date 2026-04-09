@@ -39,7 +39,7 @@ export interface ProviderAuthServiceApi {
   ) => () => void;
 }
 
-export interface ProviderAuthServiceOptions {
+interface ProviderAuthServiceOptions {
   readonly authRepository: ProviderAuthRepositoryClient;
   readonly authClient?: CodexAuthClient;
   readonly authClientOptions?: CodexAuthClientOptions;

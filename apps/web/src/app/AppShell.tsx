@@ -324,8 +324,6 @@ export function AppShell() {
           </div>
         </header> */}
 
-        {/* <AuthStatus /> */}
-
         <header className="rail-header">
           <button
             className="flat-button rail-header__button"
@@ -530,6 +528,13 @@ export function AppShell() {
             });
             setActiveThreadId(thread.threadId);
             await chatClient.sendThreadMessage(thread.threadId, message);
+            const refreshedThread = await chatClient.openThread(
+              thread.threadId,
+            );
+            dispatch({
+              type: "thread.loaded",
+              thread: refreshedThread,
+            });
             return;
           }
 

@@ -4,7 +4,7 @@ import type {
   CommentThreadEvent,
 } from "../state/threadProjector";
 
-export interface DocumentBootstrap {
+interface DocumentBootstrap {
   readonly documentId: string;
   readonly title: string;
   readonly markdown: string;
@@ -54,7 +54,7 @@ export interface DemoMagickClientOptions {
   readonly cancelSchedule?: (handle: unknown) => void;
 }
 
-export interface DemoMagickClient {
+interface DemoMagickClient {
   getDocumentBootstrap: (
     requestedDocumentId: string,
   ) => Promise<DocumentBootstrap>;
@@ -169,7 +169,7 @@ const demoDocumentSeeds: readonly DemoDocumentSeed[] = [
   },
 ] as const;
 
-export const demoDocumentIds = demoDocumentSeeds.map(
+const demoDocumentIds = demoDocumentSeeds.map(
   (document) => document.documentId,
 );
 
@@ -501,6 +501,3 @@ export const createDemoMagickClient = (
     },
   };
 };
-
-export const demoMagickClient = createDemoMagickClient();
-export const demoDocumentId = defaultDocumentId;

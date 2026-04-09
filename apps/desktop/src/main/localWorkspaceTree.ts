@@ -8,11 +8,11 @@ import type {
   LocalWorkspaceTreeNode,
 } from "@magick/shared/localWorkspace";
 
-export interface LocalWorkspaceTreeDocument {
+interface LocalWorkspaceTreeDocument {
   readonly filePath: string;
 }
 
-export interface LocalWorkspaceTreeDirectory {
+interface LocalWorkspaceTreeDirectory {
   readonly directoryPath: string;
 }
 
@@ -63,7 +63,7 @@ const toSortedTree = (
       : node,
   );
 
-export const createWorkspaceTree = (args: {
+const createWorkspaceTree = (args: {
   documents: readonly LocalWorkspaceTreeDocument[];
   directories?: readonly LocalWorkspaceTreeDirectory[];
   documentsDir: string;

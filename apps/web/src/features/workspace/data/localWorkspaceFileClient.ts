@@ -13,7 +13,7 @@ import type {
 } from "@magick/shared/localWorkspace";
 import { getLocalWorkspaceFileTitle } from "@magick/shared/localWorkspace";
 
-export interface LocalWorkspaceFileClient {
+interface LocalWorkspaceFileClient {
   readonly supportsPushWorkspaceEvents: boolean;
   getWorkspaceBootstrap: () => Promise<LocalWorkspaceFilesBootstrap>;
   openFile: (filePath: string) => Promise<LocalFilePayload>;

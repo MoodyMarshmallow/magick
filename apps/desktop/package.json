@@ -2,8 +2,13 @@
   "name": "@magick/desktop",
   "private": true,
   "type": "module",
+  "dependencies": {
+    "@magick/shared": "workspace:*",
+    "electron": "^41.1.0"
+  },
   "scripts": {
-    "dev": "electron ./src/main/main.ts",
-    "start": "electron ./src/main/main.ts"
+    "dev": "nodemon --watch src/main --watch src/preload --ext ts --signal SIGTERM --exec \"bun run main\"",
+    "main": "cross-env NODE_OPTIONS=--import=tsx electron ./src/main/main.ts",
+    "start": "bun run main"
   }
 }

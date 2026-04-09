@@ -158,6 +158,51 @@ describe("ThreadOrchestrator", () => {
     expect(lastInput?.userMessage).toBe("Second");
   });
 
+  it("auto-names a new chat from the first message through the provider adapter", async () => {
+    const adapter = new FakeProviderAdapter({
+      mode: "stateful",
+      titleGenerator: () => "Generated title",
+    });
+    const { orchestrator, publishedEvents } = createTestContext(adapter);
+
+    const thread = await orchestrator.createThread({
+      workspaceId: "workspace_1",
+      providerKey: adapter.key,
+    });
+
+    const updatedThread = await run(
+      orchestrator.sendMessage(thread.threadId, "Name this chat"),
+    );
+
+    expect(updatedThread.title).toBe("Generated title");
+    expect(publishedEvents).toContain("thread.renamed");
+  });
+
+  it("does not auto-name after the first user message", async () => {
+    const titleGenerator = vi
+      .fn()
+      .mockReturnValueOnce("Generated title")
+      .mockReturnValueOnce("Second title");
+    const adapter = new FakeProviderAdapter({
+      mode: "stateful",
+      titleGenerator,
+    });
+    const { orchestrator } = createTestContext(adapter);
+
+    const thread = await orchestrator.createThread({
+      workspaceId: "workspace_1",
+      providerKey: adapter.key,
+    });
+
+    await run(orchestrator.sendMessage(thread.threadId, "First"));
+    const updatedThread = await run(
+      orchestrator.sendMessage(thread.threadId, "Second"),
+    );
+
+    expect(updatedThread.title).toBe("Generated title");
+    expect(titleGenerator).toHaveBeenCalledTimes(1);
+  });
+
   it("rebuilds prior tool calls and tool results into the next user turn history", async () => {
     const workspaceRoot = mkdtempSync(join(tmpdir(), "magick-tool-history-"));
     writeFileSync(join(workspaceRoot, "notes.md"), "hello\nworld\n", "utf8");
@@ -352,6 +397,7 @@ describe("ThreadOrchestrator", () => {
         supportsServerSideSessions: false,
       }),
       getResumeStrategy: () => "rebuild",
+      generateThreadTitle: () => Effect.succeed(null),
       createSession: ({ sessionId }) =>
         Effect.succeed({
           sessionId,

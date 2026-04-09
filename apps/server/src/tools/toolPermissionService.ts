@@ -1,4 +1,4 @@
-export interface ToolPermissionDecision {
+interface ToolPermissionDecision {
   readonly decision: "allow";
 }
 

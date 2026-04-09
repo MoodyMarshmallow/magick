@@ -22,9 +22,9 @@ export interface FileTreeFileItemData extends FileTreeItemDataBase {
   readonly filePath: string;
 }
 
-export type FileTreeItemData = FileTreeDirectoryItemData | FileTreeFileItemData;
+type FileTreeItemData = FileTreeDirectoryItemData | FileTreeFileItemData;
 
-export interface FileTreeAdapter {
+interface FileTreeAdapter {
   readonly rootItemId: string;
   readonly itemById: ReadonlyMap<string, FileTreeItemData>;
   readonly childrenByParentId: ReadonlyMap<string, readonly string[]>;

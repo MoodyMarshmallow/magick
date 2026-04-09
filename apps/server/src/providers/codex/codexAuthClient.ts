@@ -10,14 +10,14 @@ import {
 const CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann";
 const ISSUER = "https://auth.openai.com";
 
-export interface CodexTokenResponse {
+interface CodexTokenResponse {
   readonly id_token?: string;
   readonly access_token: string;
   readonly refresh_token: string;
   readonly expires_in?: number;
 }
 
-export interface CodexAuthTokenSet {
+interface CodexAuthTokenSet {
   readonly accessToken: string;
   readonly refreshToken: string;
   readonly expiresAt: number;

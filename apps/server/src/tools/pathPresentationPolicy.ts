@@ -1,6 +1,6 @@
 import { isAbsolute, relative, resolve, sep } from "node:path";
 
-export type ToolPathPresentationMode = "workspace-relative" | "absolute";
+type ToolPathPresentationMode = "workspace-relative" | "absolute";
 
 const toPosixPath = (value: string): string => value.split(sep).join("/");
 

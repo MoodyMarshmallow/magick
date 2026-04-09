@@ -45,6 +45,17 @@ describe("FakeProviderAdapter", () => {
     );
   });
 
+  it("generates thread titles through the provider adapter", async () => {
+    const adapter = new FakeProviderAdapter({
+      mode: "stateful",
+      titleGenerator: (firstMessage) => `Title: ${firstMessage}`,
+    });
+
+    await expect(
+      Effect.runPromise(adapter.generateThreadTitle("Hello")),
+    ).resolves.toBe("Title: Hello");
+  });
+
   it("requests a tool and continues once the tool result is submitted", async () => {
     const adapter = new FakeProviderAdapter({
       mode: "stateful",

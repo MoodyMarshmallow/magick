@@ -1,6 +1,6 @@
 // Parses Codex-related JWT claims and extracts account metadata used by auth flows.
 
-export interface CodexJwtClaims {
+interface CodexJwtClaims {
   readonly chatgpt_account_id?: string;
   readonly organizations?: readonly { readonly id: string }[];
   readonly email?: string;

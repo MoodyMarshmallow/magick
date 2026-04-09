@@ -10,13 +10,13 @@ import type {
   ServerPushEnvelope,
 } from "@magick/contracts/ws";
 
-export interface ChatBootstrap {
+interface ChatBootstrap {
   readonly threads: readonly import("@magick/contracts/chat").ThreadSummary[];
   readonly activeThread: ThreadViewModel | null;
   readonly providerAuth: Readonly<Record<ProviderKey, ProviderAuthState>>;
 }
 
-export interface ChatClient {
+interface ChatClient {
   getBootstrap: (args: {
     workspaceId: string;
     threadId?: string;

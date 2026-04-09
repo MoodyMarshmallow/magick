@@ -1,4 +1,4 @@
-export interface WorkspaceTabInsertionTarget {
+interface WorkspaceTabInsertionTarget {
   readonly index: number;
   readonly markerLeft: number;
 }

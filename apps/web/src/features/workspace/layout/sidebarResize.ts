@@ -1,6 +1,6 @@
 export const leftSidebarMinWidth = 220;
 export const rightSidebarMinWidth = 280;
-export const workspaceMinWidth = 560;
+const workspaceMinWidth = 560;
 
 export const clamp = (value: number, min: number, max: number): number =>
   Math.min(Math.max(value, min), max);

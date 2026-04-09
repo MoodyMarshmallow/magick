@@ -1,6 +1,4 @@
 @import url("https://fonts.googleapis.com/css2?family=Alegreya:wght@500;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap");
-@import "katex/dist/katex.min.css";
-
 @font-face {
   font-family: "Departure Mono";
   src: url("/fonts/DepartureMono-Regular.woff2") format("woff2");

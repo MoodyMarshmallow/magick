@@ -1,9 +1,9 @@
 import type { WorkspaceDropPosition } from "../state/workspaceSessionTypes";
 
-export const paneEdgeSnapRatio = 0.18;
-export const tabStripTopBandRatio = 0.22;
+const paneEdgeSnapRatio = 0.18;
+const tabStripTopBandRatio = 0.22;
 
-export interface PaneSnapCandidate {
+interface PaneSnapCandidate {
   readonly type: "split" | "insert";
   readonly position: WorkspaceDropPosition;
   readonly distance: number;
@@ -11,7 +11,7 @@ export interface PaneSnapCandidate {
   readonly insertionIndex?: number;
 }
 
-export interface WorkspacePaneSnapResult {
+interface WorkspacePaneSnapResult {
   readonly type: "split" | "insert";
   readonly position: WorkspaceDropPosition;
   readonly markerLeft?: number;

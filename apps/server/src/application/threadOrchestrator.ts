@@ -325,6 +325,70 @@ export class ThreadOrchestrator implements ThreadOrchestratorApi {
     return history;
   };
 
+  readonly #shouldAutoNameThread = (args: {
+    readonly thread: ThreadRecord;
+    readonly snapshot: ThreadViewModel;
+  }): boolean => {
+    if (args.thread.title !== "New chat") {
+      return false;
+    }
+
+    return !args.snapshot.messages.some((message) => message.role === "user");
+  };
+
+  readonly #autoNameThreadFromFirstMessage = (args: {
+    readonly thread: ThreadRecord;
+    readonly content: string;
+  }): Effect.Effect<void, never> =>
+    Effect.gen(
+      function* (this: ThreadOrchestrator) {
+        const adapter = yield* fromSync(() =>
+          this.#providerRegistry.get(args.thread.providerKey),
+        ).pipe(
+          Effect.catchAll((error) => {
+            console.warn("Failed to load provider for thread auto-naming.", {
+              threadId: args.thread.id,
+              providerKey: args.thread.providerKey,
+              error: backendErrorMessage(error),
+            });
+            return Effect.succeed(null);
+          }),
+        );
+        if (!adapter) {
+          return;
+        }
+
+        const generatedTitle = yield* adapter
+          .generateThreadTitle(args.content)
+          .pipe(
+            Effect.catchAll((error) => {
+              console.warn("Provider thread auto-naming failed.", {
+                threadId: args.thread.id,
+                providerKey: args.thread.providerKey,
+                error: backendErrorMessage(error),
+              });
+              return Effect.succeed(null);
+            }),
+          );
+        if (!generatedTitle?.trim()) {
+          return;
+        }
+
+        yield* fromPromise(() =>
+          this.renameThread(args.thread.id, generatedTitle),
+        ).pipe(
+          Effect.catchAll((error) => {
+            console.warn("Failed to persist auto-generated thread title.", {
+              threadId: args.thread.id,
+              providerKey: args.thread.providerKey,
+              error: backendErrorMessage(error),
+            });
+            return Effect.void;
+          }),
+        );
+      }.bind(this),
+    ).pipe(Effect.asVoid);
+
   readonly #persistAndProject = (
     threadId: string,
     events: readonly Omit<DomainEvent, "sequence">[],
@@ -919,6 +983,7 @@ export class ThreadOrchestrator implements ThreadOrchestratorApi {
         const assistantMessageId = this.#idGenerator.next("message");
         const now = this.#clock.now();
         const historyItems = this.#buildConversationHistory(threadId);
+        const shouldAutoName = this.#shouldAutoNameThread({ thread, snapshot });
 
         const prelude = yield* this.#persistAndProject(threadId, [
           {
@@ -949,6 +1014,10 @@ export class ThreadOrchestrator implements ThreadOrchestratorApi {
           turnId,
           sessionId: runtime.recordId,
         });
+
+        if (shouldAutoName) {
+          yield* this.#autoNameThreadFromFirstMessage({ thread, content });
+        }
 
         const stream = yield* runtime.session.startTurn({
           threadId,

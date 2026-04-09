@@ -2,6 +2,17 @@
   "name": "@magick/server",
   "private": true,
   "type": "module",
+  "dependencies": {
+    "@magick/contracts": "workspace:*",
+    "@magick/shared": "workspace:*",
+    "better-sqlite3": "^12.8.0",
+    "effect": "^3.13.11",
+    "ws": "^8.18.1",
+    "zod": "^4.0.1"
+  },
+  "devDependencies": {
+    "vitest": "^3.1.1"
+  },
   "scripts": {
     "dev": "nodemon --watch src --ext ts --signal SIGTERM --exec \"node --import=tsx ./src/main.ts\"",
     "start": "node --import=tsx ./src/main.ts"

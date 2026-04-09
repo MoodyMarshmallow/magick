@@ -11,10 +11,13 @@ import {
 describe("CodexProviderAdapter", () => {
   it("delegates session creation and reports rebuild-based capabilities", async () => {
     const createSession = vi.fn().mockResolvedValue({ sessionId: "session_1" });
+    const generateThreadTitle = vi.fn().mockResolvedValue("Generated title");
     const resumeSession = vi.fn().mockResolvedValue({ sessionId: "session_1" });
     const adapter = new CodexProviderAdapter({
       createSession: (input) =>
         Effect.promise(() => createSession(input) as never),
+      generateThreadTitle: (firstMessage) =>
+        Effect.promise(() => generateThreadTitle(firstMessage) as never),
       resumeSession: (input) =>
         Effect.promise(() => resumeSession(input) as never),
     });
@@ -28,7 +31,11 @@ describe("CodexProviderAdapter", () => {
         sessionId: "session_1",
       }),
     );
+    await expect(
+      Effect.runPromise(adapter.generateThreadTitle("Hello")),
+    ).resolves.toBe("Generated title");
     expect(createSession).toHaveBeenCalled();
+    expect(generateThreadTitle).toHaveBeenCalledWith("Hello");
   });
 
   it("creates stateless direct-http sessions through the runtime factory", async () => {

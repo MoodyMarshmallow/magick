@@ -3,6 +3,7 @@
 import { Effect, Stream } from "effect";
 
 import type { ProviderAuthRecord } from "@magick/contracts/provider";
+import { maxThreadTitleLength } from "@magick/shared/threadTitle";
 import { nowIso } from "@magick/shared/time";
 import { ProviderFailureError } from "../../core/errors";
 import type { ProviderAuthRepositoryClient } from "../../persistence/providerAuthRepository";
@@ -12,6 +13,7 @@ const CODEX_API_ENDPOINT = "https://chatgpt.com/backend-api/codex/responses";
 const REFRESH_SAFETY_MARGIN_MS = 60_000;
 const CODEX_SYSTEM_PROMPT =
   "You are Magick's assistant for research, learning, and document work inside the user's workspace. Use tools sparingly, keep file paths relative to the workspace root, and present concise, provenance-aware results. When writing math in markdown, always use dollar-delimited LaTeX: `$...$` for inline math and `$$...$$` for display math. Do not use `\\(...\\)` or `\\[...\\]` delimiters.";
+const THREAD_TITLE_SYSTEM_PROMPT = `Generate a concise chat title from the user's first message. Return only the title text with no quotes, markdown, prefix, or explanation. Keep it under ${maxThreadTitleLength} characters.`;
 
 export interface CodexResponsesClientOptions {
   readonly fetch?: typeof fetch;
@@ -290,6 +292,18 @@ const parseCodexStreamMessage = (
   }
 };
 
+const normalizeGeneratedThreadTitle = (value: string): string | null => {
+  const normalized = value
+    .trim()
+    .replace(/^['"`]+|['"`]+$/g, "")
+    .trim();
+  if (!normalized) {
+    return null;
+  }
+
+  return normalized.slice(0, maxThreadTitleLength);
+};
+
 export class CodexResponsesClient {
   readonly #fetch: typeof fetch;
   readonly #endpoint: string;
@@ -403,6 +417,7 @@ export class CodexResponsesClient {
     )[];
     readonly tools?: readonly CodexToolDefinition[];
     readonly signal?: AbortSignal;
+    readonly instructions?: string;
   }): Stream.Stream<CodexStreamEvent, ProviderFailureError> {
     logDebug("request", {
       messageCount: input.messages.length,
@@ -430,7 +445,7 @@ export class CodexResponsesClient {
                 model: this.#defaultModel,
                 stream: true,
                 store: false,
-                instructions: CODEX_SYSTEM_PROMPT,
+                instructions: input.instructions ?? CODEX_SYSTEM_PROMPT,
                 tools:
                   input.tools?.map((tool) => ({
                     type: "function",
@@ -525,5 +540,24 @@ export class CodexResponsesClient {
         ),
       ),
     );
+  }
+
+  generateThreadTitle(
+    firstMessage: string,
+  ): Effect.Effect<string | null, ProviderFailureError> {
+    return Stream.runFold(
+      this.streamResponse({
+        messages: [{ role: "user", content: firstMessage }],
+        instructions: THREAD_TITLE_SYSTEM_PROMPT,
+      }),
+      "",
+      (current, event) => {
+        if (event.type === "output.delta") {
+          return `${current}${event.delta}`;
+        }
+
+        return current;
+      },
+    ).pipe(Effect.map(normalizeGeneratedThreadTitle));
   }
 }

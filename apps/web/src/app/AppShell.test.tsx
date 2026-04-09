@@ -59,6 +59,12 @@ const createdThread: ThreadViewModel = {
   updatedAt: "2026-04-09T00:00:00.000Z",
 };
 
+const renamedThread: ThreadViewModel = {
+  ...createdThread,
+  title: "Generated title",
+  updatedAt: "2026-04-09T00:00:01.000Z",
+};
+
 describe("AppShell", () => {
   beforeEach(() => {
     useCommentUiStore.setState(useCommentUiStore.getInitialState());
@@ -83,6 +89,7 @@ describe("AppShell", () => {
       },
     });
     vi.mocked(chatClient.createThread).mockResolvedValue(createdThread);
+    vi.mocked(chatClient.openThread).mockResolvedValue(renamedThread);
     vi.mocked(chatClient.sendThreadMessage).mockResolvedValue(undefined);
   });
 
@@ -117,6 +124,7 @@ describe("AppShell", () => {
         "thread_created",
         "First draft message",
       );
+      expect(chatClient.openThread).toHaveBeenCalledWith("thread_created");
     });
 
     expect(
@@ -124,5 +132,12 @@ describe("AppShell", () => {
     ).toBeLessThan(
       vi.mocked(chatClient.sendThreadMessage).mock.invocationCallOrder[0] ?? 0,
     );
+    expect(
+      vi.mocked(chatClient.sendThreadMessage).mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      vi.mocked(chatClient.openThread).mock.invocationCallOrder[0] ?? 0,
+    );
+
+    await screen.findByRole("button", { name: "Generated title" });
   });
 });

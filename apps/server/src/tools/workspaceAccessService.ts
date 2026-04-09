@@ -19,13 +19,13 @@ type ExecFileRunner = (
   options: { readonly cwd: string },
 ) => Promise<ExecFileResult>;
 
-export interface WorkspaceGrepMatch {
+interface WorkspaceGrepMatch {
   readonly path: string;
   readonly line: number;
   readonly text: string;
 }
 
-export interface WorkspaceListTreeResult {
+interface WorkspaceListTreeResult {
   readonly path: string;
   readonly output: string;
   readonly count: number;

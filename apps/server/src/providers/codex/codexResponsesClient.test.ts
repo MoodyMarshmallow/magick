@@ -128,6 +128,49 @@ describe("CodexResponsesClient", () => {
     expect(request.input[2].content[0].type).toBe("input_text");
   });
 
+  it("generates a normalized thread title", async () => {
+    const authRepository = {
+      get: vi.fn().mockReturnValue({
+        providerKey: "codex",
+        authMode: "chatgpt",
+        accessToken: "access",
+        refreshToken: "refresh",
+        expiresAt: Date.now() + 120_000,
+        accountId: "acct_1",
+        email: "user@example.com",
+        planType: null,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      }),
+      upsert: vi.fn(),
+      delete: vi.fn(),
+    };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(
+          'data: {"type":"response.output_text.delta","delta":"\\"Release planning\\""}\n\n' +
+            'data: {"type":"response.completed"}\n\n',
+          { status: 200, headers: { "Content-Type": "text/event-stream" } },
+        ),
+      );
+
+    const client = new CodexResponsesClient({
+      authRepository: authRepository as never,
+      authClient: { refreshAccessToken: vi.fn() } as unknown as CodexAuthClient,
+      fetch: fetchMock as never,
+    });
+
+    await expect(
+      Effect.runPromise(client.generateThreadTitle("Plan the release")),
+    ).resolves.toBe("Release planning");
+
+    const request = JSON.parse(
+      String(fetchMock.mock.calls[0]?.[1]?.body ?? "{}"),
+    );
+    expect(request.instructions).toContain("Generate a concise chat title");
+  });
+
   it("fails when auth is missing", async () => {
     const client = new CodexResponsesClient({
       authRepository: {

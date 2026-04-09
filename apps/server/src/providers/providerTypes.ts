@@ -135,6 +135,9 @@ export interface ProviderAdapter {
   readonly createSession: (
     input: CreateProviderSessionInput,
   ) => Effect.Effect<ProviderSessionHandle, ProviderFailureError>;
+  readonly generateThreadTitle: (
+    firstMessage: string,
+  ) => Effect.Effect<string | null, ProviderFailureError>;
   readonly resumeSession: (
     input: ResumeProviderSessionInput,
   ) => Effect.Effect<ProviderSessionHandle, ProviderFailureError>;

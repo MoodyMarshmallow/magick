@@ -25,16 +25,19 @@ import {
   type CodexResponsesClientOptions,
 } from "./codexResponsesClient";
 
-export interface CodexRuntimeFactory {
+interface CodexRuntimeFactory {
   readonly createSession: (
     input: CreateProviderSessionInput,
   ) => Effect.Effect<ProviderSessionHandle, ProviderFailureError>;
+  readonly generateThreadTitle: (
+    firstMessage: string,
+  ) => Effect.Effect<string | null, ProviderFailureError>;
   readonly resumeSession: (
     input: ResumeProviderSessionInput,
   ) => Effect.Effect<ProviderSessionHandle, ProviderFailureError>;
 }
 
-export interface CodexProviderOptions
+interface CodexProviderOptions
   extends Omit<CodexResponsesClientOptions, "authClient" | "authRepository">,
     CodexAuthClientOptions {
   readonly authRepository: ProviderAuthRepositoryClient;
@@ -261,6 +264,8 @@ export const createCodexRuntimeFactory = (
           responsesClient,
         }),
       ),
+    generateThreadTitle: (firstMessage) =>
+      responsesClient.generateThreadTitle(firstMessage),
     resumeSession: (input) =>
       Effect.succeed(
         new CodexSessionHandle({
@@ -292,6 +297,9 @@ export class CodexProviderAdapter implements ProviderAdapter {
 
   readonly createSession = (input: CreateProviderSessionInput) =>
     this.#runtimeFactory.createSession(input);
+
+  readonly generateThreadTitle = (firstMessage: string) =>
+    this.#runtimeFactory.generateThreadTitle(firstMessage);
 
   readonly resumeSession = (input: ResumeProviderSessionInput) =>
     this.#runtimeFactory.resumeSession(input);

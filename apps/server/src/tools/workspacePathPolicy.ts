@@ -3,7 +3,7 @@ import { dirname, extname, isAbsolute, resolve } from "node:path";
 
 const supportedFileExtensions = new Set([".md"]);
 
-export class WorkspacePathPolicyError extends Error {
+class WorkspacePathPolicyError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "WorkspacePathPolicyError";

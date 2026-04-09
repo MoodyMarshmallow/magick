@@ -12,7 +12,7 @@ import type {
   WorkspaceTabId,
 } from "./workspaceSessionTypes";
 
-export interface WorkspaceIdFactory {
+interface WorkspaceIdFactory {
   createPaneId: () => WorkspacePaneId;
   createSplitId: () => string;
   createTabId: () => WorkspaceTabId;
@@ -765,7 +765,7 @@ export const closeDocumentInWorkspace = (args: {
   };
 };
 
-export const findFirstLeafPane = (
+const findFirstLeafPane = (
   node: WorkspacePaneNode | null,
 ): WorkspaceLeafPane | null => {
   if (!node) {
@@ -775,6 +775,6 @@ export const findFirstLeafPane = (
   return isLeafPane(node) ? node : findFirstLeafPane(node.first);
 };
 
-export const findFirstLeafPaneId = (
+const findFirstLeafPaneId = (
   node: WorkspacePaneNode | null,
 ): WorkspacePaneId | null => findFirstLeafPane(node)?.id ?? null;

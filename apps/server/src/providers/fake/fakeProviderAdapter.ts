@@ -24,11 +24,12 @@ export type FakeProviderResponse =
       readonly onResult: (output: string) => FakeProviderResponse;
     };
 
-export interface FakeProviderAdapterOptions {
+interface FakeProviderAdapterOptions {
   readonly key?: string;
   readonly mode: FakeProviderMode;
   readonly chunkDelayMs?: number;
   readonly responder?: (input: StartTurnInput) => FakeProviderResponse;
+  readonly titleGenerator?: (firstMessage: string) => string | null;
 }
 
 class FakeProviderSession implements ProviderSessionHandle {
@@ -195,6 +196,7 @@ export class FakeProviderAdapter implements ProviderAdapter {
   readonly #mode: FakeProviderMode;
   readonly #chunkDelayMs: number;
   readonly #responder: (input: StartTurnInput) => FakeProviderResponse;
+  readonly #titleGenerator: (firstMessage: string) => string | null;
   readonly sessions = new Map<string, FakeProviderSession>();
 
   constructor(options: FakeProviderAdapterOptions) {
@@ -205,6 +207,7 @@ export class FakeProviderAdapter implements ProviderAdapter {
       options.responder ??
       ((input) =>
         `${this.#mode}:${input.contextMessages.map((message) => message.content).join(" | ")} => ${input.userMessage}`);
+    this.#titleGenerator = options.titleGenerator ?? (() => null);
   }
 
   readonly listCapabilities = (): ProviderCapabilities => ({
@@ -218,6 +221,9 @@ export class FakeProviderAdapter implements ProviderAdapter {
 
   readonly getResumeStrategy = () =>
     (this.#mode === "stateful" ? "native" : "rebuild") as "native" | "rebuild";
+
+  readonly generateThreadTitle = (firstMessage: string) =>
+    Effect.sync(() => this.#titleGenerator(firstMessage));
 
   readonly createSession = (input: CreateProviderSessionInput) =>
     Effect.sync(() => {
