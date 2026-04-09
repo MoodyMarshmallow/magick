@@ -11,6 +11,7 @@ import {
   type MouseEvent,
   type PointerEvent,
   type WheelEvent,
+  useCallback,
   useEffect,
   useRef,
   useState,
@@ -291,6 +292,8 @@ function WorkspaceLeafPaneView({
     string | null
   >(null);
   const [titleDraft, setTitleDraft] = useState("");
+  const [titleElement, setTitleElement] = useState<HTMLElement | null>(null);
+  const [titleHeight, setTitleHeight] = useState(0);
   const skipNextRenameBlurRef = useRef(false);
   const tabStripRef = useRef<HTMLDivElement | null>(null);
   const titleInputRef = useRef<HTMLInputElement | null>(null);
@@ -311,6 +314,40 @@ function WorkspaceLeafPaneView({
     titleInputRef.current?.focus();
     titleInputRef.current?.select();
   }, [activeTab?.documentId, editingDocumentId]);
+
+  useEffect(() => {
+    if (!titleElement) {
+      setTitleHeight(0);
+      return;
+    }
+
+    const syncTitleHeight = () => {
+      setTitleHeight(titleElement.getBoundingClientRect().height);
+    };
+
+    syncTitleHeight();
+
+    if (typeof ResizeObserver === "undefined") {
+      return;
+    }
+
+    const resizeObserver = new ResizeObserver(() => {
+      syncTitleHeight();
+    });
+    resizeObserver.observe(titleElement);
+
+    return () => {
+      resizeObserver.disconnect();
+    };
+  }, [titleElement]);
+
+  const handleTitleElementRef = useCallback((element: HTMLElement | null) => {
+    setTitleElement(element);
+  }, []);
+
+  const documentScrollStyle = {
+    "--workspace-document-title-height": `${titleHeight}px`,
+  } as CSSProperties;
 
   const beginDocumentRename = () => {
     if (!activeTab || !activeTitle) {
@@ -825,7 +862,10 @@ function WorkspaceLeafPaneView({
       >
         {activeTab ? (
           <>
-            <div className="workspace__document-scroll">
+            <div
+              className="workspace__document-scroll"
+              style={documentScrollStyle}
+            >
               {activeTitle && editingDocumentId === activeTab.documentId ? (
                 <input
                   aria-label={`Rename ${activeTitle}`}
@@ -843,7 +883,10 @@ function WorkspaceLeafPaneView({
                     setTitleDraft(event.target.value);
                   }}
                   onKeyDown={handleDocumentRenameKeyDown}
-                  ref={titleInputRef}
+                  ref={(element) => {
+                    titleInputRef.current = element;
+                    handleTitleElementRef(element);
+                  }}
                   type="text"
                   value={titleDraft}
                 />
@@ -851,6 +894,7 @@ function WorkspaceLeafPaneView({
                 <button
                   className="workspace__document-title workspace__document-title-button"
                   onClick={beginDocumentRename}
+                  ref={handleTitleElementRef}
                   title={activeTitle ?? activeTab.documentId}
                   type="button"
                 >

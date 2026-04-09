@@ -144,4 +144,52 @@ describe("milkdownFormatState", () => {
       strike: false,
     });
   });
+
+  it("uses the explicit selection when it differs from view.state.selection", () => {
+    const view = {
+      state: {
+        doc: {
+          rangeHasMark: vi.fn(() => false),
+          textBetween: vi.fn(() => ""),
+        },
+        schema: {
+          marks: {
+            emphasis: { isInSet: () => null },
+            inlineCode: { isInSet: () => null },
+            strike_through: { isInSet: () => null },
+            strong: { isInSet: () => null },
+          },
+        },
+        selection: {
+          $from: createResolvedPos([
+            { type: { name: "doc" } },
+            { type: { name: "ordered_list" } },
+            { type: { name: "list_item" } },
+            { isTextblock: true, type: { name: "paragraph" } },
+          ]),
+          empty: true,
+          from: 4,
+          to: 4,
+        },
+        storedMarks: null,
+      },
+    } as unknown as Parameters<typeof getEditorFormatState>[0];
+
+    const headingSelection = {
+      $from: createResolvedPos([
+        { type: { name: "doc" } },
+        { attrs: { level: 2 }, isTextblock: true, type: { name: "heading" } },
+      ]),
+      empty: true,
+      from: 8,
+      to: 8,
+    } as unknown as Parameters<typeof getEditorFormatState>[1];
+
+    expect(getEditorFormatState(view, headingSelection)).toMatchObject({
+      bulletList: false,
+      headingLevel: 2,
+      orderedList: false,
+      paragraph: false,
+    });
+  });
 });

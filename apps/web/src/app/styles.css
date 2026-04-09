@@ -1471,6 +1471,12 @@ button:disabled {
   outline: none;
 }
 
+.editor-surface__prose .ProseMirror::after {
+  content: "";
+  display: block;
+  height: calc(100% - 1lh + var(--workspace-document-title-height, 0px));
+}
+
 .editor-surface__prose > :first-child {
   margin-top: 0;
 }

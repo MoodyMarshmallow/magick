@@ -1,4 +1,5 @@
 import type { ResolvedPos } from "@milkdown/prose/model";
+import type { Selection } from "@milkdown/prose/state";
 import type { EditorView } from "@milkdown/prose/view";
 import type {
   EditorFormatState,
@@ -34,17 +35,18 @@ const getTextBlock = ($from: ResolvedPos) => {
   return null;
 };
 
-const isMarkActive = (view: EditorView, markName: string): boolean => {
+const isMarkActive = (
+  view: EditorView,
+  markName: string,
+  selection: Selection = view.state.selection,
+): boolean => {
   const markType = view.state.schema.marks[markName];
   if (!markType) {
     return false;
   }
 
-  const {
-    selection: { empty, from, to, $from },
-    storedMarks,
-    doc,
-  } = view.state;
+  const { storedMarks, doc } = view.state;
+  const { empty, from, to, $from } = selection;
 
   if (empty) {
     const marks = storedMarks ?? $from.marks();
@@ -54,8 +56,11 @@ const isMarkActive = (view: EditorView, markName: string): boolean => {
   return doc.rangeHasMark(from, to, markType);
 };
 
-export const getEditorFormatState = (view: EditorView): EditorFormatState => {
-  const { $from } = view.state.selection;
+export const getEditorFormatState = (
+  view: EditorView,
+  selection: Selection = view.state.selection,
+): EditorFormatState => {
+  const { $from } = selection;
   const textBlock = getTextBlock($from);
   const headingNode = getAncestorNode($from, "heading");
   const headingLevel = headingNode?.attrs.level;
@@ -68,17 +73,18 @@ export const getEditorFormatState = (view: EditorView): EditorFormatState => {
     bulletList: hasAncestorNode($from, "bullet_list"),
     orderedList: hasAncestorNode($from, "ordered_list"),
     blockquote: hasAncestorNode($from, "blockquote"),
-    bold: isMarkActive(view, "strong"),
-    italic: isMarkActive(view, "emphasis"),
-    strike: isMarkActive(view, "strike_through"),
-    code: isMarkActive(view, "inlineCode"),
+    bold: isMarkActive(view, "strong", selection),
+    italic: isMarkActive(view, "emphasis", selection),
+    strike: isMarkActive(view, "strike_through", selection),
+    code: isMarkActive(view, "inlineCode", selection),
   };
 };
 
 export const getEditorSelectionState = (
   view: EditorView,
+  selection: Selection = view.state.selection,
 ): EditorSelectionState | null => {
-  const { empty, from, to } = view.state.selection;
+  const { empty, from, to } = selection;
   if (empty) {
     return null;
   }
