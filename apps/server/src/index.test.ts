@@ -1,4 +1,4 @@
-import { existsSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { join } from "node:path";
 
@@ -65,19 +65,44 @@ describe("createBackendServices", () => {
     removeTestDatabaseDirectory(join(process.cwd(), ".magick-test"));
   });
 
-  it("resolves the default local workspace directory from the repo root", () => {
-    expect(resolveDefaultWorkspaceRoot()).toBe(
-      join(resolveBackendRepoRoot(), ".magick", "workspace"),
-    );
+  it("resolves the default local workspace directory from the local home directory", () => {
+    expect(
+      resolveDefaultWorkspaceRoot({
+        HOME: "/Users/tester",
+      } as NodeJS.ProcessEnv),
+    ).toBe("/Users/tester/Documents/magick");
   });
 
-  it("resolves the default workspace root from the repo root instead of the package cwd", () => {
+  it("resolves the default workspace root from the local home directory", () => {
     expect(resolveDefaultDatabasePath()).toBe(
       join(resolveBackendRepoRoot(), ".magick", "backend.db"),
     );
-    expect(resolveDefaultWorkspaceRoot()).toBe(
-      join(resolveBackendRepoRoot(), ".magick", "workspace"),
-    );
+    expect(
+      resolveDefaultWorkspaceRoot({
+        HOME: "/Users/tester",
+      } as NodeJS.ProcessEnv),
+    ).toBe("/Users/tester/Documents/magick");
+  });
+
+  it("resolves the default workspace root from the XDG user dirs config", () => {
+    const configRoot = mkdtempSync(join(process.cwd(), ".magick-test-xdg-"));
+
+    try {
+      writeFileSync(
+        join(configRoot, "user-dirs.dirs"),
+        'XDG_DOCUMENTS_DIR="$HOME/Localized Documents"\n',
+        "utf8",
+      );
+
+      expect(
+        resolveDefaultWorkspaceRoot({
+          HOME: "/home/tester",
+          XDG_CONFIG_HOME: configRoot,
+        } as NodeJS.ProcessEnv),
+      ).toBe("/home/tester/Localized Documents/magick");
+    } finally {
+      removeTestDatabaseDirectory(configRoot);
+    }
   });
 
   it("persists thread renames across backend restarts", async () => {

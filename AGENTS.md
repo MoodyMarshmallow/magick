@@ -64,10 +64,12 @@ Specific guidance for this repo:
 
 ## Package Roles
 
-- `apps/server`: Node.js WebSocket server. Owns provider orchestration, auth integration, persistence, and WebSocket delivery for the React app.
-- `apps/web`: React/Vite UI. Owns session UX, conversation/event rendering, and client-side state. Connects to the server via WebSocket.
-- `packages/contracts`: Shared effect/Schema schemas and TypeScript contracts for provider events, WebSocket protocol, and model/session types. Keep this package schema-only — no runtime logic.
-- `packages/shared`: Shared runtime utilities consumed by both server and web. Uses explicit subpath exports (e.g. `@magick/shared`) — no barrel index.
+- `apps/server`: Backend runtime. Owns provider integration, auth, persistence, orchestration, tools, and WebSocket transport.
+- `apps/web`: Browser UI. Owns chat, workspace, document editing, and client-side state over the backend API.
+- `apps/desktop`: Electron shell. Owns desktop packaging, local workspace access, filesystem watching, and native bridges.
+- `packages/contracts`: Shared schemas and protocol/types for events, commands, providers, and persisted thread state.
+- `packages/shared`: Shared runtime utilities used across apps, including ids, time, workspace helpers, and small cross-platform helpers.
+- `scripts` and repo root config: Developer entrypoints, local orchestration, and workspace-wide tooling/configuration.
 
 ## Frontend Design Guidelines
 
