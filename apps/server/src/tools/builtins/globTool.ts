@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { ToolDefinition } from "../toolTypes";
+import { loadToolDescription } from "./toolDescription";
 
 const globToolSchema = z.object({
   pattern: z
@@ -11,7 +12,7 @@ const globToolSchema = z.object({
 
 export const globTool: ToolDefinition<typeof globToolSchema> = {
   id: "glob",
-  description: "Find files by pattern",
+  description: loadToolDescription("glob.txt"),
   schema: globToolSchema,
   execute: async (args, context) => {
     const matches = await context.workspace.glob(args.pattern);

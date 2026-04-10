@@ -429,6 +429,9 @@ export class ThreadOrchestrator implements ThreadOrchestratorApi {
       inputSchema: tool.inputSchemaJson,
     }));
 
+  readonly #normalizeWorkspaceToolPath = (path: string): string =>
+    this.#workspaceAccess.toAgentPath(this.#workspaceAccess.resolveFile(path));
+
   readonly #extractToolLocationMetadata = (input: unknown) => {
     if (typeof input !== "object" || input === null) {
       return { path: null, url: null } as const;
@@ -663,6 +666,7 @@ export class ThreadOrchestrator implements ThreadOrchestratorApi {
     thread: ThreadRecord,
     runtime: ProviderSessionRuntime,
     providerEvent: ProviderEvent,
+    readFilesForTurn = new Set<string>(),
   ): Effect.Effect<void, BackendError> => {
     if (providerEvent.type !== "tool.call.requested") {
       return this.#applyProviderEvent(
@@ -692,6 +696,11 @@ export class ThreadOrchestrator implements ThreadOrchestratorApi {
           turnId: providerEvent.turnId,
           workspace: this.#workspaceAccess,
           web: this.#webContent,
+          hasReadFile: (path) =>
+            readFilesForTurn.has(this.#normalizeWorkspaceToolPath(path)),
+          markFileRead: (path) => {
+            readFilesForTurn.add(this.#normalizeWorkspaceToolPath(path));
+          },
         });
 
         const toolResult = yield* Effect.either(
@@ -723,7 +732,12 @@ export class ThreadOrchestrator implements ThreadOrchestratorApi {
           });
 
           yield* Stream.runForEach(continuation, (continuationEvent) =>
-            this.#processProviderEvent(thread, runtime, continuationEvent),
+            this.#processProviderEvent(
+              thread,
+              runtime,
+              continuationEvent,
+              readFilesForTurn,
+            ),
           );
           return;
         }

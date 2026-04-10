@@ -9,6 +9,8 @@ export interface ToolExecutionContext {
   readonly turnId: string;
   readonly workspace: WorkspaceAccessService;
   readonly web: WebContentService;
+  readonly hasReadFile: (path: string) => boolean;
+  readonly markFileRead: (path: string) => void;
 }
 
 export interface ToolExecutionResult {

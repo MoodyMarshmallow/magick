@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { ToolDefinition } from "../toolTypes";
+import { loadToolDescription } from "./toolDescription";
 
 const fetchToolSchema = z.object({
   url: z
@@ -11,7 +12,7 @@ const fetchToolSchema = z.object({
 
 export const fetchTool: ToolDefinition<typeof fetchToolSchema> = {
   id: "fetch",
-  description: "Fetch a URL",
+  description: loadToolDescription("fetch.txt"),
   schema: fetchToolSchema,
   execute: async (args, context) => {
     const result = await context.web.fetchUrl(args.url);

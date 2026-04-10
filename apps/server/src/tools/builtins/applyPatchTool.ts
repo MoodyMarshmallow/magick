@@ -4,6 +4,7 @@ import {
   formatFileDiffPreview,
 } from "../fileDiffPreview";
 import { type ToolDefinition, ToolExecutionError } from "../toolTypes";
+import { loadToolDescription } from "./toolDescription";
 
 const applyPatchToolSchema = z.object({
   path: z
@@ -32,7 +33,7 @@ const applyPatchToolSchema = z.object({
 
 export const applyPatchTool: ToolDefinition<typeof applyPatchToolSchema> = {
   id: "apply_patch",
-  description: "Apply targeted replacements to one file",
+  description: loadToolDescription("apply_patch.txt"),
   schema: applyPatchToolSchema,
   execute: async (args, context) => {
     const currentFile = await context.workspace.read(args.path);

@@ -56,7 +56,6 @@ describe("ToolRegistry", () => {
       },
     });
   });
-
 });
 
 describe("ToolExecutor", () => {
@@ -73,6 +72,8 @@ describe("ToolExecutor", () => {
           turnId: "turn_1",
           workspace: {} as never,
           web: {} as never,
+          hasReadFile: () => false,
+          markFileRead: () => undefined,
         },
       }),
     ).rejects.toThrow();

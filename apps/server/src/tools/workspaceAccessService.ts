@@ -279,6 +279,24 @@ export class WorkspaceAccessService {
     }
   };
 
+  readonly exists = async (filePath: string): Promise<boolean> => {
+    try {
+      const absoluteFilePath = this.resolveFile(filePath);
+      const details = await stat(absoluteFilePath);
+      return details.isFile();
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        "code" in error &&
+        error.code === "ENOENT"
+      ) {
+        return false;
+      }
+
+      throw this.sanitizeError(error);
+    }
+  };
+
   readonly write = async (
     filePath: string,
     content: string,

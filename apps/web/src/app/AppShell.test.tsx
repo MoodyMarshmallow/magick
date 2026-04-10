@@ -2,11 +2,29 @@
 
 import type { ThreadViewModel } from "@magick/contracts/chat";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { chatClient } from "../features/comments/data/chatClient";
 import { useCommentUiStore } from "../features/comments/state/commentUiStore";
 import { localWorkspaceFileClient } from "../features/workspace/data/localWorkspaceFileClient";
 import { AppShell } from "./AppShell";
+
+const threadSummary = {
+  threadId: "thread_1",
+  workspaceId: "workspace_default",
+  providerKey: "codex",
+  title: "Backend chat",
+  resolutionState: "open",
+  runtimeState: "idle",
+  latestSequence: 1,
+  latestActivityAt: "2026-04-09T00:00:00.000Z",
+  updatedAt: "2026-04-09T00:00:00.000Z",
+} as const;
 
 vi.mock("../features/workspace/components/WorkspaceSurface", () => ({
   WorkspaceSurface: () => <div data-testid="workspace-surface" />,
@@ -67,6 +85,7 @@ const renamedThread: ThreadViewModel = {
 
 describe("AppShell", () => {
   beforeEach(() => {
+    vi.useRealTimers();
     useCommentUiStore.setState(useCommentUiStore.getInitialState());
 
     vi.mocked(localWorkspaceFileClient.getWorkspaceBootstrap).mockResolvedValue(
@@ -139,5 +158,57 @@ describe("AppShell", () => {
     );
 
     await screen.findByRole("button", { name: "Generated title" });
+  });
+
+  it("reconciles the visible chat list back to backend bootstrap state", async () => {
+    vi.mocked(chatClient.getBootstrap)
+      .mockResolvedValueOnce({
+        threads: [threadSummary],
+        activeThread: null,
+        providerAuth: {
+          codex: {
+            providerKey: "codex",
+            requiresOpenaiAuth: true,
+            account: null,
+            activeLoginId: null,
+          },
+        },
+      })
+      .mockResolvedValue({
+        threads: [],
+        activeThread: null,
+        providerAuth: {
+          codex: {
+            providerKey: "codex",
+            requiresOpenaiAuth: true,
+            account: null,
+            activeLoginId: null,
+          },
+        },
+      });
+
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <AppShell />
+      </QueryClientProvider>,
+    );
+
+    await screen.findByRole("button", { name: "Open Backend chat" });
+
+    await act(async () => {
+      await queryClient.refetchQueries({
+        queryKey: ["workspace-thread-bootstrap"],
+      });
+    });
+
+    await waitFor(() => {
+      expect(
+        screen.queryByRole("button", { name: "Open Backend chat" }),
+      ).toBeNull();
+    });
   });
 });

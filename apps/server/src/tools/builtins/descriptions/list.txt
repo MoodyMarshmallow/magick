@@ -1,0 +1,1 @@
+Lists files and directories in a given path. Rooted to the workspace root. The path parameter must be relative to the workspace root; omit it to use the current workspace root. You can optionally provide an array of glob patterns to ignore with the ignore parameter. You should generally prefer the Glob and Grep tools if you know which directories to search.

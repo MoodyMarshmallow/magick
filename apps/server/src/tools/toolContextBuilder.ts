@@ -8,10 +8,14 @@ export const buildToolExecutionContext = (args: {
   readonly turnId: string;
   readonly workspace: WorkspaceAccessService;
   readonly web: WebContentService;
+  readonly hasReadFile: (path: string) => boolean;
+  readonly markFileRead: (path: string) => void;
 }): ToolExecutionContext => ({
   workspaceId: args.workspaceId,
   threadId: args.threadId,
   turnId: args.turnId,
   workspace: args.workspace,
   web: args.web,
+  hasReadFile: args.hasReadFile,
+  markFileRead: args.markFileRead,
 });

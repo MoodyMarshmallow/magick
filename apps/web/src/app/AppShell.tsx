@@ -108,6 +108,7 @@ export function AppShell() {
           ? { threadId: activeThreadId }
           : {}),
       }),
+    refetchInterval: 2000,
   });
 
   useEffect(() => {

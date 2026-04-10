@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { ToolDefinition } from "../toolTypes";
+import { loadToolDescription } from "./toolDescription";
 
 const listToolSchema = z.object({
   path: z
@@ -38,8 +39,7 @@ const listToolSchema = z.object({
 
 export const listTool: ToolDefinition<typeof listToolSchema> = {
   id: "list",
-  description:
-    "Lists files and directories in a given path. Rooted to the workspace root. The path parameter must be relative to the workspace root; omit it to use the current workspace root. You can optionally provide an array of glob patterns to ignore with the ignore parameter. You should generally prefer the Glob and Grep tools, if you know which directories to search.",
+  description: loadToolDescription("list.txt"),
   schema: listToolSchema,
   execute: async (args, context) => {
     const result = await context.workspace.listTree({

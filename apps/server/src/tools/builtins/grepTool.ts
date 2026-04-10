@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { ToolDefinition } from "../toolTypes";
+import { loadToolDescription } from "./toolDescription";
 
 const grepToolSchema = z.object({
   pattern: z
@@ -13,7 +14,7 @@ const grepToolSchema = z.object({
 
 export const grepTool: ToolDefinition<typeof grepToolSchema> = {
   id: "grep",
-  description: "Search file contents",
+  description: loadToolDescription("grep.txt"),
   schema: grepToolSchema,
   execute: async (args, context) => {
     const matches = await context.workspace.grep(args.pattern);
