@@ -11,10 +11,6 @@ import type { CodexAuthClient } from "./codexAuthClient";
 
 const CODEX_API_ENDPOINT = "https://chatgpt.com/backend-api/codex/responses";
 const REFRESH_SAFETY_MARGIN_MS = 60_000;
-const CODEX_SYSTEM_PROMPT =
-  "You are Magick's assistant for research, learning, and document work inside the user's workspace. Proactively call tools when they are needed to inspect the workspace, gather context, or complete the user's request instead of only describing what you would do. Keep file paths relative to the workspace root, avoid unnecessary tool calls, and present concise, provenance-aware results. When writing math in markdown, always use dollar-delimited LaTeX: `$...$` for inline math and `$$...$$` for display math. Do not use `\\(...\\)` or `\\[...\\]` delimiters.";
-const THREAD_TITLE_SYSTEM_PROMPT = `Generate a concise chat title from the user's first message. Return only the title text with no quotes, markdown, prefix, or explanation. Keep it under ${maxThreadTitleLength} characters.`;
-
 export interface CodexResponsesClientOptions {
   readonly fetch?: typeof fetch;
   readonly endpoint?: string;
@@ -417,7 +413,7 @@ export class CodexResponsesClient {
     )[];
     readonly tools?: readonly CodexToolDefinition[];
     readonly signal?: AbortSignal;
-    readonly instructions?: string;
+    readonly instructions: string;
   }): Stream.Stream<CodexStreamEvent, ProviderFailureError> {
     logDebug("request", {
       messageCount: input.messages.length,
@@ -445,7 +441,7 @@ export class CodexResponsesClient {
                 model: this.#defaultModel,
                 stream: true,
                 store: false,
-                instructions: input.instructions ?? CODEX_SYSTEM_PROMPT,
+                instructions: input.instructions,
                 tools:
                   input.tools?.map((tool) => ({
                     type: "function",
@@ -542,13 +538,14 @@ export class CodexResponsesClient {
     );
   }
 
-  generateThreadTitle(
-    firstMessage: string,
-  ): Effect.Effect<string | null, ProviderFailureError> {
+  generateThreadTitle(input: {
+    readonly firstMessage: string;
+    readonly instructions: string;
+  }): Effect.Effect<string | null, ProviderFailureError> {
     return Stream.runFold(
       this.streamResponse({
-        messages: [{ role: "user", content: firstMessage }],
-        instructions: THREAD_TITLE_SYSTEM_PROMPT,
+        messages: [{ role: "user", content: input.firstMessage }],
+        instructions: input.instructions,
       }),
       "",
       (current, event) => {

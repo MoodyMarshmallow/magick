@@ -5,6 +5,9 @@ import { Cause, Effect, Exit, Option, Stream } from "effect";
 import type { CodexAuthClient } from "./codexAuthClient";
 import { CodexResponsesClient } from "./codexResponsesClient";
 
+const assistantInstructions = "Assistant instructions";
+const titleInstructions = "Title instructions";
+
 describe("CodexResponsesClient", () => {
   it("refreshes auth when needed and streams response deltas", async () => {
     const authRepository = {
@@ -57,6 +60,7 @@ describe("CodexResponsesClient", () => {
       Stream.runCollect(
         client.streamResponse({
           messages: [{ role: "user", content: "Hello" }],
+          instructions: assistantInstructions,
         }),
       ),
     );
@@ -113,6 +117,7 @@ describe("CodexResponsesClient", () => {
             { role: "assistant", content: "First answer" },
             { role: "user", content: "Second question" },
           ],
+          instructions: assistantInstructions,
         }),
       ),
     );
@@ -159,7 +164,12 @@ describe("CodexResponsesClient", () => {
     });
 
     await expect(
-      Effect.runPromise(client.generateThreadTitle("Plan the release")),
+      Effect.runPromise(
+        client.generateThreadTitle({
+          firstMessage: "Plan the release",
+          instructions: titleInstructions,
+        }),
+      ),
     ).resolves.toBe("Release planning");
 
     const request = JSON.parse(
@@ -183,6 +193,7 @@ describe("CodexResponsesClient", () => {
       Stream.runCollect(
         client.streamResponse({
           messages: [{ role: "user", content: "Hello" }],
+          instructions: assistantInstructions,
         }),
       ),
     );
@@ -233,6 +244,7 @@ describe("CodexResponsesClient", () => {
       Stream.runCollect(
         client.streamResponse({
           messages: [{ role: "user", content: "Hello" }],
+          instructions: assistantInstructions,
         }),
       ),
     );
@@ -280,6 +292,7 @@ describe("CodexResponsesClient", () => {
       Stream.runCollect(
         client.streamResponse({
           messages: [{ role: "user", content: "Hello" }],
+          instructions: assistantInstructions,
         }),
       ),
     );
@@ -328,6 +341,7 @@ describe("CodexResponsesClient", () => {
       Stream.runCollect(
         client.streamResponse({
           messages: [{ role: "user", content: "Hello" }],
+          instructions: assistantInstructions,
         }),
       ),
     );
@@ -376,6 +390,7 @@ describe("CodexResponsesClient", () => {
       Stream.runCollect(
         client.streamResponse({
           messages: [{ role: "user", content: "Hello" }],
+          instructions: assistantInstructions,
         }),
       ),
     );
@@ -439,6 +454,7 @@ describe("CodexResponsesClient", () => {
               inputSchema: { type: "object" },
             },
           ],
+          instructions: assistantInstructions,
         }),
       ),
     );
@@ -513,6 +529,7 @@ describe("CodexResponsesClient", () => {
             { role: "assistant", content: "Tool saw the note" },
             { role: "user", content: "Second" },
           ],
+          instructions: assistantInstructions,
         }),
       ),
     );
@@ -617,6 +634,7 @@ describe("CodexResponsesClient", () => {
       Stream.runCollect(
         failingClient.streamResponse({
           messages: [{ role: "user", content: "Hello" }],
+          instructions: assistantInstructions,
         }),
       ),
     );
@@ -634,6 +652,7 @@ describe("CodexResponsesClient", () => {
       Stream.runCollect(
         abortingClient.streamResponse({
           messages: [{ role: "user", content: "Hello" }],
+          instructions: assistantInstructions,
         }),
       ),
     );

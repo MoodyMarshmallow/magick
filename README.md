@@ -2,12 +2,13 @@
 
 ![Screenshot of the Magick software UI](screenshot.png)
 
-Claude Code but for deep learning and thinking. Still a VERY EARLY WIP.
+Claude Code but for deep learning and thinking. Still a VERY EARLY WIP. Currently only runs via Codex.
 
-Current focus:
-- Better frontend experience
+## Todo
+- Support for reasoning moodes and models.
 - Agent that actually works well
 - Cleaninng up the code
+- 
 
 ## Running
 

@@ -4,6 +4,9 @@ import { Effect, Stream } from "effect";
 
 import { FakeProviderAdapter } from "./fakeProviderAdapter";
 
+const assistantInstructions = "Assistant instructions";
+const titleInstructions = "Title instructions";
+
 describe("FakeProviderAdapter", () => {
   it("reports capabilities based on mode", () => {
     expect(
@@ -33,6 +36,7 @@ describe("FakeProviderAdapter", () => {
         turnId: "turn_1",
         messageId: "message_1",
         userMessage: "Hello",
+        instructions: assistantInstructions,
         contextMessages: [],
         historyItems: [],
         tools: [],
@@ -48,11 +52,16 @@ describe("FakeProviderAdapter", () => {
   it("generates thread titles through the provider adapter", async () => {
     const adapter = new FakeProviderAdapter({
       mode: "stateful",
-      titleGenerator: (firstMessage) => `Title: ${firstMessage}`,
+      titleGenerator: (input) => `Title: ${input.firstMessage}`,
     });
 
     await expect(
-      Effect.runPromise(adapter.generateThreadTitle("Hello")),
+      Effect.runPromise(
+        adapter.generateThreadTitle({
+          firstMessage: "Hello",
+          instructions: titleInstructions,
+        }),
+      ),
     ).resolves.toBe("Title: Hello");
   });
 
@@ -78,6 +87,7 @@ describe("FakeProviderAdapter", () => {
         turnId: "turn_1",
         messageId: "message_1",
         userMessage: "Hello",
+        instructions: assistantInstructions,
         contextMessages: [],
         historyItems: [],
         tools: [],
@@ -95,6 +105,7 @@ describe("FakeProviderAdapter", () => {
         toolCallId: "turn_1:tool:read",
         toolName: "read",
         output: "content",
+        instructions: assistantInstructions,
         historyItems: [],
         tools: [],
       }),

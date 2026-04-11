@@ -50,6 +50,7 @@ export interface StartTurnInput {
   readonly turnId: string;
   readonly messageId: string;
   readonly userMessage: string;
+  readonly instructions: string;
   readonly contextMessages: readonly ConversationContextMessage[];
   readonly historyItems: readonly ConversationHistoryItem[];
   readonly tools: readonly ProviderToolDefinition[];
@@ -66,8 +67,14 @@ export interface SubmitToolResultInput {
   readonly toolCallId: string;
   readonly toolName: string;
   readonly output: string;
+  readonly instructions: string;
   readonly historyItems: readonly ConversationHistoryItem[];
   readonly tools: readonly ProviderToolDefinition[];
+}
+
+export interface GenerateThreadTitleInput {
+  readonly firstMessage: string;
+  readonly instructions: string;
 }
 
 export interface InterruptTurnInput {
@@ -136,7 +143,7 @@ export interface ProviderAdapter {
     input: CreateProviderSessionInput,
   ) => Effect.Effect<ProviderSessionHandle, ProviderFailureError>;
   readonly generateThreadTitle: (
-    firstMessage: string,
+    input: GenerateThreadTitleInput,
   ) => Effect.Effect<string | null, ProviderFailureError>;
   readonly resumeSession: (
     input: ResumeProviderSessionInput,

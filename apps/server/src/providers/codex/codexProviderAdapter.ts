@@ -8,6 +8,7 @@ import type { ProviderAuthRepositoryClient } from "../../persistence/providerAut
 import type {
   ConversationHistoryItem,
   CreateProviderSessionInput,
+  GenerateThreadTitleInput,
   InterruptTurnInput,
   ProviderAdapter,
   ProviderEvent,
@@ -30,7 +31,7 @@ interface CodexRuntimeFactory {
     input: CreateProviderSessionInput,
   ) => Effect.Effect<ProviderSessionHandle, ProviderFailureError>;
   readonly generateThreadTitle: (
-    firstMessage: string,
+    input: GenerateThreadTitleInput,
   ) => Effect.Effect<string | null, ProviderFailureError>;
   readonly resumeSession: (
     input: ResumeProviderSessionInput,
@@ -125,6 +126,7 @@ class CodexSessionHandle implements ProviderSessionHandle {
             contextMessages: input.contextMessages,
             userMessage: input.userMessage,
           }),
+          instructions: input.instructions,
           tools: input.tools.map((tool) => ({
             name: tool.name,
             description: tool.description,
@@ -186,6 +188,7 @@ class CodexSessionHandle implements ProviderSessionHandle {
             historyItems: input.historyItems,
             contextMessages: [],
           }),
+          instructions: input.instructions,
           tools: input.tools.map((tool) => ({
             name: tool.name,
             description: tool.description,
@@ -264,8 +267,7 @@ export const createCodexRuntimeFactory = (
           responsesClient,
         }),
       ),
-    generateThreadTitle: (firstMessage) =>
-      responsesClient.generateThreadTitle(firstMessage),
+    generateThreadTitle: (input) => responsesClient.generateThreadTitle(input),
     resumeSession: (input) =>
       Effect.succeed(
         new CodexSessionHandle({
@@ -298,8 +300,8 @@ export class CodexProviderAdapter implements ProviderAdapter {
   readonly createSession = (input: CreateProviderSessionInput) =>
     this.#runtimeFactory.createSession(input);
 
-  readonly generateThreadTitle = (firstMessage: string) =>
-    this.#runtimeFactory.generateThreadTitle(firstMessage);
+  readonly generateThreadTitle = (input: GenerateThreadTitleInput) =>
+    this.#runtimeFactory.generateThreadTitle(input);
 
   readonly resumeSession = (input: ResumeProviderSessionInput) =>
     this.#runtimeFactory.resumeSession(input);

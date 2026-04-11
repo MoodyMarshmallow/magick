@@ -8,6 +8,9 @@ import {
   createCodexRuntimeFactory,
 } from "./codexProviderAdapter";
 
+const assistantInstructions = "Assistant instructions";
+const titleInstructions = "Title instructions";
+
 describe("CodexProviderAdapter", () => {
   it("delegates session creation and reports rebuild-based capabilities", async () => {
     const createSession = vi.fn().mockResolvedValue({ sessionId: "session_1" });
@@ -16,8 +19,8 @@ describe("CodexProviderAdapter", () => {
     const adapter = new CodexProviderAdapter({
       createSession: (input) =>
         Effect.promise(() => createSession(input) as never),
-      generateThreadTitle: (firstMessage) =>
-        Effect.promise(() => generateThreadTitle(firstMessage) as never),
+      generateThreadTitle: (input) =>
+        Effect.promise(() => generateThreadTitle(input) as never),
       resumeSession: (input) =>
         Effect.promise(() => resumeSession(input) as never),
     });
@@ -32,10 +35,18 @@ describe("CodexProviderAdapter", () => {
       }),
     );
     await expect(
-      Effect.runPromise(adapter.generateThreadTitle("Hello")),
+      Effect.runPromise(
+        adapter.generateThreadTitle({
+          firstMessage: "Hello",
+          instructions: titleInstructions,
+        }),
+      ),
     ).resolves.toBe("Generated title");
     expect(createSession).toHaveBeenCalled();
-    expect(generateThreadTitle).toHaveBeenCalledWith("Hello");
+    expect(generateThreadTitle).toHaveBeenCalledWith({
+      firstMessage: "Hello",
+      instructions: titleInstructions,
+    });
   });
 
   it("creates stateless direct-http sessions through the runtime factory", async () => {
@@ -148,6 +159,7 @@ describe("CodexProviderAdapter", () => {
         turnId: "turn_1",
         messageId: "message_1",
         userMessage: "Hello",
+        instructions: assistantInstructions,
         contextMessages: [],
         historyItems: [],
         tools: [],
@@ -229,6 +241,7 @@ describe("CodexProviderAdapter", () => {
             toolCallId: "call_1",
             toolName: "read",
             output: "done",
+            instructions: assistantInstructions,
             historyItems: [
               {
                 type: "tool_call",
@@ -336,6 +349,7 @@ describe("CodexProviderAdapter", () => {
         turnId: "turn_1",
         messageId: "message_1",
         userMessage: "Investigate the note",
+        instructions: assistantInstructions,
         contextMessages: [],
         historyItems: [],
         tools: [
@@ -376,6 +390,7 @@ describe("CodexProviderAdapter", () => {
         toolCallId: "call_1",
         toolName: "read",
         output: "hello world",
+        instructions: assistantInstructions,
         historyItems: [
           {
             type: "tool_call",
@@ -427,6 +442,7 @@ describe("CodexProviderAdapter", () => {
         toolCallId: "call_2",
         toolName: "grep",
         output: "notes.md:1:hello world",
+        instructions: assistantInstructions,
         historyItems: [
           {
             type: "tool_call",

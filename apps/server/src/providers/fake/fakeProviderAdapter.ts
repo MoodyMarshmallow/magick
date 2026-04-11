@@ -5,6 +5,7 @@ import { Effect, Option, Stream } from "effect";
 import type { ProviderFailureError } from "../../core/errors";
 import type {
   CreateProviderSessionInput,
+  GenerateThreadTitleInput,
   InterruptTurnInput,
   ProviderAdapter,
   ProviderEvent,
@@ -29,7 +30,7 @@ interface FakeProviderAdapterOptions {
   readonly mode: FakeProviderMode;
   readonly chunkDelayMs?: number;
   readonly responder?: (input: StartTurnInput) => FakeProviderResponse;
-  readonly titleGenerator?: (firstMessage: string) => string | null;
+  readonly titleGenerator?: (input: GenerateThreadTitleInput) => string | null;
 }
 
 class FakeProviderSession implements ProviderSessionHandle {
@@ -196,7 +197,7 @@ export class FakeProviderAdapter implements ProviderAdapter {
   readonly #mode: FakeProviderMode;
   readonly #chunkDelayMs: number;
   readonly #responder: (input: StartTurnInput) => FakeProviderResponse;
-  readonly #titleGenerator: (firstMessage: string) => string | null;
+  readonly #titleGenerator: (input: GenerateThreadTitleInput) => string | null;
   readonly sessions = new Map<string, FakeProviderSession>();
 
   constructor(options: FakeProviderAdapterOptions) {
@@ -222,8 +223,8 @@ export class FakeProviderAdapter implements ProviderAdapter {
   readonly getResumeStrategy = () =>
     (this.#mode === "stateful" ? "native" : "rebuild") as "native" | "rebuild";
 
-  readonly generateThreadTitle = (firstMessage: string) =>
-    Effect.sync(() => this.#titleGenerator(firstMessage));
+  readonly generateThreadTitle = (input: GenerateThreadTitleInput) =>
+    Effect.sync(() => this.#titleGenerator(input));
 
   readonly createSession = (input: CreateProviderSessionInput) =>
     Effect.sync(() => {

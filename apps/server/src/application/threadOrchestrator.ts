@@ -35,6 +35,10 @@ import {
   projectThreadEvents,
   toThreadSummary,
 } from "../projections/threadProjector";
+import {
+  DEFAULT_ASSISTANT_INSTRUCTIONS,
+  DEFAULT_THREAD_TITLE_INSTRUCTIONS,
+} from "../providers/providerPrompts";
 import type {
   ConversationContextMessage,
   ConversationHistoryItem,
@@ -359,7 +363,10 @@ export class ThreadOrchestrator implements ThreadOrchestratorApi {
         }
 
         const generatedTitle = yield* adapter
-          .generateThreadTitle(args.content)
+          .generateThreadTitle({
+            firstMessage: args.content,
+            instructions: DEFAULT_THREAD_TITLE_INSTRUCTIONS,
+          })
           .pipe(
             Effect.catchAll((error) => {
               console.warn("Provider thread auto-naming failed.", {
@@ -727,6 +734,7 @@ export class ThreadOrchestrator implements ThreadOrchestratorApi {
             toolCallId: providerEvent.toolCallId,
             toolName: providerEvent.toolName,
             output: toolResult.right.modelOutput,
+            instructions: DEFAULT_ASSISTANT_INSTRUCTIONS,
             historyItems: this.#buildConversationHistory(thread.id),
             tools: this.#listProviderTools(),
           });
@@ -758,6 +766,7 @@ export class ThreadOrchestrator implements ThreadOrchestratorApi {
           toolCallId: providerEvent.toolCallId,
           toolName: providerEvent.toolName,
           output: toolFailureOutput,
+          instructions: DEFAULT_ASSISTANT_INSTRUCTIONS,
           historyItems: this.#buildConversationHistory(thread.id),
           tools: this.#listProviderTools(),
         });
@@ -1038,6 +1047,7 @@ export class ThreadOrchestrator implements ThreadOrchestratorApi {
           turnId,
           messageId: assistantMessageId,
           userMessage: content,
+          instructions: DEFAULT_ASSISTANT_INSTRUCTIONS,
           contextMessages: this.#buildContextMessages(snapshot),
           historyItems,
           tools: this.#listProviderTools(),
