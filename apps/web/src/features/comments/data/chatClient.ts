@@ -32,7 +32,11 @@ interface ChatClient {
   sendThreadMessage: (threadId: string, content: string) => Promise<void>;
   resolveThread: (threadId: string) => Promise<ThreadViewModel>;
   reopenThread: (threadId: string) => Promise<ThreadViewModel>;
-  startLogin: (providerKey: ProviderKey) => Promise<void>;
+  startLogin: (
+    providerKey: ProviderKey,
+  ) => Promise<{ loginId: string; popup: Window | null }>;
+  cancelLogin: (providerKey: ProviderKey, loginId: string) => Promise<void>;
+  logout: (providerKey: ProviderKey) => Promise<void>;
   subscribe: (listener: (event: ServerPushEnvelope) => void) => () => void;
 }
 
@@ -274,7 +278,28 @@ class WebSocketChatClient implements ChatClient {
       throw new Error("Unexpected login start response.");
     }
 
-    window.open(result.auth.authUrl, "_blank", "noopener,noreferrer");
+    const popup = window.open(result.auth.authUrl, "_blank");
+    return { loginId: result.auth.loginId, popup };
+  }
+
+  async cancelLogin(providerKey: ProviderKey, loginId: string) {
+    const result = await this.#send({
+      type: "provider.auth.login.cancel",
+      payload: { providerKey, loginId },
+    });
+    if (result.kind !== "providerAuthState") {
+      throw new Error("Unexpected provider auth login cancel response.");
+    }
+  }
+
+  async logout(providerKey: ProviderKey) {
+    const result = await this.#send({
+      type: "provider.auth.logout",
+      payload: { providerKey },
+    });
+    if (result.kind !== "providerAuthState") {
+      throw new Error("Unexpected provider auth logout response.");
+    }
   }
 
   subscribe(listener: (event: ServerPushEnvelope) => void): () => void {

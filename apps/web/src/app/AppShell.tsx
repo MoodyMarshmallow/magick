@@ -4,6 +4,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   type CSSProperties,
   type PointerEvent as ReactPointerEvent,
+  useCallback,
   useEffect,
   useReducer,
   useRef,
@@ -58,6 +59,8 @@ export function AppShell() {
   const [providerAuthByKey, setProviderAuthByKey] = useState<
     Record<string, ProviderAuthState>
   >({});
+  const loginPollRef = useRef<number | null>(null);
+  const loginWindowRef = useRef<Window | null>(null);
   const { activeThreadId, setActiveThreadId } = useCommentUiStore();
   const draftThread: CommentThread = {
     threadId: draftThreadId,
@@ -196,6 +199,16 @@ export function AppShell() {
       }
 
       if (event.channel === "provider.authStateChanged") {
+        if (
+          event.auth.providerKey === defaultProviderKey &&
+          event.auth.login.status !== "pending"
+        ) {
+          if (loginPollRef.current !== null) {
+            window.clearInterval(loginPollRef.current);
+            loginPollRef.current = null;
+          }
+          loginWindowRef.current = null;
+        }
         setProviderAuthByKey((current) => ({
           ...current,
           [event.auth.providerKey]: event.auth,
@@ -268,7 +281,57 @@ export function AppShell() {
 
   const codexAuth = providerAuthByKey[defaultProviderKey] ?? null;
   const isLoggedIn = codexAuth?.account != null;
-  const isLoginPending = codexAuth?.activeLoginId != null;
+  const loginState = codexAuth?.login;
+  const isLoginPending = loginState?.status === "pending";
+  const showSidebarLogin = !isLoggedIn;
+
+  const clearPendingLoginWatcher = useCallback(() => {
+    if (loginPollRef.current !== null) {
+      window.clearInterval(loginPollRef.current);
+      loginPollRef.current = null;
+    }
+    loginWindowRef.current = null;
+  }, []);
+
+  useEffect(() => clearPendingLoginWatcher, [clearPendingLoginWatcher]);
+
+  const handleAuthButtonClick = async () => {
+    if (isLoggedIn) {
+      clearPendingLoginWatcher();
+      await chatClient.logout(defaultProviderKey);
+      await queryClient.invalidateQueries({
+        queryKey: ["workspace-thread-bootstrap"],
+      });
+      return;
+    }
+
+    if (loginState?.status === "pending" && loginState.loginId) {
+      await chatClient.cancelLogin(defaultProviderKey, loginState.loginId);
+      return;
+    }
+
+    const { loginId, popup } = await chatClient.startLogin(defaultProviderKey);
+    loginWindowRef.current = popup;
+    if (loginPollRef.current !== null) {
+      window.clearInterval(loginPollRef.current);
+    }
+
+    loginPollRef.current = window.setInterval(() => {
+      if (!loginWindowRef.current || !loginWindowRef.current.closed) {
+        return;
+      }
+
+      clearPendingLoginWatcher();
+      void chatClient
+        .cancelLogin(defaultProviderKey, loginId)
+        .catch(() => undefined)
+        .finally(() => {
+          void queryClient.invalidateQueries({
+            queryKey: ["workspace-thread-bootstrap"],
+          });
+        });
+    }, 500);
+  };
 
   const clearResizeState = () => {
     resizeStateRef.current = null;
@@ -328,13 +391,12 @@ export function AppShell() {
         <header className="rail-header">
           <button
             className="flat-button rail-header__button"
-            disabled={isLoggedIn || isLoginPending}
-            onClick={async () => {
-              await chatClient.startLogin(defaultProviderKey);
+            onClick={() => {
+              void handleAuthButtonClick();
             }}
             type="button"
           >
-            {isLoggedIn ? "logged in" : "log in"}
+            {isLoggedIn ? "logout" : isLoginPending ? "cancel login" : "login"}
           </button>
         </header>
 
@@ -491,71 +553,85 @@ export function AppShell() {
         onPointerUp={clearResizeState}
       />
 
-      <CommentSidebar
-        threads={sidebarThreads}
-        activeThreadId={activeThreadId}
-        activeThreadIsDraft={activeThreadId === draftThreadId}
-        onActivateThread={handleSelectThread}
-        onCreateThread={async () => {
-          setActiveThreadId(draftThreadId);
-        }}
-        onDeleteThread={async (threadId: string) => {
-          await chatClient.deleteThread(threadId);
-          dispatch({
-            type: "thread.deleted",
-            threadId,
-          });
-          if (activeThreadIdRef.current === threadId) {
-            setActiveThreadId(null);
-          }
-        }}
-        onRenameThread={async (threadId: string, title: string) => {
-          const thread = await chatClient.renameThread(threadId, title);
-          dispatch({
-            type: "thread.loaded",
-            thread,
-          });
-        }}
-        onShowLedger={() => setActiveThreadId(null)}
-        onSendReply={async (threadId: string, message: string) => {
-          if (threadId === draftThreadId) {
-            const thread = await chatClient.createThread({
-              workspaceId: defaultWorkspaceId,
-              providerKey: defaultProviderKey,
+      {showSidebarLogin ? (
+        <aside className="comment-sidebar comment-sidebar--auth-gate">
+          <button
+            className="comment-sidebar__login-gate"
+            onClick={() => {
+              void handleAuthButtonClick();
+            }}
+            type="button"
+          >
+            {isLoginPending ? "cancel login" : "login"}
+          </button>
+        </aside>
+      ) : (
+        <CommentSidebar
+          threads={sidebarThreads}
+          activeThreadId={activeThreadId}
+          activeThreadIsDraft={activeThreadId === draftThreadId}
+          onActivateThread={handleSelectThread}
+          onCreateThread={async () => {
+            setActiveThreadId(draftThreadId);
+          }}
+          onDeleteThread={async (threadId: string) => {
+            await chatClient.deleteThread(threadId);
+            dispatch({
+              type: "thread.deleted",
+              threadId,
             });
+            if (activeThreadIdRef.current === threadId) {
+              setActiveThreadId(null);
+            }
+          }}
+          onRenameThread={async (threadId: string, title: string) => {
+            const thread = await chatClient.renameThread(threadId, title);
             dispatch({
               type: "thread.loaded",
               thread,
             });
-            setActiveThreadId(thread.threadId);
-            await chatClient.sendThreadMessage(thread.threadId, message);
-            const refreshedThread = await chatClient.openThread(
-              thread.threadId,
+          }}
+          onShowLedger={() => setActiveThreadId(null)}
+          onSendReply={async (threadId: string, message: string) => {
+            if (threadId === draftThreadId) {
+              const thread = await chatClient.createThread({
+                workspaceId: defaultWorkspaceId,
+                providerKey: defaultProviderKey,
+              });
+              dispatch({
+                type: "thread.loaded",
+                thread,
+              });
+              setActiveThreadId(thread.threadId);
+              await chatClient.sendThreadMessage(thread.threadId, message);
+              const refreshedThread = await chatClient.openThread(
+                thread.threadId,
+              );
+              dispatch({
+                type: "thread.loaded",
+                thread: refreshedThread,
+              });
+              return;
+            }
+
+            await chatClient.sendThreadMessage(threadId, message);
+            setActiveThreadId(threadId);
+          }}
+          onToggleResolved={async (threadId: string) => {
+            const thread = threads.find(
+              (candidate) => candidate.threadId === threadId,
             );
+            const updatedThread =
+              thread?.status === "resolved"
+                ? await chatClient.reopenThread(threadId)
+                : await chatClient.resolveThread(threadId);
             dispatch({
               type: "thread.loaded",
-              thread: refreshedThread,
+              thread: updatedThread,
             });
-            return;
-          }
-
-          await chatClient.sendThreadMessage(threadId, message);
-          setActiveThreadId(threadId);
-        }}
-        onToggleResolved={async (threadId: string) => {
-          const thread = threads.find(
-            (candidate) => candidate.threadId === threadId,
-          );
-          const updatedThread =
-            thread?.status === "resolved"
-              ? await chatClient.reopenThread(threadId)
-              : await chatClient.resolveThread(threadId);
-          dispatch({
-            type: "thread.loaded",
-            thread: updatedThread,
-          });
-        }}
-      />
+          }}
+        />
+      )}
     </main>
   );
 }

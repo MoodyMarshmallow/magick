@@ -26,6 +26,15 @@ const threadSummary = {
   updatedAt: "2026-04-09T00:00:00.000Z",
 } as const;
 
+const idleLoginState = {
+  status: "idle",
+  loginId: null,
+  authUrl: null,
+  startedAt: null,
+  expiresAt: null,
+  error: null,
+} as const;
+
 vi.mock("../features/workspace/components/WorkspaceSurface", () => ({
   WorkspaceSurface: () => <div data-testid="workspace-surface" />,
 }));
@@ -53,6 +62,8 @@ vi.mock("../features/comments/data/chatClient", () => ({
     resolveThread: vi.fn(),
     reopenThread: vi.fn(),
     startLogin: vi.fn(),
+    cancelLogin: vi.fn(),
+    logout: vi.fn(),
     subscribe: vi.fn(() => () => undefined),
   },
 }));
@@ -102,14 +113,22 @@ describe("AppShell", () => {
         codex: {
           providerKey: "codex",
           requiresOpenaiAuth: true,
-          account: null,
-          activeLoginId: null,
+          account: {
+            type: "chatgpt",
+            email: "user@example.com",
+            planType: null,
+          },
+          login: idleLoginState,
         },
       },
     });
     vi.mocked(chatClient.createThread).mockResolvedValue(createdThread);
     vi.mocked(chatClient.openThread).mockResolvedValue(renamedThread);
     vi.mocked(chatClient.sendThreadMessage).mockResolvedValue(undefined);
+    vi.mocked(chatClient.startLogin).mockResolvedValue({
+      loginId: "login_1",
+      popup: null,
+    });
   });
 
   it("creates a new thread only when the first draft message is sent", async () => {
@@ -160,6 +179,122 @@ describe("AppShell", () => {
     await screen.findByRole("button", { name: "Generated title" });
   });
 
+  it("shows a full sidebar login gate when Codex auth is missing", async () => {
+    vi.mocked(chatClient.getBootstrap).mockResolvedValueOnce({
+      threads: [],
+      activeThread: null,
+      providerAuth: {
+        codex: {
+          providerKey: "codex",
+          requiresOpenaiAuth: true,
+          account: null,
+          login: idleLoginState,
+        },
+      },
+    });
+
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <AppShell />
+      </QueryClientProvider>,
+    );
+
+    expect(
+      (await screen.findAllByRole("button", { name: "login" })).length,
+    ).toBe(2);
+    expect(screen.queryByLabelText("Create new chat")).toBeNull();
+  });
+
+  it("shows logout when Codex auth is present and logs out on click", async () => {
+    vi.mocked(chatClient.getBootstrap).mockResolvedValueOnce({
+      threads: [],
+      activeThread: null,
+      providerAuth: {
+        codex: {
+          providerKey: "codex",
+          requiresOpenaiAuth: true,
+          account: {
+            type: "chatgpt",
+            email: "user@example.com",
+            planType: null,
+          },
+          login: idleLoginState,
+        },
+      },
+    });
+
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <AppShell />
+      </QueryClientProvider>,
+    );
+
+    const logoutButton = await screen.findByRole("button", { name: "logout" });
+    fireEvent.click(logoutButton);
+
+    await waitFor(() => {
+      expect(chatClient.logout).toHaveBeenCalledWith("codex");
+    });
+  });
+
+  it("cancels a pending login when retrying login from a signed-out pending state", async () => {
+    vi.mocked(chatClient.getBootstrap).mockResolvedValueOnce({
+      threads: [],
+      activeThread: null,
+      providerAuth: {
+        codex: {
+          providerKey: "codex",
+          requiresOpenaiAuth: true,
+          account: null,
+          login: {
+            status: "pending",
+            loginId: "login_1",
+            authUrl: "https://chatgpt.com/login",
+            startedAt: "2026-04-09T00:00:00.000Z",
+            expiresAt: "2026-04-09T00:05:00.000Z",
+            error: null,
+          },
+        },
+      },
+    });
+    vi.mocked(chatClient.startLogin).mockResolvedValueOnce({
+      loginId: "login_2",
+      popup: null,
+    });
+
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <AppShell />
+      </QueryClientProvider>,
+    );
+
+    const cancelButtons = await screen.findAllByRole("button", {
+      name: "cancel login",
+    });
+    const cancelButton = cancelButtons[0];
+    if (!cancelButton) {
+      throw new Error("Expected cancel login button.");
+    }
+    fireEvent.click(cancelButton);
+
+    await waitFor(() => {
+      expect(chatClient.cancelLogin).toHaveBeenCalledWith("codex", "login_1");
+      expect(chatClient.startLogin).not.toHaveBeenCalled();
+    });
+  });
+
   it("reconciles the visible chat list back to backend bootstrap state", async () => {
     vi.mocked(chatClient.getBootstrap)
       .mockResolvedValueOnce({
@@ -169,8 +304,12 @@ describe("AppShell", () => {
           codex: {
             providerKey: "codex",
             requiresOpenaiAuth: true,
-            account: null,
-            activeLoginId: null,
+            account: {
+              type: "chatgpt",
+              email: "user@example.com",
+              planType: null,
+            },
+            login: idleLoginState,
           },
         },
       })
@@ -181,8 +320,12 @@ describe("AppShell", () => {
           codex: {
             providerKey: "codex",
             requiresOpenaiAuth: true,
-            account: null,
-            activeLoginId: null,
+            account: {
+              type: "chatgpt",
+              email: "user@example.com",
+              planType: null,
+            },
+            login: idleLoginState,
           },
         },
       });

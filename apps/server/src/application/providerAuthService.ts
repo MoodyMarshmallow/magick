@@ -2,6 +2,7 @@
 
 import type {
   ProviderAuthLoginStartResult,
+  ProviderAuthLoginState,
   ProviderAuthRecord,
   ProviderAuthState,
   ProviderKey,
@@ -20,6 +21,7 @@ import {
 } from "../providers/codex/codexOAuth";
 
 const REFRESH_SAFETY_MARGIN_MS = 60_000;
+const LOGIN_EXPIRY_MS = 5 * 60_000;
 
 export interface ProviderAuthServiceApi {
   readonly read: (
@@ -45,22 +47,33 @@ interface ProviderAuthServiceOptions {
   readonly authClientOptions?: CodexAuthClientOptions;
   readonly oauthHarness?: CodexOAuthHarness;
   readonly oauthHarnessOptions?: CodexOAuthHarnessOptions;
+  readonly loginExpiryMs?: number;
+}
+
+interface ActiveLoginEntry {
+  readonly providerKey: ProviderKey;
+  readonly login: CodexOAuthLogin;
+  readonly startedAt: string;
+  readonly expiresAt: string;
 }
 
 export class ProviderAuthService implements ProviderAuthServiceApi {
   readonly #authRepository: ProviderAuthRepositoryClient;
   readonly #authClient: CodexAuthClient;
   readonly #oauthHarness: CodexOAuthHarness;
-  readonly #activeLogins = new Map<
+  readonly #activeLogins = new Map<string, ActiveLoginEntry>();
+  readonly #loginStateByProvider = new Map<
+    ProviderKey,
+    ProviderAuthLoginState
+  >();
+  readonly #loginExpiryTimers = new Map<
     string,
-    {
-      readonly providerKey: ProviderKey;
-      readonly login: CodexOAuthLogin;
-    }
+    ReturnType<typeof setTimeout>
   >();
   readonly #listeners = new Set<
     (auth: ProviderAuthState) => void | Promise<void>
   >();
+  readonly #loginExpiryMs: number;
 
   constructor(options: ProviderAuthServiceOptions) {
     this.#authRepository = options.authRepository;
@@ -69,27 +82,135 @@ export class ProviderAuthService implements ProviderAuthServiceApi {
     this.#oauthHarness =
       options.oauthHarness ??
       new CodexOAuthHarness(options.oauthHarnessOptions);
+    this.#loginExpiryMs = options.loginExpiryMs ?? LOGIN_EXPIRY_MS;
   }
 
-  #activeLoginIdForProvider(providerKey: ProviderKey): string | null {
-    for (const [loginId, login] of this.#activeLogins.entries()) {
+  #activeLoginForProvider(providerKey: ProviderKey): ActiveLoginEntry | null {
+    for (const login of this.#activeLogins.values()) {
       if (login.providerKey === providerKey) {
-        return loginId;
+        return login;
       }
     }
 
     return null;
   }
 
-  #unauthenticatedState(
+  #idleLoginState(): ProviderAuthLoginState {
+    return {
+      status: "idle",
+      loginId: null,
+      authUrl: null,
+      startedAt: null,
+      expiresAt: null,
+      error: null,
+    };
+  }
+
+  #pendingLoginState(login: ActiveLoginEntry): ProviderAuthLoginState {
+    return {
+      status: "pending",
+      loginId: login.login.loginId,
+      authUrl: login.login.authUrl,
+      startedAt: login.startedAt,
+      expiresAt: login.expiresAt,
+      error: null,
+    };
+  }
+
+  #terminalLoginState(args: {
+    readonly status: "cancelled" | "failed" | "expired";
+    readonly loginId: string;
+    readonly startedAt: string;
+    readonly expiresAt: string;
+    readonly error?: string | null;
+  }): ProviderAuthLoginState {
+    return {
+      status: args.status,
+      loginId: args.loginId,
+      authUrl: null,
+      startedAt: args.startedAt,
+      expiresAt: args.expiresAt,
+      error: args.error ?? null,
+    };
+  }
+
+  #setLoginState(
     providerKey: ProviderKey,
-    activeLoginId: string | null,
-  ): ProviderAuthState {
+    state: ProviderAuthLoginState,
+  ): void {
+    this.#loginStateByProvider.set(providerKey, state);
+  }
+
+  #currentLoginState(providerKey: ProviderKey): ProviderAuthLoginState {
+    const activeLogin = this.#activeLoginForProvider(providerKey);
+    if (activeLogin) {
+      return this.#pendingLoginState(activeLogin);
+    }
+
+    return (
+      this.#loginStateByProvider.get(providerKey) ?? this.#idleLoginState()
+    );
+  }
+
+  #clearLoginTimer(loginId: string): void {
+    const timer = this.#loginExpiryTimers.get(loginId);
+    if (!timer) {
+      return;
+    }
+
+    clearTimeout(timer);
+    this.#loginExpiryTimers.delete(loginId);
+  }
+
+  async #finishLogin(args: {
+    readonly loginId: string;
+    readonly nextState: ProviderAuthLoginState;
+  }): Promise<boolean> {
+    const activeLogin = this.#activeLogins.get(args.loginId);
+    if (!activeLogin) {
+      return false;
+    }
+
+    this.#clearLoginTimer(args.loginId);
+    this.#activeLogins.delete(args.loginId);
+    this.#setLoginState(activeLogin.providerKey, args.nextState);
+    await this.#emit(activeLogin.providerKey);
+    return true;
+  }
+
+  #scheduleLoginExpiry(login: ActiveLoginEntry): void {
+    this.#clearLoginTimer(login.login.loginId);
+    this.#loginExpiryTimers.set(
+      login.login.loginId,
+      setTimeout(() => {
+        void (async () => {
+          const activeLogin = this.#activeLogins.get(login.login.loginId);
+          if (!activeLogin) {
+            return;
+          }
+
+          await activeLogin.login.cancel().catch(() => undefined);
+          await this.#finishLogin({
+            loginId: login.login.loginId,
+            nextState: this.#terminalLoginState({
+              status: "expired",
+              loginId: login.login.loginId,
+              startedAt: activeLogin.startedAt,
+              expiresAt: activeLogin.expiresAt,
+              error: "Login expired before completion.",
+            }),
+          });
+        })();
+      }, this.#loginExpiryMs),
+    );
+  }
+
+  #unauthenticatedState(providerKey: ProviderKey): ProviderAuthState {
     return {
       providerKey,
       requiresOpenaiAuth: providerKey === "codex",
       account: null,
-      activeLoginId,
+      login: this.#currentLoginState(providerKey),
     };
   }
 
@@ -179,15 +300,14 @@ export class ProviderAuthService implements ProviderAuthServiceApi {
     refreshToken = false,
   ): Promise<ProviderAuthState> {
     this.#assertCodexProvider(providerKey);
-    const activeLoginId = this.#activeLoginIdForProvider(providerKey);
     const record = this.#authRepository.get(providerKey);
     if (!record) {
-      return this.#unauthenticatedState(providerKey, activeLoginId);
+      return this.#unauthenticatedState(providerKey);
     }
 
     const refreshed = await this.#refreshIfNeeded(record, refreshToken);
     if (!refreshed) {
-      return this.#unauthenticatedState(providerKey, activeLoginId);
+      return this.#unauthenticatedState(providerKey);
     }
 
     return {
@@ -198,7 +318,7 @@ export class ProviderAuthService implements ProviderAuthServiceApi {
         email: refreshed.email,
         planType: refreshed.planType,
       },
-      activeLoginId,
+      login: this.#currentLoginState(providerKey),
     };
   }
 
@@ -206,32 +326,66 @@ export class ProviderAuthService implements ProviderAuthServiceApi {
     providerKey: ProviderKey,
   ): Promise<ProviderAuthLoginStartResult> {
     this.#assertCodexProvider(providerKey);
-    const existing = this.#activeLoginIdForProvider(providerKey);
+    const existing = this.#activeLoginForProvider(providerKey);
     if (existing) {
-      throw new InvalidStateError({
-        code: "provider_login_in_progress",
-        detail: `Provider '${providerKey}' already has a login flow in progress.`,
-      });
+      return {
+        providerKey,
+        loginId: existing.login.loginId,
+        authUrl: existing.login.authUrl,
+      };
     }
 
     const login = await this.#oauthHarness.startLogin();
-    this.#activeLogins.set(login.loginId, { providerKey, login });
+    const startedAt = nowIso();
+    const expiresAt = new Date(Date.now() + this.#loginExpiryMs).toISOString();
+    const activeLogin: ActiveLoginEntry = {
+      providerKey,
+      login,
+      startedAt,
+      expiresAt,
+    };
+    this.#activeLogins.set(login.loginId, activeLogin);
+    this.#setLoginState(providerKey, this.#pendingLoginState(activeLogin));
+    this.#scheduleLoginExpiry(activeLogin);
     await this.#emit(providerKey);
 
     void (async () => {
       try {
         const code = await login.waitForCode();
+        const currentLogin = this.#activeLogins.get(login.loginId);
+        if (!currentLogin) {
+          return;
+        }
         const tokens = await this.#authClient.exchangeAuthorizationCode(
           code,
           login.redirectUri,
           login.codeVerifier,
         );
         this.#persistTokens(tokens);
-      } catch {
-        // Browser login failure only affects the active flow; callers can observe it through state.
+        await this.#finishLogin({
+          loginId: login.loginId,
+          nextState: this.#idleLoginState(),
+        });
+      } catch (error) {
+        const currentLogin = this.#activeLogins.get(login.loginId);
+        if (!currentLogin) {
+          return;
+        }
+        await this.#finishLogin({
+          loginId: login.loginId,
+          nextState: this.#terminalLoginState({
+            status: "failed",
+            loginId: login.loginId,
+            startedAt: currentLogin.startedAt,
+            expiresAt: currentLogin.expiresAt,
+            error:
+              error instanceof Error
+                ? error.message
+                : "Login failed before completion.",
+          }),
+        });
       } finally {
-        this.#activeLogins.delete(login.loginId);
-        await this.#emit(providerKey);
+        this.#clearLoginTimer(login.loginId);
       }
     })();
 
@@ -261,21 +415,31 @@ export class ProviderAuthService implements ProviderAuthServiceApi {
       });
     }
 
-    this.#activeLogins.delete(loginId);
-    await this.#emit(providerKey);
+    await this.#finishLogin({
+      loginId,
+      nextState: this.#terminalLoginState({
+        status: "cancelled",
+        loginId,
+        startedAt: login.startedAt,
+        expiresAt: login.expiresAt,
+        error: "Login cancelled.",
+      }),
+    });
   }
 
   async logout(providerKey: ProviderKey): Promise<void> {
     this.#assertCodexProvider(providerKey);
-    const activeLoginId = this.#activeLoginIdForProvider(providerKey);
-    if (activeLoginId) {
-      const login = this.#activeLogins.get(activeLoginId);
+    const activeLogin = this.#activeLoginForProvider(providerKey);
+    if (activeLogin) {
+      const login = this.#activeLogins.get(activeLogin.login.loginId);
       if (login) {
         await login.login.cancel().catch(() => undefined);
       }
-      this.#activeLogins.delete(activeLoginId);
+      this.#clearLoginTimer(activeLogin.login.loginId);
+      this.#activeLogins.delete(activeLogin.login.loginId);
     }
 
+    this.#setLoginState(providerKey, this.#idleLoginState());
     this.#authRepository.delete(providerKey);
     await this.#emit(providerKey);
   }

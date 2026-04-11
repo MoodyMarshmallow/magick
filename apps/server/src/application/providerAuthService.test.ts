@@ -10,6 +10,7 @@ const makeService = (overrides?: {
   authRepository?: ProviderAuthRepositoryClient;
   authClient?: CodexAuthClient;
   oauthHarness?: CodexOAuthHarness;
+  loginExpiryMs?: number;
 }) => {
   return new ProviderAuthService({
     authRepository:
@@ -19,8 +20,20 @@ const makeService = (overrides?: {
     ...(overrides?.oauthHarness
       ? { oauthHarness: overrides.oauthHarness }
       : {}),
+    ...(overrides?.loginExpiryMs
+      ? { loginExpiryMs: overrides.loginExpiryMs }
+      : {}),
   });
 };
+
+const idleLoginState = {
+  status: "idle",
+  loginId: null,
+  authUrl: null,
+  startedAt: null,
+  expiresAt: null,
+  error: null,
+} as const;
 
 describe("ProviderAuthService", () => {
   it("fails for non-codex providers", async () => {
@@ -39,7 +52,7 @@ describe("ProviderAuthService", () => {
       providerKey: "codex",
       requiresOpenaiAuth: true,
       account: null,
-      activeLoginId: null,
+      login: idleLoginState,
     });
   });
 
@@ -78,7 +91,7 @@ describe("ProviderAuthService", () => {
         email: "new@example.com",
         planType: "plus",
       },
-      activeLoginId: null,
+      login: idleLoginState,
     });
   });
 
@@ -103,7 +116,21 @@ describe("ProviderAuthService", () => {
       authUrl: "https://chatgpt.com/login",
     });
 
+    await expect(service.read("codex")).resolves.toMatchObject({
+      login: {
+        status: "pending",
+        loginId: "login_1",
+      },
+    });
+
     await service.cancelLogin("codex", "login_1");
+
+    await expect(service.read("codex")).resolves.toMatchObject({
+      login: {
+        status: "cancelled",
+        loginId: "login_1",
+      },
+    });
   });
 
   it("logs out by clearing persisted auth state", async () => {
@@ -171,7 +198,7 @@ describe("ProviderAuthService", () => {
     });
   });
 
-  it("fails when starting a second login while one is active and when canceling an unknown login", async () => {
+  it("returns the existing login when starting again while one is pending and still fails for unknown login cancellation", async () => {
     const deferred = new Promise<string>(() => {});
     const oauthHarness = {
       startLogin: vi.fn().mockResolvedValue({
@@ -187,8 +214,39 @@ describe("ProviderAuthService", () => {
     const service = makeService({ oauthHarness });
     await service.startChatGptLogin("codex");
 
-    await expect(service.startChatGptLogin("codex")).rejects.toBeTruthy();
+    await expect(service.startChatGptLogin("codex")).resolves.toEqual({
+      providerKey: "codex",
+      loginId: "login_1",
+      authUrl: "https://chatgpt.com/login",
+    });
     await expect(service.cancelLogin("codex", "missing")).rejects.toBeTruthy();
+  });
+
+  it("expires an unfinished login and returns to a retryable auth state", async () => {
+    vi.useFakeTimers();
+    const oauthHarness = {
+      startLogin: vi.fn().mockResolvedValue({
+        loginId: "login_1",
+        authUrl: "https://chatgpt.com/login",
+        redirectUri: "http://127.0.0.1:1455/auth/callback",
+        codeVerifier: "verifier",
+        waitForCode: () => new Promise<string>(() => {}),
+        cancel: vi.fn().mockResolvedValue(undefined),
+      }),
+    } as unknown as CodexOAuthHarness;
+
+    const service = makeService({ oauthHarness, loginExpiryMs: 1000 });
+    await service.startChatGptLogin("codex");
+
+    await vi.advanceTimersByTimeAsync(1000);
+
+    await expect(service.read("codex")).resolves.toMatchObject({
+      login: {
+        status: "expired",
+        loginId: "login_1",
+      },
+    });
+    vi.useRealTimers();
   });
 
   it("does not fail auth mutations when a subscriber rejects", async () => {

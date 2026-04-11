@@ -167,7 +167,14 @@ export class WebSocketCommandServer {
       providerKey,
       requiresOpenaiAuth: false,
       account: null,
-      activeLoginId: null,
+      login: {
+        status: "idle",
+        loginId: null,
+        authUrl: null,
+        startedAt: null,
+        expiresAt: null,
+        error: null,
+      },
     };
   }
 

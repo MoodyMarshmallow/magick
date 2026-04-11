@@ -168,8 +168,14 @@ const printResponse = (
       return;
     case "providerAuthState":
       output.write(
-        `auth ${data.auth.providerKey}: account=${data.auth.account?.type ?? "none"}, activeLogin=${data.auth.activeLoginId ?? "none"}\n`,
+        `auth ${data.auth.providerKey}: account=${data.auth.account?.type ?? "none"}, login=${data.auth.login.status}\n`,
       );
+      if (data.auth.login.loginId) {
+        output.write(`login id=${data.auth.login.loginId}\n`);
+      }
+      if (data.auth.login.error) {
+        output.write(`login error=${data.auth.login.error}\n`);
+      }
       if (data.auth.account?.type === "chatgpt") {
         output.write(
           `chatgpt email=${data.auth.account.email ?? "unknown"} plan=${data.auth.account.planType ?? "unknown"}\n`,

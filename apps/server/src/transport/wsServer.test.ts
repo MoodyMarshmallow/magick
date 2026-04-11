@@ -25,6 +25,15 @@ import { WorkspacePathPolicy } from "../tools/workspacePathPolicy";
 import { ConnectionRegistry } from "./connectionRegistry";
 import { WebSocketCommandServer } from "./wsServer";
 
+const idleLoginState = {
+  status: "idle",
+  loginId: null,
+  authUrl: null,
+  startedAt: null,
+  expiresAt: null,
+  error: null,
+} as const;
+
 const createToolServices = () => ({
   toolExecutor: new ToolExecutor(),
   workspaceAccess: new WorkspaceAccessService({
@@ -49,7 +58,7 @@ const makeServices = () => {
         providerKey,
         requiresOpenaiAuth: providerKey === "codex",
         account: null,
-        activeLoginId: null,
+        login: idleLoginState,
       }),
       startChatGptLogin: async (providerKey: string) => ({
         providerKey,
@@ -253,7 +262,7 @@ describe("WebSocketCommandServer", () => {
             providerKey: "codex",
             requiresOpenaiAuth: true,
             account: null,
-            activeLoginId: null,
+            login: idleLoginState,
           },
         },
       },

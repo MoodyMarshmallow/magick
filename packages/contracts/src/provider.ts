@@ -35,11 +35,27 @@ export type ProviderAuthAccount =
       readonly planType: string | null;
     };
 
+export type ProviderAuthLoginStatus =
+  | "idle"
+  | "pending"
+  | "cancelled"
+  | "failed"
+  | "expired";
+
+export interface ProviderAuthLoginState {
+  readonly status: ProviderAuthLoginStatus;
+  readonly loginId: string | null;
+  readonly authUrl: string | null;
+  readonly startedAt: string | null;
+  readonly expiresAt: string | null;
+  readonly error: string | null;
+}
+
 export interface ProviderAuthState {
   readonly providerKey: ProviderKey;
   readonly requiresOpenaiAuth: boolean;
   readonly account: ProviderAuthAccount | null;
-  readonly activeLoginId: string | null;
+  readonly login: ProviderAuthLoginState;
 }
 
 export interface ProviderAuthLoginStartResult {

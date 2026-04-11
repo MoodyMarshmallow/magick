@@ -3,7 +3,10 @@ import { readFileSync } from "node:fs";
 import { maxThreadTitleLength } from "@magick/shared/threadTitle";
 
 const loadProviderPrompt = (fileName: string): string => {
-  return readFileSync(new URL(`./prompts/${fileName}`, import.meta.url), "utf8").trim();
+  return readFileSync(
+    new URL(`./prompts/${fileName}`, import.meta.url),
+    "utf8",
+  ).trim();
 };
 
 export const DEFAULT_ASSISTANT_INSTRUCTIONS = loadProviderPrompt(
