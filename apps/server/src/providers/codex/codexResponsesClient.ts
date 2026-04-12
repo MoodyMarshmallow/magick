@@ -2,6 +2,7 @@
 
 import { Effect, Stream } from "effect";
 
+import type { AssistantOutputChannel } from "@magick/contracts/chat";
 import type { ProviderAuthRecord } from "@magick/contracts/provider";
 import { maxThreadTitleLength } from "@magick/shared/threadTitle";
 import { nowIso } from "@magick/shared/time";
@@ -20,8 +21,18 @@ export interface CodexResponsesClientOptions {
 }
 
 type CodexStreamEvent =
-  | { readonly type: "output.delta"; readonly delta: string }
-  | { readonly type: "output.completed" }
+  | {
+      readonly type: "output.delta";
+      readonly channel: AssistantOutputChannel;
+      readonly itemKey: string;
+      readonly delta: string;
+    }
+  | {
+      readonly type: "output.message.completed";
+      readonly channel: AssistantOutputChannel;
+      readonly itemKey: string;
+    }
+  | { readonly type: "turn.completed" }
   | {
       readonly type: "tool.call.requested";
       readonly toolCallId: string;
@@ -32,8 +43,11 @@ type CodexStreamEvent =
 
 interface CodexConversationMessage {
   readonly role: "user" | "assistant";
+  readonly channel?: "commentary" | "final";
   readonly content: string;
 }
+
+type ResponsesAssistantPhase = "commentary" | "final_answer";
 
 interface CodexToolCallMessage {
   readonly type: "function_call";
@@ -194,6 +208,20 @@ const extractString = (
   return null;
 };
 
+const extractNumber = (
+  record: Record<string, unknown>,
+  keys: readonly string[],
+): number | null => {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === "number" && Number.isFinite(value)) {
+      return value;
+    }
+  }
+
+  return null;
+};
+
 const extractDelta = (record: Record<string, unknown>): string => {
   return (
     extractString(record, ["delta", "text", "output_text"]) ??
@@ -223,11 +251,78 @@ const extractError = (record: Record<string, unknown>): string => {
   );
 };
 
+const extractMessageText = (item: Record<string, unknown>): string => {
+  const content = Array.isArray(item.content) ? item.content : [];
+  const textParts: string[] = [];
+
+  for (const part of content) {
+    if (typeof part !== "object" || part === null) {
+      continue;
+    }
+
+    const record = part as Record<string, unknown>;
+    const text =
+      extractString(record, ["text", "output_text"]) ??
+      parseResponseItemText(record.text);
+    if (text) {
+      textParts.push(text);
+    }
+  }
+
+  return textParts.join("");
+};
+
+const toAssistantChannel = (
+  phase: string | null,
+): AssistantOutputChannel | null => {
+  switch (phase) {
+    case "commentary":
+      return "commentary";
+    case "final_answer":
+      return "final";
+    default:
+      return null;
+  }
+};
+
+const toResponsesAssistantPhase = (
+  channel: AssistantOutputChannel,
+): ResponsesAssistantPhase => {
+  return channel === "commentary" ? "commentary" : "final_answer";
+};
+
+type CodexRawStreamEvent =
+  | {
+      readonly type: "output.text.delta";
+      readonly itemKey: string | null;
+      readonly delta: string;
+    }
+  | {
+      readonly type: "output.item.added";
+      readonly itemKey: string;
+      readonly channel: AssistantOutputChannel;
+      readonly text: string;
+    }
+  | {
+      readonly type: "output.item.completed";
+      readonly itemKey: string;
+      readonly channel: AssistantOutputChannel;
+      readonly text: string;
+    }
+  | { readonly type: "response.completed" }
+  | {
+      readonly type: "tool.call.requested";
+      readonly toolCallId: string;
+      readonly toolName: string;
+      readonly input: unknown;
+    }
+  | { readonly type: "turn.failed"; readonly error: string };
+
 const parseCodexStreamMessage = (
   message: SseMessage,
-): readonly CodexStreamEvent[] => {
+): readonly CodexRawStreamEvent[] => {
   if (message.data === "[DONE]") {
-    return [{ type: "output.completed" }];
+    return [{ type: "response.completed" }];
   }
 
   const parsed = JSON.parse(message.data) as Record<string, unknown>;
@@ -237,23 +332,79 @@ const parseCodexStreamMessage = (
   switch (type) {
     case "response.created":
     case "response.in_progress":
-    case "response.output_item.added":
     case "response.content_part.added":
     case "response.content_part.done":
       return [];
+    case "response.output_item.added": {
+      const item =
+        typeof parsed.item === "object" && parsed.item !== null
+          ? (parsed.item as Record<string, unknown>)
+          : null;
+      if (item?.type !== "message" || item.role !== "assistant") {
+        return [];
+      }
+
+      const channel = toAssistantChannel(extractString(item, ["phase"]));
+      if (!channel) {
+        return [];
+      }
+
+      const itemKey =
+        extractString(item, ["id", "item_id"]) ??
+        (extractNumber(parsed, ["output_index", "item_index"]) ?? 0).toString();
+      return [
+        {
+          type: "output.item.added",
+          itemKey,
+          channel,
+          text: extractMessageText(item),
+        },
+      ];
+    }
     case "response.output_text.delta":
     case "response.output_text.annotation.added":
     case "response.content_part.delta": {
       const delta = extractDelta(parsed);
-      return delta.length > 0 ? [{ type: "output.delta", delta }] : [];
+      const outputIndex = extractNumber(parsed, ["output_index", "item_index"]);
+      const itemKey =
+        extractString(parsed, [
+          "item_id",
+          "output_item_id",
+          "message_id",
+          "id",
+        ]) ?? (outputIndex === null ? null : String(outputIndex));
+      return delta.length > 0
+        ? [{ type: "output.text.delta", itemKey, delta }]
+        : [];
     }
     case "response.completed":
-      return [{ type: "output.completed" }];
+      return [{ type: "response.completed" }];
     case "response.output_item.done": {
       const item =
         typeof parsed.item === "object" && parsed.item !== null
           ? (parsed.item as Record<string, unknown>)
           : null;
+      if (item?.type === "message" && item.role === "assistant") {
+        const channel = toAssistantChannel(extractString(item, ["phase"]));
+        if (!channel) {
+          return [];
+        }
+
+        const itemKey =
+          extractString(item, ["id", "item_id"]) ??
+          (
+            extractNumber(parsed, ["output_index", "item_index"]) ?? 0
+          ).toString();
+        return [
+          {
+            type: "output.item.completed",
+            itemKey,
+            channel,
+            text: extractMessageText(item),
+          },
+        ];
+      }
+
       if (item?.type !== "function_call") {
         return [];
       }
@@ -299,6 +450,18 @@ const normalizeGeneratedThreadTitle = (value: string): string | null => {
 
   return normalized.slice(0, maxThreadTitleLength);
 };
+
+interface ActiveAssistantOutputItem {
+  readonly itemKey: string;
+  readonly channel: AssistantOutputChannel;
+  emittedText: string;
+  completed: boolean;
+}
+
+const toStreamContractFailure = (detail: string): CodexStreamEvent => ({
+  type: "turn.failed",
+  error: `Invalid Codex Responses stream: ${detail}`,
+});
 
 export class CodexResponsesClient {
   readonly #fetch: typeof fetch;
@@ -469,6 +632,9 @@ export class CodexResponsesClient {
 
                   return {
                     role: message.role,
+                    ...(message.role === "assistant" && message.channel
+                      ? { phase: toResponsesAssistantPhase(message.channel) }
+                      : {}),
                     content: [
                       {
                         type:
@@ -529,8 +695,195 @@ export class CodexResponsesClient {
               error instanceof Error ? error.message : String(error),
             ),
           ).pipe(
-            Stream.flatMap((message) =>
-              Stream.fromIterable(parseCodexStreamMessage(message)),
+            Stream.flatMap(
+              (() => {
+                const activeAssistantItems = new Map<
+                  string,
+                  ActiveAssistantOutputItem
+                >();
+                let sawToolCall = false;
+                let responseCompleted = false;
+                let terminalFailureSeen = false;
+                let finalItemKey: string | null = null;
+
+                const ensureAssistantItem = (args: {
+                  readonly itemKey: string;
+                  readonly channel: AssistantOutputChannel;
+                }): ActiveAssistantOutputItem => {
+                  const existing = activeAssistantItems.get(args.itemKey);
+                  if (existing) {
+                    return existing;
+                  }
+
+                  const nextItem: ActiveAssistantOutputItem = {
+                    itemKey: args.itemKey,
+                    channel: args.channel,
+                    emittedText: "",
+                    completed: false,
+                  };
+                  if (args.channel === "final") {
+                    if (finalItemKey && finalItemKey !== args.itemKey) {
+                      throw new Error(
+                        "received more than one final_answer item in a single turn",
+                      );
+                    }
+                    finalItemKey = args.itemKey;
+                  }
+                  activeAssistantItems.set(args.itemKey, nextItem);
+                  return nextItem;
+                };
+
+                const resolveDeltaTarget = (
+                  itemKey: string | null,
+                ): ActiveAssistantOutputItem | null => {
+                  if (itemKey) {
+                    const keyedItem = activeAssistantItems.get(itemKey);
+                    if (keyedItem && !keyedItem.completed) {
+                      return keyedItem;
+                    }
+
+                    throw new Error(
+                      `received delta for unknown or completed assistant item '${itemKey}'`,
+                    );
+                  }
+
+                  const activeItems = Array.from(
+                    activeAssistantItems.values(),
+                  ).filter((item) => !item.completed);
+                  if (activeItems.length === 1) {
+                    return activeItems[0] ?? null;
+                  }
+
+                  throw new Error(
+                    activeItems.length === 0
+                      ? "received assistant text delta without an active assistant item"
+                      : "received assistant text delta without item_id while multiple assistant items were active",
+                  );
+                };
+
+                const emitCompletionForActiveItems = (
+                  nextEvents: CodexStreamEvent[],
+                ): void => {
+                  for (const item of Array.from(
+                    activeAssistantItems.values(),
+                  )) {
+                    emitCompletion(nextEvents, item, item.emittedText);
+                  }
+                };
+
+                const emitCompletion = (
+                  nextEvents: CodexStreamEvent[],
+                  item: ActiveAssistantOutputItem,
+                  fullText: string,
+                ): void => {
+                  if (item.completed) {
+                    return;
+                  }
+
+                  const remainingText = fullText.slice(item.emittedText.length);
+                  if (remainingText.length > 0) {
+                    nextEvents.push({
+                      type: "output.delta",
+                      itemKey: item.itemKey,
+                      channel: item.channel,
+                      delta: remainingText,
+                    });
+                    item.emittedText = fullText;
+                  }
+
+                  nextEvents.push({
+                    type: "output.message.completed",
+                    itemKey: item.itemKey,
+                    channel: item.channel,
+                  });
+                  item.completed = true;
+                  activeAssistantItems.delete(item.itemKey);
+                };
+
+                return (message: SseMessage) => {
+                  if (terminalFailureSeen) {
+                    return Stream.empty;
+                  }
+
+                  const rawEvents = parseCodexStreamMessage(message);
+                  const nextEvents: CodexStreamEvent[] = [];
+
+                  try {
+                    for (const rawEvent of rawEvents) {
+                      switch (rawEvent.type) {
+                        case "output.item.added": {
+                          const item = ensureAssistantItem({
+                            itemKey: rawEvent.itemKey,
+                            channel: rawEvent.channel,
+                          });
+                          if (
+                            rawEvent.text.length > 0 &&
+                            item.emittedText.length === 0
+                          ) {
+                            nextEvents.push({
+                              type: "output.delta",
+                              itemKey: item.itemKey,
+                              channel: item.channel,
+                              delta: rawEvent.text,
+                            });
+                            item.emittedText = rawEvent.text;
+                          }
+                          break;
+                        }
+                        case "output.text.delta": {
+                          const item = resolveDeltaTarget(rawEvent.itemKey);
+                          if (!item) {
+                            break;
+                          }
+                          nextEvents.push({
+                            type: "output.delta",
+                            itemKey: item.itemKey,
+                            channel: item.channel,
+                            delta: rawEvent.delta,
+                          });
+                          item.emittedText += rawEvent.delta;
+                          break;
+                        }
+                        case "output.item.completed": {
+                          const item = ensureAssistantItem({
+                            itemKey: rawEvent.itemKey,
+                            channel: rawEvent.channel,
+                          });
+                          emitCompletion(nextEvents, item, rawEvent.text);
+                          break;
+                        }
+                        case "tool.call.requested":
+                          sawToolCall = true;
+                          nextEvents.push(rawEvent);
+                          break;
+                        case "response.completed":
+                          if (!responseCompleted) {
+                            responseCompleted = true;
+                            emitCompletionForActiveItems(nextEvents);
+                            if (!sawToolCall) {
+                              nextEvents.push({ type: "turn.completed" });
+                            }
+                          }
+                          break;
+                        case "turn.failed":
+                          terminalFailureSeen = true;
+                          nextEvents.push(rawEvent);
+                          break;
+                      }
+                    }
+                  } catch (error) {
+                    terminalFailureSeen = true;
+                    nextEvents.length = 0;
+                    nextEvents.push(
+                      toStreamContractFailure(
+                        error instanceof Error ? error.message : String(error),
+                      ),
+                    );
+                  }
+
+                  return Stream.fromIterable(nextEvents);
+                };
+              })(),
             ),
           ),
         ),

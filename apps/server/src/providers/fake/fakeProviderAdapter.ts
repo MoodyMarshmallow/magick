@@ -1,5 +1,6 @@
 // Provides a deterministic in-memory provider used for orchestration and transport tests.
 
+import type { AssistantOutputChannel } from "@magick/contracts/chat";
 import type { ProviderCapabilities } from "@magick/contracts/provider";
 import { Effect, Option, Stream } from "effect";
 import type { ProviderFailureError } from "../../core/errors";
@@ -20,10 +21,24 @@ type FakeProviderMode = "stateful" | "stateless";
 export type FakeProviderResponse =
   | string
   | {
-      readonly toolName: string;
-      readonly input: Record<string, unknown>;
-      readonly onResult: (output: string) => FakeProviderResponse;
-    };
+      readonly channel: AssistantOutputChannel;
+      readonly content: string;
+    }
+  | readonly FakeProviderResponseStep[]
+  | FakeToolResponse;
+
+type FakeProviderResponseStep =
+  | {
+      readonly channel: AssistantOutputChannel;
+      readonly content: string;
+    }
+  | FakeToolResponse;
+
+interface FakeToolResponse {
+  readonly toolName: string;
+  readonly input: Record<string, unknown>;
+  readonly onResult: (output: string) => FakeProviderResponse;
+}
 
 interface FakeProviderAdapterOptions {
   readonly key?: string;
@@ -48,6 +63,12 @@ class FakeProviderSession implements ProviderSessionHandle {
   >();
   readonly #chunkDelayMs: number;
   readonly #responder: (input: StartTurnInput) => FakeProviderResponse;
+  readonly #turnMessageState = new Map<
+    string,
+    {
+      commentaryIndex: number;
+    }
+  >();
   readonly observedInputs: StartTurnInput[] = [];
 
   constructor(
@@ -66,26 +87,67 @@ class FakeProviderSession implements ProviderSessionHandle {
 
   readonly #streamTextResponse = (
     turnId: string,
-    messageId: string,
-    content: string,
+    response:
+      | string
+      | { readonly channel: AssistantOutputChannel; readonly content: string },
   ): Stream.Stream<ProviderEvent, ProviderFailureError> => {
-    const chunks = content.match(/.{1,8}/g) ?? [content];
+    const turnMessageState = this.#turnMessageState.get(turnId) ?? {
+      commentaryIndex: 0,
+    };
+    this.#turnMessageState.set(turnId, turnMessageState);
 
-    const deltas = Stream.fromIterable(chunks).pipe(
-      Stream.mapEffect((chunk) =>
+    const messages =
+      typeof response === "string"
+        ? [{ channel: "final" as const, content: response }]
+        : [response];
+
+    const events: ProviderEvent[] = [];
+
+    for (const message of messages) {
+      const messageId =
+        message.channel === "final"
+          ? `${turnId}:assistant:final`
+          : `${turnId}:assistant:commentary:${turnMessageState.commentaryIndex++}`;
+      const chunks = message.content.match(/.{1,8}/g) ?? [message.content];
+
+      for (const chunk of chunks) {
+        events.push({
+          type: "output.delta",
+          turnId,
+          messageId,
+          channel: message.channel,
+          delta: chunk,
+        });
+      }
+
+      events.push({
+        type: "output.message.completed",
+        turnId,
+        messageId,
+        channel: message.channel,
+      });
+    }
+
+    return Stream.fromIterable(events).pipe(
+      Stream.mapEffect((event) =>
         Effect.sleep(`${this.#chunkDelayMs} millis`).pipe(
           Effect.zipRight(
             Effect.sync(() => {
-              if (this.#interruptedTurns.has(turnId)) {
+              if (
+                this.#interruptedTurns.has(turnId) &&
+                event.type !== "turn.completed"
+              ) {
                 return null;
               }
 
-              return {
-                type: "output.delta" as const,
-                turnId,
-                messageId,
-                delta: chunk,
-              } satisfies ProviderEvent;
+              if (
+                this.#interruptedTurns.has(turnId) &&
+                event.type === "turn.completed"
+              ) {
+                return null;
+              }
+
+              return event;
             }),
           ),
         ),
@@ -94,46 +156,90 @@ class FakeProviderSession implements ProviderSessionHandle {
         event === null ? Option.none() : Option.some(event),
       ),
     );
-
-    const completed = Stream.unwrap(
-      Effect.sync(() => {
-        if (this.#interruptedTurns.has(turnId)) {
-          return Stream.empty;
-        }
-
-        return Stream.succeed({
-          type: "output.completed" as const,
-          turnId,
-          messageId,
-        } satisfies ProviderEvent);
-      }),
-    );
-
-    return Stream.concat(deltas, completed);
   };
 
   readonly #streamResponse = (
     turnId: string,
-    messageId: string,
     response: FakeProviderResponse,
   ): Stream.Stream<ProviderEvent, ProviderFailureError> => {
+    const completedTurnEvent = () =>
+      Stream.succeed(null).pipe(
+        Stream.map(() => {
+          if (this.#interruptedTurns.has(turnId)) {
+            this.#turnMessageState.delete(turnId);
+            return null;
+          }
+
+          this.#turnMessageState.delete(turnId);
+          return {
+            type: "turn.completed" as const,
+            turnId,
+          } satisfies ProviderEvent;
+        }),
+        Stream.filterMap((event) =>
+          event === null ? Option.none() : Option.some(event),
+        ),
+      );
+
     if (typeof response === "string") {
-      return this.#streamTextResponse(turnId, messageId, response);
+      return Stream.concat(
+        this.#streamTextResponse(turnId, response),
+        completedTurnEvent(),
+      );
     }
 
-    const toolCallId = `${turnId}:tool:${response.toolName}`;
+    if (Array.isArray(response)) {
+      const streams = response.map((step) => {
+        if (typeof step === "string" || "channel" in step) {
+          return this.#streamTextResponse(turnId, step);
+        }
+
+        return this.#streamResponse(turnId, step);
+      });
+      const [firstStream, ...remainingStreams] = streams;
+      const combinedStream = remainingStreams.reduce(
+        (combinedStream, nextStream) =>
+          Stream.concat(combinedStream, nextStream),
+        firstStream ?? Stream.empty,
+      );
+
+      const lastStep = response.at(-1);
+      const shouldCompleteTurn =
+        lastStep !== undefined &&
+        !(
+          typeof lastStep === "object" &&
+          lastStep !== null &&
+          "toolName" in lastStep
+        );
+
+      if (!shouldCompleteTurn) {
+        return combinedStream;
+      }
+
+      return Stream.concat(combinedStream, completedTurnEvent());
+    }
+
+    if ("channel" in response) {
+      return Stream.concat(
+        this.#streamTextResponse(turnId, response),
+        completedTurnEvent(),
+      );
+    }
+
+    const toolResponse = response as FakeToolResponse;
+    const toolCallId = `${turnId}:tool:${toolResponse.toolName}`;
     this.#pendingToolContinuations.set(turnId, {
       toolCallId,
-      toolName: response.toolName,
-      onResult: response.onResult,
+      toolName: toolResponse.toolName,
+      onResult: toolResponse.onResult,
     });
 
     return Stream.succeed({
       type: "tool.call.requested" as const,
       turnId,
       toolCallId,
-      toolName: response.toolName,
-      input: response.input,
+      toolName: toolResponse.toolName,
+      input: toolResponse.input,
     } satisfies ProviderEvent);
   };
 
@@ -145,11 +251,7 @@ class FakeProviderSession implements ProviderSessionHandle {
   > =>
     Effect.sync(() => {
       this.observedInputs.push(input);
-      return this.#streamResponse(
-        input.turnId,
-        input.messageId,
-        this.#responder(input),
-      );
+      return this.#streamResponse(input.turnId, this.#responder(input));
     });
 
   readonly submitToolResult = (
@@ -177,7 +279,6 @@ class FakeProviderSession implements ProviderSessionHandle {
       this.#pendingToolContinuations.delete(input.turnId);
       return this.#streamResponse(
         input.turnId,
-        `${input.turnId}:assistant`,
         pendingContinuation.onResult(input.output),
       );
     });
@@ -187,6 +288,7 @@ class FakeProviderSession implements ProviderSessionHandle {
   ): Effect.Effect<void, ProviderFailureError> =>
     Effect.sync(() => {
       this.#interruptedTurns.add(input.turnId);
+      this.#turnMessageState.delete(input.turnId);
     });
 
   readonly dispose = (): Effect.Effect<void> => Effect.void;

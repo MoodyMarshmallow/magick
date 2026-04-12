@@ -32,9 +32,9 @@ describe("CodexResponsesClient", () => {
       .mockResolvedValue(
         new Response(
           'event: response.created\ndata: {"type":"response.created"}\n\n' +
-            'event: response.output_item.added\ndata: {"type":"response.output_item.added"}\n\n' +
+            'event: response.output_item.added\ndata: {"type":"response.output_item.added","item":{"type":"message","id":"msg_1","role":"assistant","phase":"final_answer"}}\n\n' +
             'event: response.output_text.delta\ndata: {"type":"response.output_text.delta","delta":"Hello"}\n\n' +
-            'event: response.text.done\ndata: {"type":"response.text.done"}\n\n' +
+            'event: response.output_item.done\ndata: {"type":"response.output_item.done","item":{"type":"message","id":"msg_1","role":"assistant","phase":"final_answer","content":[{"type":"output_text","text":"Hello"}]}}\n\n' +
             "data: [DONE]\n\n",
           { status: 200, headers: { "Content-Type": "text/event-stream" } },
         ),
@@ -66,8 +66,18 @@ describe("CodexResponsesClient", () => {
     );
 
     expect(Array.from(events)).toEqual([
-      { type: "output.delta", delta: "Hello" },
-      { type: "output.completed" },
+      {
+        type: "output.delta",
+        itemKey: "msg_1",
+        channel: "final",
+        delta: "Hello",
+      },
+      {
+        type: "output.message.completed",
+        itemKey: "msg_1",
+        channel: "final",
+      },
+      { type: "turn.completed" },
     ]);
     expect(authRepository.upsert).toHaveBeenCalled();
     const request = JSON.parse(
@@ -114,7 +124,7 @@ describe("CodexResponsesClient", () => {
         client.streamResponse({
           messages: [
             { role: "user", content: "First question" },
-            { role: "assistant", content: "First answer" },
+            { role: "assistant", channel: "final", content: "First answer" },
             { role: "user", content: "Second question" },
           ],
           instructions: assistantInstructions,
@@ -127,6 +137,8 @@ describe("CodexResponsesClient", () => {
     );
     expect(request.input[0].content[0].type).toBe("input_text");
     expect(request.input[1].content[0].type).toBe("output_text");
+    expect(request.input[1].phase).toBe("final_answer");
+    expect(request.input[1].content[0].text).toBe("First answer");
     expect(request.input[2].content[0].type).toBe("input_text");
   });
 
@@ -151,7 +163,9 @@ describe("CodexResponsesClient", () => {
       .fn()
       .mockResolvedValue(
         new Response(
-          'data: {"type":"response.output_text.delta","delta":"\\"Release planning\\""}\n\n' +
+          'data: {"type":"response.output_item.added","item":{"type":"message","id":"title_1","role":"assistant","phase":"final_answer"}}\n\n' +
+            'data: {"type":"response.output_text.delta","delta":"\\"Release planning\\""}\n\n' +
+            'data: {"type":"response.output_item.done","item":{"type":"message","id":"title_1","role":"assistant","phase":"final_answer","content":[{"type":"output_text","text":"\\"Release planning\\""}]}}\n\n' +
             'data: {"type":"response.completed"}\n\n',
           { status: 200, headers: { "Content-Type": "text/event-stream" } },
         ),
@@ -254,6 +268,57 @@ describe("CodexResponsesClient", () => {
     ]);
   });
 
+  it("ignores later completion frames after an upstream failure", async () => {
+    const authRepository = {
+      get: vi.fn().mockReturnValue({
+        providerKey: "codex",
+        authMode: "chatgpt",
+        accessToken: "access",
+        refreshToken: "refresh",
+        expiresAt: Date.now() + 120_000,
+        accountId: null,
+        email: "user@example.com",
+        planType: null,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      }),
+      upsert: vi.fn(),
+      delete: vi.fn(),
+    };
+
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(
+          'data: {"type":"response.failed","message":"Boom"}\n\n' +
+            'data: {"type":"response.completed"}\n\n' +
+            "data: [DONE]\n\n",
+          { status: 200, headers: { "Content-Type": "text/event-stream" } },
+        ),
+      );
+
+    const client = new CodexResponsesClient({
+      authRepository: authRepository as never,
+      authClient: {
+        refreshAccessToken: vi.fn(),
+      } as unknown as CodexAuthClient,
+      fetch: fetchMock as never,
+    });
+
+    const events = await Effect.runPromise(
+      Stream.runCollect(
+        client.streamResponse({
+          messages: [{ role: "user", content: "Hello" }],
+          instructions: assistantInstructions,
+        }),
+      ),
+    );
+
+    expect(Array.from(events)).toEqual([
+      { type: "turn.failed", error: "Boom" },
+    ]);
+  });
+
   it("parses multiline sse frames and nested error payloads", async () => {
     const authRepository = {
       get: vi.fn().mockReturnValue({
@@ -276,7 +341,8 @@ describe("CodexResponsesClient", () => {
       .fn()
       .mockResolvedValue(
         new Response(
-          'event: response.content_part.delta\ndata: {"type":"response.content_part.delta","text":"Hi"}\n\n' +
+          'event: response.output_item.added\ndata: {"type":"response.output_item.added","item":{"type":"message","id":"msg_1","role":"assistant","phase":"final_answer"}}\n\n' +
+            'event: response.content_part.delta\ndata: {"type":"response.content_part.delta","text":"Hi"}\n\n' +
             'event: error\ndata: {"type":"error","error":{"message":"nested boom"}}\n\n',
           { status: 200, headers: { "Content-Type": "text/event-stream" } },
         ),
@@ -298,8 +364,66 @@ describe("CodexResponsesClient", () => {
     );
 
     expect(Array.from(events)).toEqual([
-      { type: "output.delta", delta: "Hi" },
+      { type: "output.delta", itemKey: "msg_1", channel: "final", delta: "Hi" },
       { type: "turn.failed", error: "nested boom" },
+    ]);
+  });
+
+  it("emits completion only once when both response.completed and [DONE] arrive", async () => {
+    const authRepository = {
+      get: vi.fn().mockReturnValue({
+        providerKey: "codex",
+        authMode: "chatgpt",
+        accessToken: "access",
+        refreshToken: "refresh",
+        expiresAt: Date.now() + 120_000,
+        accountId: null,
+        email: "user@example.com",
+        planType: null,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      }),
+      upsert: vi.fn(),
+      delete: vi.fn(),
+    };
+
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(
+          'event: response.output_item.added\ndata: {"type":"response.output_item.added","item":{"type":"message","id":"msg_1","role":"assistant","phase":"final_answer"}}\n\n' +
+            'event: response.output_text.delta\ndata: {"type":"response.output_text.delta","delta":"Done"}\n\n' +
+            'event: response.output_item.done\ndata: {"type":"response.output_item.done","item":{"type":"message","id":"msg_1","role":"assistant","phase":"final_answer","content":[{"type":"output_text","text":"Done"}]}}\n\n' +
+            'event: response.completed\ndata: {"type":"response.completed"}\n\n' +
+            "data: [DONE]\n\n",
+          { status: 200, headers: { "Content-Type": "text/event-stream" } },
+        ),
+      );
+
+    const client = new CodexResponsesClient({
+      authRepository: authRepository as never,
+      authClient: { refreshAccessToken: vi.fn() } as unknown as CodexAuthClient,
+      fetch: fetchMock as never,
+    });
+
+    const events = await Effect.runPromise(
+      Stream.runCollect(
+        client.streamResponse({
+          messages: [{ role: "user", content: "Hello" }],
+          instructions: assistantInstructions,
+        }),
+      ),
+    );
+
+    expect(Array.from(events)).toEqual([
+      {
+        type: "output.delta",
+        itemKey: "msg_1",
+        channel: "final",
+        delta: "Done",
+      },
+      { type: "output.message.completed", itemKey: "msg_1", channel: "final" },
+      { type: "turn.completed" },
     ]);
   });
 
@@ -325,7 +449,9 @@ describe("CodexResponsesClient", () => {
       .fn()
       .mockResolvedValue(
         new Response(
-          'event: response.content_part.delta\ndata: {"type":"response.content_part.delta","content_part":{"text":"Nested delta"}}\n\n' +
+          'event: response.output_item.added\ndata: {"type":"response.output_item.added","item":{"type":"message","id":"msg_1","role":"assistant","phase":"final_answer"}}\n\n' +
+            'event: response.content_part.delta\ndata: {"type":"response.content_part.delta","content_part":{"text":"Nested delta"}}\n\n' +
+            'event: response.output_item.done\ndata: {"type":"response.output_item.done","item":{"type":"message","id":"msg_1","role":"assistant","phase":"final_answer","content":[{"type":"output_text","text":"Nested delta"}]}}\n\n' +
             "data: [DONE]\n\n",
           { status: 200, headers: { "Content-Type": "text/event-stream" } },
         ),
@@ -347,8 +473,314 @@ describe("CodexResponsesClient", () => {
     );
 
     expect(Array.from(events)).toEqual([
-      { type: "output.delta", delta: "Nested delta" },
-      { type: "output.completed" },
+      {
+        type: "output.delta",
+        itemKey: "msg_1",
+        channel: "final",
+        delta: "Nested delta",
+      },
+      {
+        type: "output.message.completed",
+        itemKey: "msg_1",
+        channel: "final",
+      },
+      { type: "turn.completed" },
+    ]);
+  });
+
+  it("routes interleaved assistant deltas by upstream item identity", async () => {
+    const authRepository = {
+      get: vi.fn().mockReturnValue({
+        providerKey: "codex",
+        authMode: "chatgpt",
+        accessToken: "access",
+        refreshToken: "refresh",
+        expiresAt: Date.now() + 120_000,
+        accountId: null,
+        email: "user@example.com",
+        planType: null,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      }),
+      upsert: vi.fn(),
+      delete: vi.fn(),
+    };
+
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(
+          'data: {"type":"response.output_item.added","item":{"type":"message","id":"commentary_1","role":"assistant","phase":"commentary"}}\n\n' +
+            'data: {"type":"response.output_item.added","item":{"type":"message","id":"final_1","role":"assistant","phase":"final_answer"}}\n\n' +
+            'data: {"type":"response.output_text.delta","item_id":"commentary_1","delta":"Inspecting notes. "}\n\n' +
+            'data: {"type":"response.output_text.delta","item_id":"final_1","delta":"Summary ready."}\n\n' +
+            'data: {"type":"response.output_item.done","item":{"type":"message","id":"commentary_1","role":"assistant","phase":"commentary","content":[{"type":"output_text","text":"Inspecting notes. "}]}}\n\n' +
+            'data: {"type":"response.output_item.done","item":{"type":"message","id":"final_1","role":"assistant","phase":"final_answer","content":[{"type":"output_text","text":"Summary ready."}]}}\n\n' +
+            'data: {"type":"response.completed"}\n\n',
+          { status: 200, headers: { "Content-Type": "text/event-stream" } },
+        ),
+      );
+
+    const client = new CodexResponsesClient({
+      authRepository: authRepository as never,
+      authClient: { refreshAccessToken: vi.fn() } as unknown as CodexAuthClient,
+      fetch: fetchMock as never,
+    });
+
+    const events = await Effect.runPromise(
+      Stream.runCollect(
+        client.streamResponse({
+          messages: [{ role: "user", content: "Hello" }],
+          instructions: assistantInstructions,
+        }),
+      ),
+    );
+
+    expect(Array.from(events)).toEqual([
+      {
+        type: "output.delta",
+        itemKey: "commentary_1",
+        channel: "commentary",
+        delta: "Inspecting notes. ",
+      },
+      {
+        type: "output.delta",
+        itemKey: "final_1",
+        channel: "final",
+        delta: "Summary ready.",
+      },
+      {
+        type: "output.message.completed",
+        itemKey: "commentary_1",
+        channel: "commentary",
+      },
+      {
+        type: "output.message.completed",
+        itemKey: "final_1",
+        channel: "final",
+      },
+      { type: "turn.completed" },
+    ]);
+  });
+
+  it("fails the turn if a second final_answer item appears", async () => {
+    const authRepository = {
+      get: vi.fn().mockReturnValue({
+        providerKey: "codex",
+        authMode: "chatgpt",
+        accessToken: "access",
+        refreshToken: "refresh",
+        expiresAt: Date.now() + 120_000,
+        accountId: null,
+        email: "user@example.com",
+        planType: null,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      }),
+      upsert: vi.fn(),
+      delete: vi.fn(),
+    };
+
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(
+          'data: {"type":"response.output_item.added","item":{"type":"message","id":"final_1","role":"assistant","phase":"final_answer"}}\n\n' +
+            'data: {"type":"response.output_item.added","item":{"type":"message","id":"final_2","role":"assistant","phase":"final_answer"}}\n\n',
+          { status: 200, headers: { "Content-Type": "text/event-stream" } },
+        ),
+      );
+
+    const client = new CodexResponsesClient({
+      authRepository: authRepository as never,
+      authClient: { refreshAccessToken: vi.fn() } as unknown as CodexAuthClient,
+      fetch: fetchMock as never,
+    });
+
+    const events = await Effect.runPromise(
+      Stream.runCollect(
+        client.streamResponse({
+          messages: [{ role: "user", content: "Hello" }],
+          instructions: assistantInstructions,
+        }),
+      ),
+    );
+
+    expect(Array.from(events)).toEqual([
+      {
+        type: "turn.failed",
+        error:
+          "Invalid Codex Responses stream: received more than one final_answer item in a single turn",
+      },
+    ]);
+  });
+
+  it("fails the turn when a delta omits item_id while multiple assistant items are active", async () => {
+    const authRepository = {
+      get: vi.fn().mockReturnValue({
+        providerKey: "codex",
+        authMode: "chatgpt",
+        accessToken: "access",
+        refreshToken: "refresh",
+        expiresAt: Date.now() + 120_000,
+        accountId: null,
+        email: "user@example.com",
+        planType: null,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      }),
+      upsert: vi.fn(),
+      delete: vi.fn(),
+    };
+
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(
+          'data: {"type":"response.output_item.added","item":{"type":"message","id":"commentary_1","role":"assistant","phase":"commentary"}}\n\n' +
+            'data: {"type":"response.output_item.added","item":{"type":"message","id":"final_1","role":"assistant","phase":"final_answer"}}\n\n' +
+            'data: {"type":"response.output_text.delta","delta":"Ambiguous delta"}\n\n',
+          { status: 200, headers: { "Content-Type": "text/event-stream" } },
+        ),
+      );
+
+    const client = new CodexResponsesClient({
+      authRepository: authRepository as never,
+      authClient: { refreshAccessToken: vi.fn() } as unknown as CodexAuthClient,
+      fetch: fetchMock as never,
+    });
+
+    const events = await Effect.runPromise(
+      Stream.runCollect(
+        client.streamResponse({
+          messages: [{ role: "user", content: "Hello" }],
+          instructions: assistantInstructions,
+        }),
+      ),
+    );
+
+    expect(Array.from(events)).toEqual([
+      {
+        type: "turn.failed",
+        error:
+          "Invalid Codex Responses stream: received assistant text delta without item_id while multiple assistant items were active",
+      },
+    ]);
+  });
+
+  it("ignores later completion frames after a contract failure", async () => {
+    const authRepository = {
+      get: vi.fn().mockReturnValue({
+        providerKey: "codex",
+        authMode: "chatgpt",
+        accessToken: "access",
+        refreshToken: "refresh",
+        expiresAt: Date.now() + 120_000,
+        accountId: null,
+        email: "user@example.com",
+        planType: null,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      }),
+      upsert: vi.fn(),
+      delete: vi.fn(),
+    };
+
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(
+          'data: {"type":"response.output_item.added","item":{"type":"message","id":"commentary_1","role":"assistant","phase":"commentary"}}\n\n' +
+            'data: {"type":"response.output_item.added","item":{"type":"message","id":"final_1","role":"assistant","phase":"final_answer"}}\n\n' +
+            'data: {"type":"response.output_text.delta","delta":"Ambiguous delta"}\n\n' +
+            'data: {"type":"response.completed"}\n\n' +
+            "data: [DONE]\n\n",
+          { status: 200, headers: { "Content-Type": "text/event-stream" } },
+        ),
+      );
+
+    const client = new CodexResponsesClient({
+      authRepository: authRepository as never,
+      authClient: { refreshAccessToken: vi.fn() } as unknown as CodexAuthClient,
+      fetch: fetchMock as never,
+    });
+
+    const events = await Effect.runPromise(
+      Stream.runCollect(
+        client.streamResponse({
+          messages: [{ role: "user", content: "Hello" }],
+          instructions: assistantInstructions,
+        }),
+      ),
+    );
+
+    expect(Array.from(events)).toEqual([
+      {
+        type: "turn.failed",
+        error:
+          "Invalid Codex Responses stream: received assistant text delta without item_id while multiple assistant items were active",
+      },
+    ]);
+  });
+
+  it("completes active assistant items when the response ends without output_item.done", async () => {
+    const authRepository = {
+      get: vi.fn().mockReturnValue({
+        providerKey: "codex",
+        authMode: "chatgpt",
+        accessToken: "access",
+        refreshToken: "refresh",
+        expiresAt: Date.now() + 120_000,
+        accountId: null,
+        email: "user@example.com",
+        planType: null,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      }),
+      upsert: vi.fn(),
+      delete: vi.fn(),
+    };
+
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(
+          'data: {"type":"response.output_item.added","item":{"type":"message","id":"msg_1","role":"assistant","phase":"final_answer"}}\n\n' +
+            'data: {"type":"response.output_text.delta","item_id":"msg_1","delta":"Complete me"}\n\n' +
+            'data: {"type":"response.completed"}\n\n' +
+            "data: [DONE]\n\n",
+          { status: 200, headers: { "Content-Type": "text/event-stream" } },
+        ),
+      );
+
+    const client = new CodexResponsesClient({
+      authRepository: authRepository as never,
+      authClient: { refreshAccessToken: vi.fn() } as unknown as CodexAuthClient,
+      fetch: fetchMock as never,
+    });
+
+    const events = await Effect.runPromise(
+      Stream.runCollect(
+        client.streamResponse({
+          messages: [{ role: "user", content: "Hello" }],
+          instructions: assistantInstructions,
+        }),
+      ),
+    );
+
+    expect(Array.from(events)).toEqual([
+      {
+        type: "output.delta",
+        itemKey: "msg_1",
+        channel: "final",
+        delta: "Complete me",
+      },
+      {
+        type: "output.message.completed",
+        itemKey: "msg_1",
+        channel: "final",
+      },
+      { type: "turn.completed" },
     ]);
   });
 
@@ -402,7 +834,6 @@ describe("CodexResponsesClient", () => {
         toolName: "read",
         input: { path: "notes.md" },
       },
-      { type: "output.completed" },
     ]);
   });
 
@@ -526,7 +957,11 @@ describe("CodexResponsesClient", () => {
               callId: "call_1",
               output: "hello\nworld\n",
             },
-            { role: "assistant", content: "Tool saw the note" },
+            {
+              role: "assistant",
+              channel: "final",
+              content: "Tool saw the note",
+            },
             { role: "user", content: "Second" },
           ],
           instructions: assistantInstructions,
@@ -555,6 +990,7 @@ describe("CodexResponsesClient", () => {
       },
       {
         role: "assistant",
+        phase: "final_answer",
         content: [{ type: "output_text", text: "Tool saw the note" }],
       },
       {
