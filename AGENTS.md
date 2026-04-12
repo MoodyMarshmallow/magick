@@ -98,12 +98,14 @@ How we use it in this codebase:
 
 - Provider dispatch, auth handling, and thread orchestration are coordinated under `apps/server/src/application/` and `apps/server/src/providers/`.
 - The current Codex runtime lives under `apps/server/src/providers/codex/`.
+- The backend Codex transport is the OpenAI Responses API shape even though it's streaming from a different endpoint. We're simply using the OAuth endpoint instead of the usual API endpoint.
 - Web app consumers should continue to rely on orchestration domain events and typed WebSocket commands rather than provider-specific transport details.
 - If implementing new Codex work, keep the direct OAuth, token refresh, and Codex HTTP transport path as the source of truth.
 
 Docs:
 
 - Codex auth/docs overview: https://developers.openai.com/codex/auth
+- Responses API reference: https://platform.openai.com/docs/api-reference/responses/create
 
 ## Reference Repos
 
