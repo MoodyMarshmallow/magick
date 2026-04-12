@@ -1,4 +1,5 @@
 import type {
+  AssistantOutputChannel,
   DomainEvent,
   ThreadSummary,
   ThreadViewModel,
@@ -23,6 +24,7 @@ export type CommentThreadRuntimeState =
 export interface CommentMessage {
   readonly id: string;
   readonly author: CommentMessageAuthor;
+  readonly channel: AssistantOutputChannel | null;
   readonly body: string;
   readonly createdAt: string;
   readonly status: CommentMessageStatus;
@@ -93,6 +95,7 @@ const toCommentMessage = (
 ): CommentMessage => ({
   id: message.id,
   author: message.role === "user" ? "human" : "ai",
+  channel: message.channel,
   body: message.content,
   createdAt: message.createdAt,
   status: message.status,
@@ -173,30 +176,13 @@ const updateThread = (
   );
 };
 
-const assistantMessageIdPrefix = (turnId: string) => `${turnId}:assistant`;
+const assistantMessageIdPrefix = (turnId: string) => `${turnId}:assistant:`;
 
 const isAssistantMessageForTurn = (
   messageId: string,
   turnId: string,
 ): boolean => {
-  return (
-    messageId === assistantMessageIdPrefix(turnId) ||
-    messageId.startsWith(`${assistantMessageIdPrefix(turnId)}:`)
-  );
-};
-
-const getAssistantSegmentIndex = (
-  messageId: string,
-  turnId: string,
-): number => {
-  const prefix = assistantMessageIdPrefix(turnId);
-  if (messageId === prefix) {
-    return 0;
-  }
-
-  const suffix = messageId.slice(prefix.length + 1);
-  const parsed = Number.parseInt(suffix, 10);
-  return Number.isNaN(parsed) ? 0 : parsed;
+  return messageId.startsWith(assistantMessageIdPrefix(turnId));
 };
 
 const findLatestAssistantMessageByTurn = (
@@ -213,19 +199,15 @@ const findLatestAssistantMessageByTurn = (
   return undefined;
 };
 
-const createNextAssistantMessageId = (
-  messages: readonly CommentMessage[],
+const findStreamingAssistantMessagesByTurn = (
+  thread: CommentThread,
   turnId: string,
-): string => {
-  const highestSegmentIndex = messages.reduce((highest, message) => {
-    if (!isAssistantMessageForTurn(message.id, turnId)) {
-      return highest;
-    }
-
-    return Math.max(highest, getAssistantSegmentIndex(message.id, turnId));
-  }, -1);
-
-  return `${assistantMessageIdPrefix(turnId)}:${highestSegmentIndex + 1}`;
+): readonly CommentMessage[] => {
+  return thread.messages.filter(
+    (message) =>
+      isAssistantMessageForTurn(message.id, turnId) &&
+      message.status === "streaming",
+  );
 };
 
 const ensureThread = (
@@ -334,11 +316,24 @@ export const projectThreadEvent = (
             updatedAt: domainEvent.occurredAt,
           }));
         case "provider.session.disconnected":
+          return updateThread(nextThreads, event.threadId, (thread) => ({
+            ...thread,
+            runtimeState: "failed",
+            updatedAt: domainEvent.occurredAt,
+          }));
         case "turn.failed":
           return updateThread(nextThreads, event.threadId, (thread) => ({
             ...thread,
             runtimeState: "failed",
             updatedAt: domainEvent.occurredAt,
+            messages: thread.messages.map((message) =>
+              findStreamingAssistantMessagesByTurn(
+                thread,
+                domainEvent.payload.turnId,
+              ).some((streamingMessage) => streamingMessage.id === message.id)
+                ? { ...message, status: "failed" }
+                : message,
+            ),
           }));
         case "tool.approval.requested":
           return updateThread(nextThreads, event.threadId, (thread) => ({
@@ -400,11 +395,10 @@ export const projectThreadEvent = (
             runtimeState: "interrupted",
             updatedAt: domainEvent.occurredAt,
             messages: thread.messages.map((message) =>
-              message.id ===
-              findLatestAssistantMessageByTurn(
+              findStreamingAssistantMessagesByTurn(
                 thread,
                 domainEvent.payload.turnId,
-              )?.id
+              ).some((streamingMessage) => streamingMessage.id === message.id)
                 ? { ...message, status: "interrupted" }
                 : message,
             ),
@@ -435,11 +429,10 @@ export const projectThreadEvent = (
             ...thread,
             updatedAt: domainEvent.occurredAt,
             messages: thread.messages.map((message) =>
-              message.id ===
-                findLatestAssistantMessageByTurn(
-                  thread,
-                  domainEvent.payload.turnId,
-                )?.id && message.status === "streaming"
+              findStreamingAssistantMessagesByTurn(
+                thread,
+                domainEvent.payload.turnId,
+              ).some((streamingMessage) => streamingMessage.id === message.id)
                 ? { ...message, status: "complete" }
                 : message,
             ),
@@ -520,49 +513,59 @@ export const projectThreadEvent = (
               {
                 id: domainEvent.payload.messageId,
                 author: "human",
+                channel: null,
                 body: domainEvent.payload.content,
                 createdAt: domainEvent.occurredAt,
                 status: "complete",
               },
             ],
           }));
-        case "turn.delta":
+        case "message.assistant.delta":
           return updateThread(nextThreads, event.threadId, (thread) => {
-            const existingMessage = findLatestAssistantMessageByTurn(
-              thread,
-              domainEvent.payload.turnId,
+            const existingMessage = thread.messages.find(
+              (message) => message.id === domainEvent.payload.messageId,
             );
 
             return {
               ...thread,
               runtimeState: "running",
               updatedAt: domainEvent.occurredAt,
-              messages:
-                existingMessage?.status === "streaming"
-                  ? thread.messages.map((message) =>
-                      message.id === existingMessage.id
-                        ? {
-                            ...message,
-                            body: `${message.body}${domainEvent.payload.delta}`,
-                            status: "streaming",
-                          }
-                        : message,
-                    )
-                  : [
-                      ...thread.messages,
-                      {
-                        id: createNextAssistantMessageId(
-                          thread.messages,
-                          domainEvent.payload.turnId,
-                        ),
-                        author: "ai",
-                        body: domainEvent.payload.delta,
-                        createdAt: domainEvent.occurredAt,
-                        status: "streaming",
-                      },
-                    ],
+              messages: existingMessage
+                ? thread.messages.map((message) =>
+                    message.id === existingMessage.id
+                      ? {
+                          ...message,
+                          body: `${message.body}${domainEvent.payload.delta}`,
+                          status:
+                            message.status === "streaming"
+                              ? "streaming"
+                              : message.status,
+                        }
+                      : message,
+                  )
+                : [
+                    ...thread.messages,
+                    {
+                      id: domainEvent.payload.messageId,
+                      author: "ai",
+                      channel: domainEvent.payload.channel,
+                      body: domainEvent.payload.delta,
+                      createdAt: domainEvent.occurredAt,
+                      status: "streaming",
+                    },
+                  ],
             };
           });
+        case "message.assistant.completed":
+          return updateThread(nextThreads, event.threadId, (thread) => ({
+            ...thread,
+            updatedAt: domainEvent.occurredAt,
+            messages: thread.messages.map((message) =>
+              message.id === domainEvent.payload.messageId
+                ? { ...message, status: "complete" }
+                : message,
+            ),
+          }));
       }
     }
   }

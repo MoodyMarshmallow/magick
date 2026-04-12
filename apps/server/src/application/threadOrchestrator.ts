@@ -234,6 +234,7 @@ export class ThreadOrchestrator implements ThreadOrchestratorApi {
   ): readonly ConversationContextMessage[] => {
     return thread.messages.map((message) => ({
       role: message.role,
+      channel: message.channel,
       content: message.content,
     }));
   };
@@ -264,6 +265,7 @@ export class ThreadOrchestrator implements ThreadOrchestratorApi {
     type MutableAssistantHistoryMessage = {
       type: "message";
       role: "assistant";
+      channel: "commentary" | "final";
       content: string;
     };
     const assistantMessages = new Map<string, MutableAssistantHistoryMessage>();
@@ -274,10 +276,11 @@ export class ThreadOrchestrator implements ThreadOrchestratorApi {
           history.push({
             type: "message",
             role: "user",
+            channel: null,
             content: event.payload.content,
           });
           break;
-        case "turn.delta": {
+        case "message.assistant.delta": {
           const assistantMessage = assistantMessages.get(
             event.payload.messageId,
           );
@@ -289,6 +292,7 @@ export class ThreadOrchestrator implements ThreadOrchestratorApi {
           const nextMessage: MutableAssistantHistoryMessage = {
             type: "message",
             role: "assistant",
+            channel: event.payload.channel,
             content: event.payload.delta,
           };
           assistantMessages.set(event.payload.messageId, nextMessage);
@@ -578,15 +582,31 @@ export class ThreadOrchestrator implements ThreadOrchestratorApi {
             threadId,
             providerSessionId,
             occurredAt: this.#clock.now(),
-            type: "turn.delta",
+            type: "message.assistant.delta",
             payload: {
               turnId: providerEvent.turnId,
               messageId: providerEvent.messageId,
+              channel: providerEvent.channel,
               delta: providerEvent.delta,
             },
           },
         ]);
-      case "output.completed":
+      case "output.message.completed":
+        return this.#persistAndProject(threadId, [
+          {
+            eventId: this.#idGenerator.next("event"),
+            threadId,
+            providerSessionId,
+            occurredAt: this.#clock.now(),
+            type: "message.assistant.completed",
+            payload: {
+              turnId: providerEvent.turnId,
+              messageId: providerEvent.messageId,
+              channel: providerEvent.channel,
+            },
+          },
+        ]);
+      case "turn.completed":
         return this.#persistAndProject(threadId, [
           {
             eventId: this.#idGenerator.next("event"),
@@ -596,7 +616,6 @@ export class ThreadOrchestrator implements ThreadOrchestratorApi {
             type: "turn.completed",
             payload: {
               turnId: providerEvent.turnId,
-              messageId: providerEvent.messageId,
             },
           },
         ]);

@@ -43,13 +43,15 @@ const runningSeed: ThreadViewModel = {
     {
       id: "message_1",
       role: "user",
+      channel: null,
       content: "Hello",
       createdAt: "2026-01-01T00:00:01.000Z",
       status: "complete",
     },
     {
-      id: "turn_1:assistant",
+      id: "turn_1:assistant:final",
       role: "assistant",
+      channel: "final",
       content: "Part 1",
       createdAt: "2026-01-01T00:00:03.000Z",
       status: "streaming",
@@ -85,18 +87,29 @@ describe("projectThreadEvents", () => {
       makeEvent({
         sequence: 4,
         occurredAt: "2026-01-01T00:00:03.000Z",
-        type: "turn.delta",
+        type: "message.assistant.delta",
         payload: {
           turnId: "turn_1",
-          messageId: "assistant_1",
+          messageId: "turn_1:assistant:final",
+          channel: "final",
           delta: "Hi",
         },
       }),
       makeEvent({
         sequence: 5,
         occurredAt: "2026-01-01T00:00:04.000Z",
+        type: "message.assistant.completed",
+        payload: {
+          turnId: "turn_1",
+          messageId: "turn_1:assistant:final",
+          channel: "final",
+        },
+      }),
+      makeEvent({
+        sequence: 6,
+        occurredAt: "2026-01-01T00:00:04.500Z",
         type: "turn.completed",
-        payload: { turnId: "turn_1", messageId: "assistant_1" },
+        payload: { turnId: "turn_1" },
       }),
     ]);
 
@@ -119,10 +132,11 @@ describe("projectThreadEvents", () => {
       makeEvent({
         sequence: 3,
         occurredAt: "2026-01-01T00:00:02.000Z",
-        type: "turn.delta",
+        type: "message.assistant.delta",
         payload: {
           turnId: "turn_1",
-          messageId: "assistant_1",
+          messageId: "turn_1:assistant:final",
+          channel: "final",
           delta: "Partial",
         },
       }),
@@ -190,18 +204,29 @@ describe("projectThreadEvents", () => {
       makeEvent({
         sequence: 4,
         occurredAt: "2026-01-01T00:00:04.000Z",
-        type: "turn.delta",
+        type: "message.assistant.delta",
         payload: {
           turnId: "turn_1",
-          messageId: "assistant_1",
+          messageId: "turn_1:assistant:final",
+          channel: "final",
           delta: " + Part 2",
         },
       }),
       makeEvent({
         sequence: 5,
         occurredAt: "2026-01-01T00:00:05.000Z",
+        type: "message.assistant.completed",
+        payload: {
+          turnId: "turn_1",
+          messageId: "turn_1:assistant:final",
+          channel: "final",
+        },
+      }),
+      makeEvent({
+        sequence: 6,
+        occurredAt: "2026-01-01T00:00:05.500Z",
         type: "turn.completed",
-        payload: { turnId: "turn_1", messageId: "assistant_1" },
+        payload: { turnId: "turn_1" },
       }),
     ]);
 
@@ -224,10 +249,11 @@ describe("projectThreadEvents", () => {
       makeEvent({
         sequence: 3,
         occurredAt: "2026-01-01T00:00:02.000Z",
-        type: "turn.delta",
+        type: "message.assistant.delta",
         payload: {
           turnId: "turn_1",
-          messageId: "assistant_1",
+          messageId: "turn_1:assistant:commentary:0",
+          channel: "commentary",
           delta: "Before tool. ",
         },
       }),
@@ -248,29 +274,42 @@ describe("projectThreadEvents", () => {
       makeEvent({
         sequence: 5,
         occurredAt: "2026-01-01T00:00:04.000Z",
-        type: "turn.delta",
+        type: "message.assistant.delta",
         payload: {
           turnId: "turn_1",
-          messageId: "assistant_1",
+          messageId: "turn_1:assistant:final",
+          channel: "final",
           delta: "After tool.",
         },
       }),
       makeEvent({
         sequence: 6,
         occurredAt: "2026-01-01T00:00:05.000Z",
+        type: "message.assistant.completed",
+        payload: {
+          turnId: "turn_1",
+          messageId: "turn_1:assistant:final",
+          channel: "final",
+        },
+      }),
+      makeEvent({
+        sequence: 7,
+        occurredAt: "2026-01-01T00:00:05.500Z",
         type: "turn.completed",
-        payload: { turnId: "turn_1", messageId: "assistant_1" },
+        payload: { turnId: "turn_1" },
       }),
     ]);
 
     expect(thread.messages).toEqual([
       expect.objectContaining({
-        id: "turn_1:assistant:0",
+        id: "turn_1:assistant:commentary:0",
+        channel: "commentary",
         content: "Before tool. ",
         status: "complete",
       }),
       expect.objectContaining({
-        id: "turn_1:assistant:1",
+        id: "turn_1:assistant:final",
+        channel: "final",
         content: "After tool.",
         status: "complete",
       }),
@@ -279,6 +318,261 @@ describe("projectThreadEvents", () => {
       toolCallId: "tool_1",
       createdAt: "2026-01-01T00:00:03.000Z",
     });
+  });
+
+  it("keeps completed commentary complete if the turn later fails or is interrupted", () => {
+    const interrupted = projectThreadEvents(null, [
+      createdEvent(),
+      makeEvent({
+        sequence: 2,
+        occurredAt: "2026-01-01T00:00:01.000Z",
+        type: "turn.started",
+        payload: { turnId: "turn_1", parentTurnId: null },
+      }),
+      makeEvent({
+        sequence: 3,
+        occurredAt: "2026-01-01T00:00:02.000Z",
+        type: "message.assistant.delta",
+        payload: {
+          turnId: "turn_1",
+          messageId: "turn_1:assistant:commentary:0",
+          channel: "commentary",
+          delta: "Checking the notes.",
+        },
+      }),
+      makeEvent({
+        sequence: 4,
+        occurredAt: "2026-01-01T00:00:03.000Z",
+        type: "tool.requested",
+        payload: {
+          turnId: "turn_1",
+          toolCallId: "tool_1",
+          toolName: "read",
+          title: "Read notes.md",
+          argsPreview: '{"path":"notes.md"}',
+          path: "notes.md",
+          url: null,
+        },
+      }),
+      makeEvent({
+        sequence: 5,
+        occurredAt: "2026-01-01T00:00:04.000Z",
+        type: "turn.interrupted",
+        payload: { turnId: "turn_1", reason: "Stopped during tool" },
+      }),
+    ]);
+
+    expect(interrupted.messages).toContainEqual(
+      expect.objectContaining({
+        id: "turn_1:assistant:commentary:0",
+        status: "complete",
+      }),
+    );
+
+    const failed = projectThreadEvents(null, [
+      createdEvent(),
+      makeEvent({
+        sequence: 2,
+        occurredAt: "2026-01-01T00:00:01.000Z",
+        type: "turn.started",
+        payload: { turnId: "turn_1", parentTurnId: null },
+      }),
+      makeEvent({
+        sequence: 3,
+        occurredAt: "2026-01-01T00:00:02.000Z",
+        type: "message.assistant.delta",
+        payload: {
+          turnId: "turn_1",
+          messageId: "turn_1:assistant:commentary:0",
+          channel: "commentary",
+          delta: "Checking the notes.",
+        },
+      }),
+      makeEvent({
+        sequence: 4,
+        occurredAt: "2026-01-01T00:00:03.000Z",
+        type: "tool.requested",
+        payload: {
+          turnId: "turn_1",
+          toolCallId: "tool_1",
+          toolName: "read",
+          title: "Read notes.md",
+          argsPreview: '{"path":"notes.md"}',
+          path: "notes.md",
+          url: null,
+        },
+      }),
+      makeEvent({
+        sequence: 5,
+        occurredAt: "2026-01-01T00:00:04.000Z",
+        type: "turn.failed",
+        payload: { turnId: "turn_1", error: "Tool failed" },
+      }),
+    ]);
+
+    expect(failed.messages).toContainEqual(
+      expect.objectContaining({
+        id: "turn_1:assistant:commentary:0",
+        status: "complete",
+      }),
+    );
+  });
+
+  it("updates all streaming assistant messages for turn-level tool and failure events", () => {
+    const withTool = projectThreadEvents(null, [
+      createdEvent(),
+      makeEvent({
+        sequence: 2,
+        occurredAt: "2026-01-01T00:00:01.000Z",
+        type: "turn.started",
+        payload: { turnId: "turn_1", parentTurnId: null },
+      }),
+      makeEvent({
+        sequence: 3,
+        occurredAt: "2026-01-01T00:00:02.000Z",
+        type: "message.assistant.delta",
+        payload: {
+          turnId: "turn_1",
+          messageId: "turn_1:assistant:commentary:0",
+          channel: "commentary",
+          delta: "Inspecting notes. ",
+        },
+      }),
+      makeEvent({
+        sequence: 4,
+        occurredAt: "2026-01-01T00:00:02.500Z",
+        type: "message.assistant.delta",
+        payload: {
+          turnId: "turn_1",
+          messageId: "turn_1:assistant:final",
+          channel: "final",
+          delta: "Drafting answer.",
+        },
+      }),
+      makeEvent({
+        sequence: 5,
+        occurredAt: "2026-01-01T00:00:03.000Z",
+        type: "tool.requested",
+        payload: {
+          turnId: "turn_1",
+          toolCallId: "tool_1",
+          toolName: "read",
+          title: "Read notes.md",
+          argsPreview: '{"path":"notes.md"}',
+          path: "notes.md",
+          url: null,
+        },
+      }),
+    ]);
+
+    expect(withTool.messages).toEqual([
+      expect.objectContaining({
+        id: "turn_1:assistant:commentary:0",
+        status: "complete",
+      }),
+      expect.objectContaining({
+        id: "turn_1:assistant:final",
+        status: "complete",
+      }),
+    ]);
+
+    const failed = projectThreadEvents(null, [
+      createdEvent(),
+      makeEvent({
+        sequence: 2,
+        occurredAt: "2026-01-01T00:00:01.000Z",
+        type: "turn.started",
+        payload: { turnId: "turn_1", parentTurnId: null },
+      }),
+      makeEvent({
+        sequence: 3,
+        occurredAt: "2026-01-01T00:00:02.000Z",
+        type: "message.assistant.delta",
+        payload: {
+          turnId: "turn_1",
+          messageId: "turn_1:assistant:commentary:0",
+          channel: "commentary",
+          delta: "Inspecting notes. ",
+        },
+      }),
+      makeEvent({
+        sequence: 4,
+        occurredAt: "2026-01-01T00:00:02.500Z",
+        type: "message.assistant.delta",
+        payload: {
+          turnId: "turn_1",
+          messageId: "turn_1:assistant:final",
+          channel: "final",
+          delta: "Drafting answer.",
+        },
+      }),
+      makeEvent({
+        sequence: 5,
+        occurredAt: "2026-01-01T00:00:03.000Z",
+        type: "turn.failed",
+        payload: { turnId: "turn_1", error: "Socket lost" },
+      }),
+    ]);
+
+    expect(failed.messages).toEqual([
+      expect.objectContaining({
+        id: "turn_1:assistant:commentary:0",
+        status: "failed",
+      }),
+      expect.objectContaining({
+        id: "turn_1:assistant:final",
+        status: "failed",
+      }),
+    ]);
+
+    const interrupted = projectThreadEvents(null, [
+      createdEvent(),
+      makeEvent({
+        sequence: 2,
+        occurredAt: "2026-01-01T00:00:01.000Z",
+        type: "turn.started",
+        payload: { turnId: "turn_1", parentTurnId: null },
+      }),
+      makeEvent({
+        sequence: 3,
+        occurredAt: "2026-01-01T00:00:02.000Z",
+        type: "message.assistant.delta",
+        payload: {
+          turnId: "turn_1",
+          messageId: "turn_1:assistant:commentary:0",
+          channel: "commentary",
+          delta: "Inspecting notes. ",
+        },
+      }),
+      makeEvent({
+        sequence: 4,
+        occurredAt: "2026-01-01T00:00:02.500Z",
+        type: "message.assistant.delta",
+        payload: {
+          turnId: "turn_1",
+          messageId: "turn_1:assistant:final",
+          channel: "final",
+          delta: "Drafting answer.",
+        },
+      }),
+      makeEvent({
+        sequence: 5,
+        occurredAt: "2026-01-01T00:00:03.000Z",
+        type: "turn.interrupted",
+        payload: { turnId: "turn_1", reason: "Stopped" },
+      }),
+    ]);
+
+    expect(interrupted.messages).toEqual([
+      expect.objectContaining({
+        id: "turn_1:assistant:commentary:0",
+        status: "interrupted",
+      }),
+      expect.objectContaining({
+        id: "turn_1:assistant:final",
+        status: "interrupted",
+      }),
+    ]);
   });
 });
 

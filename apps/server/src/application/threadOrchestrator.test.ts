@@ -232,6 +232,7 @@ describe("ThreadOrchestrator", () => {
       {
         type: "message",
         role: "user",
+        channel: null,
         content: "First",
       },
       {
@@ -248,6 +249,7 @@ describe("ThreadOrchestrator", () => {
       {
         type: "message",
         role: "assistant",
+        channel: "final",
         content: "Tool saw: helloworld",
       },
     ]);

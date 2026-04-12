@@ -29,30 +29,13 @@ const upsertMessage = (
   return nextMessages;
 };
 
-const assistantMessageIdPrefix = (turnId: string) => `${turnId}:assistant`;
+const assistantMessageIdPrefix = (turnId: string) => `${turnId}:assistant:`;
 
 const isAssistantMessageForTurn = (
   messageId: string,
   turnId: string,
 ): boolean => {
-  return (
-    messageId === assistantMessageIdPrefix(turnId) ||
-    messageId.startsWith(`${assistantMessageIdPrefix(turnId)}:`)
-  );
-};
-
-const getAssistantSegmentIndex = (
-  messageId: string,
-  turnId: string,
-): number => {
-  const prefix = assistantMessageIdPrefix(turnId);
-  if (messageId === prefix) {
-    return 0;
-  }
-
-  const suffix = messageId.slice(prefix.length + 1);
-  const parsed = Number.parseInt(suffix, 10);
-  return Number.isNaN(parsed) ? 0 : parsed;
+  return messageId.startsWith(assistantMessageIdPrefix(turnId));
 };
 
 const findLatestAssistantMessageByTurn = (
@@ -69,19 +52,15 @@ const findLatestAssistantMessageByTurn = (
   return undefined;
 };
 
-const createNextAssistantMessageId = (
-  messages: readonly TranscriptMessage[],
+const findStreamingAssistantMessagesByTurn = (
+  state: ThreadViewModel,
   turnId: string,
-): string => {
-  const highestSegmentIndex = messages.reduce((highest, message) => {
-    if (!isAssistantMessageForTurn(message.id, turnId)) {
-      return highest;
-    }
-
-    return Math.max(highest, getAssistantSegmentIndex(message.id, turnId));
-  }, -1);
-
-  return `${assistantMessageIdPrefix(turnId)}:${highestSegmentIndex + 1}`;
+): readonly TranscriptMessage[] => {
+  return state.messages.filter(
+    (message) =>
+      isAssistantMessageForTurn(message.id, turnId) &&
+      message.status === "streaming",
+  );
 };
 
 const cloneThread = (thread: ThreadViewModel): MutableThreadViewModel => {
@@ -211,6 +190,7 @@ export const projectThreadEvents = (
           {
             id: event.payload.messageId,
             role: "user",
+            channel: null,
             content: event.payload.content,
             createdAt: event.occurredAt,
             status: "complete",
@@ -231,13 +211,12 @@ export const projectThreadEvents = (
         state.updatedAt = event.occurredAt;
         state.lastError = null;
         break;
-      case "turn.delta": {
-        const existing = findLatestAssistantMessageByTurn(
-          state,
-          event.payload.turnId,
+      case "message.assistant.delta": {
+        const existing = state.messages.find(
+          (message) => message.id === event.payload.messageId,
         );
 
-        if (existing?.status === "streaming") {
+        if (existing) {
           state.messages = upsertMessage(state.messages, {
             ...existing,
             content: `${existing.content}${event.payload.delta}`,
@@ -246,11 +225,9 @@ export const projectThreadEvents = (
           state.messages = [
             ...state.messages,
             {
-              id: createNextAssistantMessageId(
-                state.messages,
-                event.payload.turnId,
-              ),
+              id: event.payload.messageId,
               role: "assistant",
+              channel: event.payload.channel,
               content: event.payload.delta,
               createdAt: event.occurredAt,
               status: "streaming",
@@ -263,13 +240,10 @@ export const projectThreadEvents = (
         state.lastAssistantMessageAt = event.occurredAt;
         break;
       }
-      case "turn.completed": {
-        const existing = findLatestAssistantMessageByTurn(
-          state,
-          event.payload.turnId,
+      case "message.assistant.completed": {
+        const existing = state.messages.find(
+          (message) => message.id === event.payload.messageId,
         );
-        state.runtimeState = "idle";
-        state.activeTurnId = null;
         if (existing) {
           state.messages = upsertMessage(state.messages, {
             ...existing,
@@ -282,16 +256,24 @@ export const projectThreadEvents = (
         state.lastAssistantMessageAt = event.occurredAt;
         break;
       }
+      case "turn.completed": {
+        state.runtimeState = "idle";
+        state.activeTurnId = null;
+        state.latestSequence = event.sequence;
+        state.latestActivityAt = event.occurredAt;
+        state.updatedAt = event.occurredAt;
+        break;
+      }
       case "turn.interrupted": {
-        const existing = findLatestAssistantMessageByTurn(
+        const streamingMessages = findStreamingAssistantMessagesByTurn(
           state,
           event.payload.turnId,
         );
         state.runtimeState = "interrupted";
         state.activeTurnId = null;
-        if (existing) {
+        for (const message of streamingMessages) {
           state.messages = upsertMessage(state.messages, {
-            ...existing,
+            ...message,
             status: "interrupted",
           });
         }
@@ -302,15 +284,15 @@ export const projectThreadEvents = (
         break;
       }
       case "turn.failed": {
-        const existing = findLatestAssistantMessageByTurn(
+        const streamingMessages = findStreamingAssistantMessagesByTurn(
           state,
           event.payload.turnId,
         );
         state.runtimeState = "failed";
         state.activeTurnId = null;
-        if (existing) {
+        for (const message of streamingMessages) {
           state.messages = upsertMessage(state.messages, {
-            ...existing,
+            ...message,
             status: "failed",
           });
         }
@@ -321,13 +303,13 @@ export const projectThreadEvents = (
         break;
       }
       case "tool.requested": {
-        const existingAssistantMessage = findLatestAssistantMessageByTurn(
+        const streamingMessages = findStreamingAssistantMessagesByTurn(
           state,
           event.payload.turnId,
         );
-        if (existingAssistantMessage?.status === "streaming") {
+        for (const message of streamingMessages) {
           state.messages = upsertMessage(state.messages, {
-            ...existingAssistantMessage,
+            ...message,
             status: "complete",
           });
         }
