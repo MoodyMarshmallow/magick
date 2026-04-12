@@ -1,5 +1,0 @@
-#!/usr/bin/env sh
-
-set -eu
-
-exec node --import tsx "apps/server/src/terminalCli.ts" "$@"
