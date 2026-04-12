@@ -3,37 +3,38 @@ import type { Server } from "node:http";
 import { dirname, join, resolve } from "node:path";
 import { resolveLocalWorkspaceDir } from "../../../packages/shared/src/localWorkspaceNode";
 
-import { ProviderAuthService } from "./application/providerAuthService";
-import { ProviderRegistry } from "./application/providerRegistry";
-import { ReplayService } from "./application/replayService";
-import { ThreadOrchestrator } from "./application/threadOrchestrator";
+import {
+  CodexProviderAdapter,
+  createCodexRuntimeFactory,
+} from "./ai/agent/providers/codex/codexProviderAdapter";
+import {
+  FakeProviderAdapter,
+  type FakeProviderResponse,
+} from "./ai/agent/providers/fake/fakeProviderAdapter";
+import { ProviderRegistry } from "./ai/agent/providers/providerRegistry";
+import type { ProviderAdapter } from "./ai/agent/providers/providerTypes";
 import {
   createClock,
   createIdGenerator,
   createRuntimeState,
-} from "./core/runtime";
-import type { EventPublisherService } from "./core/runtime";
-import { createDatabase } from "./persistence/database";
-import { EventStore } from "./persistence/eventStore";
-import { ProviderAuthRepositoryClient } from "./persistence/providerAuthRepository";
-import { ProviderSessionRepository } from "./persistence/providerSessionRepository";
-import { ThreadRepository } from "./persistence/threadRepository";
-import {
-  CodexProviderAdapter,
-  createCodexRuntimeFactory,
-} from "./providers/codex/codexProviderAdapter";
-import {
-  FakeProviderAdapter,
-  type FakeProviderResponse,
-} from "./providers/fake/fakeProviderAdapter";
-import type { ProviderAdapter } from "./providers/providerTypes";
-import { PathPresentationPolicy } from "./tools/pathPresentationPolicy";
-import { ToolExecutor } from "./tools/toolExecutor";
-import { WebContentService } from "./tools/webContentService";
-import { WorkspaceAccessService } from "./tools/workspaceAccessService";
-import { WorkspacePathPolicy } from "./tools/workspacePathPolicy";
-import { ConnectionRegistry } from "./transport/connectionRegistry";
-import { WebSocketCommandServer } from "./transport/wsServer";
+} from "./ai/agent/runtime/runtime";
+import type { EventPublisherService } from "./ai/agent/runtime/runtime";
+import { EventStore } from "./ai/agent/threads/eventStore";
+import { ProviderSessionRepository } from "./ai/agent/threads/providerSessionRepository";
+import { ReplayService } from "./ai/agent/threads/replayService";
+import { ThreadOrchestrator } from "./ai/agent/threads/threadOrchestrator";
+import { ThreadRepository } from "./ai/agent/threads/threadRepository";
+import { ToolExecutor } from "./ai/agent/tools/toolExecutor";
+import { WebContentService } from "./ai/agent/tools/webContentService";
+import { ConnectionRegistry } from "./ai/agent/transport/connectionRegistry";
+import { WebSocketCommandServer } from "./ai/agent/transport/wsServer";
+import { ProviderAuthRepositoryClient } from "./ai/auth/providerAuthRepository";
+import { ProviderAuthService } from "./ai/auth/providerAuthService";
+import { DocumentService } from "./editor/documents/documentService";
+import { PathPresentationPolicy } from "./editor/workspace/pathPresentationPolicy";
+import { WorkspacePathPolicy } from "./editor/workspace/workspacePathPolicy";
+import { WorkspaceQueryService } from "./editor/workspace/workspaceQueryService";
+import { type DatabaseClient, createDatabase } from "./persistence/database";
 
 export interface BackendServices {
   readonly database: ReturnType<typeof createDatabase>;
@@ -71,28 +72,42 @@ export const resolveDefaultWorkspaceRoot = (
     cwd: resolveBackendRepoRoot(),
   });
 
-export const createBackendServices = (
-  options: BackendServiceOptions = {},
-): BackendServices => {
-  const databasePath = options.databasePath ?? resolveDefaultDatabasePath();
-  const workspaceRoot = options.workspaceRoot ?? resolveDefaultWorkspaceRoot();
-  mkdirSync(dirname(databasePath), { recursive: true });
-  mkdirSync(workspaceRoot, { recursive: true });
+const createEditorServices = (workspaceRoot: string) => {
+  const pathPolicy = new WorkspacePathPolicy(workspaceRoot);
+  const presentationPolicy = new PathPresentationPolicy("workspace-relative");
+  const documents = new DocumentService({
+    pathPolicy,
+    presentationPolicy,
+  });
 
-  const database = createDatabase(databasePath);
-  const connections = new ConnectionRegistry();
+  return {
+    documents,
+    workspaceQuery: new WorkspaceQueryService({
+      pathPolicy,
+      presentationPolicy,
+      documents,
+    }),
+  };
+};
 
+const createAiServices = (args: {
+  readonly database: DatabaseClient;
+  readonly connections: ConnectionRegistry;
+  readonly includeFakeProviders?: boolean;
+  readonly documents: DocumentService;
+  readonly workspaceQuery: WorkspaceQueryService;
+}) => {
   const clock = createClock();
   const idGenerator = createIdGenerator();
   const runtimeState = createRuntimeState();
-  const eventStore = new EventStore(database);
-  const providerAuthRepository = new ProviderAuthRepositoryClient(database);
-  const threadRepository = new ThreadRepository(database);
-  const providerSessionRepository = new ProviderSessionRepository(database);
-  const workspaceAccess = new WorkspaceAccessService({
-    pathPolicy: new WorkspacePathPolicy(workspaceRoot),
-    presentationPolicy: new PathPresentationPolicy("workspace-relative"),
-  });
+  const eventStore = new EventStore(args.database);
+  const providerAuthRepository = new ProviderAuthRepositoryClient(
+    args.database,
+  );
+  const threadRepository = new ThreadRepository(args.database);
+  const providerSessionRepository = new ProviderSessionRepository(
+    args.database,
+  );
   const webContent = new WebContentService();
   const toolExecutor = new ToolExecutor();
   const providers: ProviderAdapter[] = [
@@ -102,13 +117,15 @@ export const createBackendServices = (
       }),
     ),
   ];
-  if (options.includeFakeProviders) {
+  if (args.includeFakeProviders) {
     providers.push(
       new FakeProviderAdapter({ mode: "stateful" }),
       new FakeProviderAdapter({
         key: "fake-tools",
         mode: "stateful",
-        responder: ({ userMessage }): FakeProviderResponse => {
+        responder: ({
+          userMessage,
+        }: { readonly userMessage: string }): FakeProviderResponse => {
           const normalizedMessage = userMessage.toLowerCase();
           if (normalizedMessage.includes("list")) {
             return {
@@ -154,13 +171,13 @@ export const createBackendServices = (
       new FakeProviderAdapter({ key: "fake-stateless", mode: "stateless" }),
     );
   }
-  const providerRegistry = new ProviderRegistry(providers);
 
+  const providerRegistry = new ProviderRegistry(providers);
   const publisher: EventPublisherService = {
     publish: async (events) => {
       await Promise.all(
         events.map((event) =>
-          connections.publishToThread(event.threadId, {
+          args.connections.publishToThread(event.threadId, {
             channel: "orchestration.domainEvent",
             threadId: event.threadId,
             event,
@@ -170,35 +187,60 @@ export const createBackendServices = (
     },
   };
 
-  const replayService = new ReplayService({
-    eventStore,
-    threadRepository,
-  });
-  const providerAuthService = new ProviderAuthService({
-    authRepository: providerAuthRepository,
-  });
-  const threadOrchestrator = new ThreadOrchestrator({
+  return {
     providerRegistry,
-    eventStore,
-    threadRepository,
-    providerSessionRepository,
-    publisher,
-    runtimeState,
-    clock,
-    idGenerator,
-    toolExecutor,
-    workspaceAccess,
-    webContent,
+    providerAuthService: new ProviderAuthService({
+      authRepository: providerAuthRepository,
+    }),
+    replayService: new ReplayService({
+      eventStore,
+      threadRepository,
+    }),
+    threadOrchestrator: new ThreadOrchestrator({
+      providerRegistry,
+      eventStore,
+      threadRepository,
+      providerSessionRepository,
+      publisher,
+      runtimeState,
+      clock,
+      idGenerator,
+      toolExecutor,
+      documents: args.documents,
+      workspaceQuery: args.workspaceQuery,
+      webContent,
+    }),
+  };
+};
+
+export const createBackendServices = (
+  options: BackendServiceOptions = {},
+): BackendServices => {
+  const databasePath = options.databasePath ?? resolveDefaultDatabasePath();
+  const workspaceRoot = options.workspaceRoot ?? resolveDefaultWorkspaceRoot();
+  mkdirSync(dirname(databasePath), { recursive: true });
+  mkdirSync(workspaceRoot, { recursive: true });
+
+  const database = createDatabase(databasePath);
+  const connections = new ConnectionRegistry();
+  const editorServices = createEditorServices(workspaceRoot);
+  const aiServices = createAiServices({
+    database,
+    connections,
+    ...(options.includeFakeProviders === undefined
+      ? {}
+      : { includeFakeProviders: options.includeFakeProviders }),
+    ...editorServices,
   });
 
   return {
     database,
     databasePath,
     connections,
-    providerRegistry,
-    providerAuthService,
-    replayService,
-    threadOrchestrator,
+    providerRegistry: aiServices.providerRegistry,
+    providerAuthService: aiServices.providerAuthService,
+    replayService: aiServices.replayService,
+    threadOrchestrator: aiServices.threadOrchestrator,
   };
 };
 
