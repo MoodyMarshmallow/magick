@@ -13,6 +13,7 @@ interface DocumentBootstrap {
 interface MutableCommentMessage {
   id: string;
   author: CommentMessage["author"];
+  channel: CommentMessage["channel"];
   body: string;
   createdAt: string;
   status: CommentMessage["status"];
@@ -179,6 +180,7 @@ const longThreadMessages: readonly Omit<MutableCommentMessage, "createdAt">[] =
     return {
       id: `message_long_${index + 1}`,
       author,
+      channel: author === "ai" ? "final" : null,
       body: `${author === "human" ? "I want the demo thread to overflow so I can test scrolling" : "The chat panel should stay readable even when a thread becomes very long"}. ${repeatParagraph(
         "Keep the line length moderate, preserve rhythm between paragraphs, and make sure the scroller still feels easy to grab.",
         2,
@@ -195,6 +197,7 @@ const createSeedThreads = (now: () => string): MutableCommentThread[] => {
   }): MutableCommentMessage => ({
     id: args.id,
     author: args.author,
+    channel: args.author === "ai" ? "final" : null,
     body: args.body,
     createdAt: now(),
     status: "complete",
@@ -353,6 +356,7 @@ export const createDemoMagickClient = (
     const streamingMessage: MutableCommentMessage = {
       id: messageId,
       author: "ai",
+      channel: "final",
       body: "",
       createdAt,
       status: "streaming",
@@ -442,6 +446,7 @@ export const createDemoMagickClient = (
           {
             id: `message_${createId()}`,
             author: "human",
+            channel: null,
             body: args.initialMessage,
             createdAt: timestamp,
             status: "complete",
@@ -466,6 +471,7 @@ export const createDemoMagickClient = (
       const message: MutableCommentMessage = {
         id: `message_${createId()}`,
         author: "human",
+        channel: null,
         body: args.body,
         createdAt: now(),
         status: "complete",

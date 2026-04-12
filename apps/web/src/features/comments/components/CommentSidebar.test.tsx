@@ -22,6 +22,7 @@ const threads: readonly CommentThread[] = [
       {
         id: "message_1",
         author: "human",
+        channel: null,
         body: "hello",
         createdAt: "2026-04-02T10:00:00.000Z",
         status: "complete",
@@ -306,6 +307,7 @@ describe("CommentSidebar", () => {
           {
             id: "message_math",
             author: "ai",
+            channel: "final",
             body: "**bold**\n\n- item one\n- item two\n\n`inline code` and [link](https://example.com) and $E = mc^2$",
             createdAt: "2026-04-02T10:00:00.000Z",
             status: "complete",

@@ -8,6 +8,7 @@ export type ThreadRuntimeState =
   | "awaiting_approval"
   | "interrupted"
   | "failed";
+export type AssistantOutputChannel = "commentary" | "final";
 export type ToolActivityStatus =
   | "requested"
   | "running"
@@ -69,6 +70,7 @@ export interface ThreadRecord {
 export interface TranscriptMessage {
   readonly id: string;
   readonly role: "user" | "assistant";
+  readonly channel: AssistantOutputChannel | null;
   readonly content: string;
   readonly createdAt: string;
   readonly status: "streaming" | "complete" | "interrupted" | "failed";
@@ -134,10 +136,23 @@ export type DomainEvent =
   | EventBase<"message.user.created", { messageId: string; content: string }>
   | EventBase<"turn.started", { turnId: string; parentTurnId: string | null }>
   | EventBase<
-      "turn.delta",
-      { turnId: string; messageId: string; delta: string }
+      "message.assistant.delta",
+      {
+        turnId: string;
+        messageId: string;
+        channel: AssistantOutputChannel;
+        delta: string;
+      }
     >
-  | EventBase<"turn.completed", { turnId: string; messageId: string }>
+  | EventBase<
+      "message.assistant.completed",
+      {
+        turnId: string;
+        messageId: string;
+        channel: AssistantOutputChannel;
+      }
+    >
+  | EventBase<"turn.completed", { turnId: string }>
   | EventBase<"turn.interrupted", { turnId: string; reason: string }>
   | EventBase<"turn.failed", { turnId: string; error: string }>
   | EventBase<

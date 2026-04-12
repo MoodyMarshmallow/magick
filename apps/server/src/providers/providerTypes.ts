@@ -2,6 +2,7 @@
 
 import type { Effect, Stream } from "effect";
 
+import type { AssistantOutputChannel } from "@magick/contracts/chat";
 import type {
   ProviderCapabilities,
   ProviderKey,
@@ -14,6 +15,7 @@ import type {
 
 export interface ConversationContextMessage {
   readonly role: "user" | "assistant";
+  readonly channel: AssistantOutputChannel | null;
   readonly content: string;
 }
 
@@ -21,6 +23,7 @@ export type ConversationHistoryItem =
   | {
       readonly type: "message";
       readonly role: "user" | "assistant";
+      readonly channel: AssistantOutputChannel | null;
       readonly content: string;
     }
   | {
@@ -87,12 +90,18 @@ export type ProviderEvent =
       readonly type: "output.delta";
       readonly turnId: string;
       readonly messageId: string;
+      readonly channel: AssistantOutputChannel;
       readonly delta: string;
     }
   | {
-      readonly type: "output.completed";
+      readonly type: "output.message.completed";
       readonly turnId: string;
       readonly messageId: string;
+      readonly channel: AssistantOutputChannel;
+    }
+  | {
+      readonly type: "turn.completed";
+      readonly turnId: string;
     }
   | {
       readonly type: "tool.call.requested";
