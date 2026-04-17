@@ -5,7 +5,7 @@
 Claude Code but for deep learning and thinking. Still a VERY EARLY WIP. Currently only runs via Codex.
 
 ## Todo
-- Support for reasoning moodes and models.
+- Support for reasoning modes and models.
 - Agent that actually works well
 - Cleaninng up the code
 - 

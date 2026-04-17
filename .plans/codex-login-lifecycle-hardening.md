@@ -171,7 +171,7 @@ Recommended UI behavior:
 - use `login` as the signed-out button label in both the sidebar gate and any supporting auth controls
 - no permanently disabled login button for signed-out users
 - if backend says `pending`, show a pending state plus an explicit recovery action without replacing the current layout pattern
-- if backend says `failed` / `expired` / `cancelled`, immediately show a retryable state with optional reason text
+- if backend says `failed` / `expired` / `cancelled`, immediately show a retryable state with  reason text
 
 ### Internal service structure
 
