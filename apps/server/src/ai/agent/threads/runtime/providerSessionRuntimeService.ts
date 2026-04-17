@@ -3,11 +3,11 @@ import type { ThreadRecord } from "@magick/contracts/chat";
 import type {
   ProviderRegistryService,
   ProviderSessionRuntime,
-} from "../providers/providerTypes";
-import { NotFoundError } from "../runtime/errors";
-import type { RuntimeStateService } from "../runtime/runtime";
-import type { ProviderSessionRepository } from "./providerSessionRepository";
-import { fromSync } from "./threadEffect";
+} from "../../providers/providerTypes";
+import { NotFoundError } from "../../runtime/errors";
+import type { RuntimeStateService } from "../../runtime/runtime";
+import { fromSync } from "../domain/threadEffect";
+import type { ProviderSessionRepository } from "../persistence/providerSessionRepository";
 
 export class ProviderSessionRuntimeService {
   readonly #providerRegistry: ProviderRegistryService;

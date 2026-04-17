@@ -1,13 +1,13 @@
 import { Cause, Effect, Exit, Option } from "effect";
 
-import { createDatabase } from "../../../persistence/database";
-import { ProviderRegistry } from "../providers/providerRegistry";
-import type { ProviderSessionHandle } from "../providers/providerTypes";
-import { NotFoundError } from "../runtime/errors";
-import { createRuntimeState } from "../runtime/runtime";
-import { ProviderSessionRepository } from "./providerSessionRepository";
+import { createDatabase } from "../../../../persistence/database";
+import { ProviderRegistry } from "../../providers/providerRegistry";
+import type { ProviderSessionHandle } from "../../providers/providerTypes";
+import { NotFoundError } from "../../runtime/errors";
+import { createRuntimeState } from "../../runtime/runtime";
+import { ProviderSessionRepository } from "../persistence/providerSessionRepository";
+import { createThreadRecord } from "../test-support/threadTestSupport";
 import { ProviderSessionRuntimeService } from "./providerSessionRuntimeService";
-import { createThreadRecord } from "./threadTestSupport";
 
 describe("ProviderSessionRuntimeService", () => {
   it("returns a cached runtime without hitting the provider adapter again", async () => {

@@ -1,8 +1,11 @@
 import { Cause, Effect, Exit, Option } from "effect";
 
 import { maxThreadTitleLength } from "@magick/shared/threadTitle";
-import { InvalidStateError } from "../runtime/errors";
-import { createThreadServicesContext, run } from "./threadTestSupport";
+import { InvalidStateError } from "../../runtime/errors";
+import {
+  createThreadServicesContext,
+  run,
+} from "../test-support/threadTestSupport";
 
 describe("ThreadCrudService", () => {
   it("normalizes thread titles and rejects invalid ones", () => {

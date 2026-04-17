@@ -3,8 +3,8 @@ import type { ThreadViewModel } from "@magick/contracts/chat";
 import type {
   ConversationContextMessage,
   ConversationHistoryItem,
-} from "../providers/providerTypes";
-import type { EventStore } from "./eventStore";
+} from "../../providers/providerTypes";
+import type { EventStore } from "../persistence/eventStore";
 
 type MutableAssistantHistoryMessage = {
   type: "message";

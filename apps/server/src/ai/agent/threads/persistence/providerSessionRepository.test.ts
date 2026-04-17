@@ -1,6 +1,6 @@
 // Verifies provider session records can be persisted and updated.
 
-import { createDatabase } from "../../../persistence/database";
+import { createDatabase } from "../../../../persistence/database";
 import { ProviderSessionRepository } from "./providerSessionRepository";
 
 describe("ProviderSessionRepository", () => {

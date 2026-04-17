@@ -1,8 +1,8 @@
 // Persists and replays append-only thread domain events.
 
 import type { DomainEvent } from "@magick/contracts/chat";
-import type { DatabaseClient } from "../../../persistence/database";
-import { PersistenceError } from "../runtime/errors";
+import type { DatabaseClient } from "../../../../persistence/database";
+import { PersistenceError } from "../../runtime/errors";
 
 type UnsequencedEvent = Omit<DomainEvent, "sequence">;
 

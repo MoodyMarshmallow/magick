@@ -1,9 +1,12 @@
 import { Effect } from "effect";
 
-import { ProviderRegistry } from "../providers/providerRegistry";
-import { ProviderFailureError } from "../runtime/errors";
+import { ProviderRegistry } from "../../providers/providerRegistry";
+import { ProviderFailureError } from "../../runtime/errors";
+import {
+  createThreadRecord,
+  createThreadViewModel,
+} from "../test-support/threadTestSupport";
 import { ThreadAutoTitleService } from "./threadAutoTitleService";
-import { createThreadRecord, createThreadViewModel } from "./threadTestSupport";
 
 describe("ThreadAutoTitleService", () => {
   it("only auto-names untouched new chats before the first user message", () => {

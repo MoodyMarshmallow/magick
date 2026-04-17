@@ -1,6 +1,6 @@
 // Verifies event append and replay ordering semantics.
 
-import { createDatabase } from "../../../persistence/database";
+import { createDatabase } from "../../../../persistence/database";
 import { EventStore } from "./eventStore";
 
 describe("EventStore", () => {

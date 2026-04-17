@@ -7,19 +7,19 @@ import type {
 import type { ProviderSessionRecord } from "@magick/contracts/provider";
 import { maxThreadTitleLength } from "@magick/shared/threadTitle";
 
-import type { ProviderRegistryService } from "../providers/providerTypes";
-import { InvalidStateError, NotFoundError } from "../runtime/errors";
+import type { ProviderRegistryService } from "../../providers/providerTypes";
+import { InvalidStateError, NotFoundError } from "../../runtime/errors";
 import type {
   ClockService,
   IdGeneratorService,
   RuntimeStateService,
-} from "../runtime/runtime";
-import type { EventStore } from "./eventStore";
-import type { ProviderSessionRepository } from "./providerSessionRepository";
-import type { ProviderSessionRuntimeService } from "./providerSessionRuntimeService";
-import { fromPromise, fromSync } from "./threadEffect";
-import type { ThreadEventPersistence } from "./threadEventPersistence";
-import type { ThreadRepository } from "./threadRepository";
+} from "../../runtime/runtime";
+import { fromPromise, fromSync } from "../domain/threadEffect";
+import type { EventStore } from "../persistence/eventStore";
+import type { ProviderSessionRepository } from "../persistence/providerSessionRepository";
+import type { ThreadRepository } from "../persistence/threadRepository";
+import type { ProviderSessionRuntimeService } from "../runtime/providerSessionRuntimeService";
+import type { ThreadEventPersistence } from "../runtime/threadEventPersistence";
 
 export class ThreadCrudService {
   readonly #providerRegistry: ProviderRegistryService;

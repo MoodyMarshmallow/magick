@@ -10,7 +10,10 @@ import type {
   ProviderAdapter,
   ProviderSessionHandle,
 } from "../providers/providerTypes";
-import { createThreadServicesContext, run } from "./threadTestSupport";
+import {
+  createThreadServicesContext,
+  run,
+} from "./test-support/threadTestSupport";
 
 const createTestContext = (
   adapter: FakeProviderAdapter,

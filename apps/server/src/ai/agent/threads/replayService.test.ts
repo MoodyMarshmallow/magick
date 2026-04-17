@@ -1,9 +1,9 @@
 // Verifies replay service behavior for missing threads and replay queries.
 
 import { createDatabase } from "../../../persistence/database";
-import { EventStore } from "./eventStore";
+import { EventStore } from "./persistence/eventStore";
+import { ThreadRepository } from "./persistence/threadRepository";
 import { ReplayService } from "./replayService";
-import { ThreadRepository } from "./threadRepository";
 
 const makeReplayService = () => {
   const database = createDatabase();

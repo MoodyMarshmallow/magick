@@ -1,9 +1,9 @@
 import type { ThreadRecord, ThreadViewModel } from "@magick/contracts/chat";
 
-import { DEFAULT_THREAD_TITLE_INSTRUCTIONS } from "../providers/providerPrompts";
-import type { ProviderRegistryService } from "../providers/providerTypes";
-import { backendErrorMessage } from "../runtime/errors";
-import { fromPromise, fromSync } from "./threadEffect";
+import { DEFAULT_THREAD_TITLE_INSTRUCTIONS } from "../../providers/providerPrompts";
+import type { ProviderRegistryService } from "../../providers/providerTypes";
+import { backendErrorMessage } from "../../runtime/errors";
+import { fromPromise, fromSync } from "../domain/threadEffect";
 
 export class ThreadAutoTitleService {
   readonly #providerRegistry: ProviderRegistryService;

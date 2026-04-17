@@ -1,12 +1,15 @@
 import type { DomainEvent, FileDiffPreview } from "@magick/contracts/chat";
 
-import type { ProviderEvent } from "../providers/providerTypes";
-import type { EventPublisherService } from "../runtime/runtime";
-import type { EventStore } from "./eventStore";
-import type { ProviderSessionRepository } from "./providerSessionRepository";
-import { fromPromise, fromSync } from "./threadEffect";
-import { projectThreadEvents, toThreadSummary } from "./threadProjector";
-import type { ThreadRepository } from "./threadRepository";
+import type { ProviderEvent } from "../../providers/providerTypes";
+import type { EventPublisherService } from "../../runtime/runtime";
+import { fromPromise, fromSync } from "../domain/threadEffect";
+import {
+  projectThreadEvents,
+  toThreadSummary,
+} from "../domain/threadProjector";
+import type { EventStore } from "../persistence/eventStore";
+import type { ProviderSessionRepository } from "../persistence/providerSessionRepository";
+import type { ThreadRepository } from "../persistence/threadRepository";
 
 export class ThreadEventPersistence {
   readonly #eventStore: EventStore;

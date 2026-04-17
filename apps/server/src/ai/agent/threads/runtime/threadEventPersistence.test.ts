@@ -1,6 +1,9 @@
 import { Effect } from "effect";
 
-import { createThreadServicesContext, run } from "./threadTestSupport";
+import {
+  createThreadServicesContext,
+  run,
+} from "../test-support/threadTestSupport";
 
 describe("ThreadEventPersistence", () => {
   it("appends, projects, snapshots, and publishes events while tolerating publisher failure", async () => {

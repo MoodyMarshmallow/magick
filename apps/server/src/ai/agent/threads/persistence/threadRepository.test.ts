@@ -1,7 +1,7 @@
 // Verifies thread records and snapshots round-trip through persistence.
 
 import type { ThreadSummary, ThreadViewModel } from "@magick/contracts/chat";
-import { createDatabase } from "../../../persistence/database";
+import { createDatabase } from "../../../../persistence/database";
 import { ThreadRepository } from "./threadRepository";
 
 const makeSummary = (

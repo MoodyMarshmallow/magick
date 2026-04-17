@@ -6,8 +6,8 @@ import type {
   ThreadSummary,
   ThreadViewModel,
 } from "@magick/contracts/chat";
-import type { DatabaseClient } from "../../../persistence/database";
-import { PersistenceError } from "../runtime/errors";
+import type { DatabaseClient } from "../../../../persistence/database";
+import { PersistenceError } from "../../runtime/errors";
 
 export class ThreadRepository {
   readonly #deleteThreadById: (threadId: string) => void;

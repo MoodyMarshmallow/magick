@@ -13,16 +13,16 @@ import type {
 } from "../runtime/runtime";
 import type { ToolExecutor } from "../tools/toolExecutor";
 import type { WebContentService } from "../tools/webContentService";
-import type { EventStore } from "./eventStore";
-import type { ProviderSessionRepository } from "./providerSessionRepository";
-import { ProviderSessionRuntimeService } from "./providerSessionRuntimeService";
-import { ThreadAutoTitleService } from "./threadAutoTitleService";
-import { ThreadCrudService } from "./threadCrudService";
-import { runThreadEffect } from "./threadEffect";
-import { ThreadEventPersistence } from "./threadEventPersistence";
-import { ThreadHistoryBuilder } from "./threadHistoryBuilder";
-import type { ThreadRepository } from "./threadRepository";
-import { ThreadTurnRunner } from "./threadTurnRunner";
+import { runThreadEffect } from "./domain/threadEffect";
+import { ThreadHistoryBuilder } from "./domain/threadHistoryBuilder";
+import { ThreadCrudService } from "./lifecycle/threadCrudService";
+import type { EventStore } from "./persistence/eventStore";
+import type { ProviderSessionRepository } from "./persistence/providerSessionRepository";
+import type { ThreadRepository } from "./persistence/threadRepository";
+import { ProviderSessionRuntimeService } from "./runtime/providerSessionRuntimeService";
+import { ThreadAutoTitleService } from "./runtime/threadAutoTitleService";
+import { ThreadEventPersistence } from "./runtime/threadEventPersistence";
+import { ThreadTurnRunner } from "./runtime/threadTurnRunner";
 
 export interface CreateThreadInput {
   readonly workspaceId: string;

@@ -1,33 +1,33 @@
 import { Effect, Either, Stream } from "effect";
 
 import type { ThreadRecord, ThreadViewModel } from "@magick/contracts/chat";
-import type { DocumentService } from "../../../editor/documents/documentService";
-import type { WorkspaceQueryService } from "../../../editor/workspace/workspaceQueryService";
-import { DEFAULT_ASSISTANT_INSTRUCTIONS } from "../providers/providerPrompts";
+import type { DocumentService } from "../../../../editor/documents/documentService";
+import type { WorkspaceQueryService } from "../../../../editor/workspace/workspaceQueryService";
+import { DEFAULT_ASSISTANT_INSTRUCTIONS } from "../../providers/providerPrompts";
 import type {
   ProviderEvent,
   ProviderSessionRuntime,
   ProviderToolDefinition,
-} from "../providers/providerTypes";
+} from "../../providers/providerTypes";
 import {
   InvalidStateError,
   NotFoundError,
   backendErrorMessage,
-} from "../runtime/errors";
+} from "../../runtime/errors";
 import type {
   ClockService,
   IdGeneratorService,
   RuntimeStateService,
-} from "../runtime/runtime";
-import { buildToolExecutionContext } from "../tools/toolContextBuilder";
-import type { ToolExecutor } from "../tools/toolExecutor";
-import type { WebContentService } from "../tools/webContentService";
+} from "../../runtime/runtime";
+import { buildToolExecutionContext } from "../../tools/toolContextBuilder";
+import type { ToolExecutor } from "../../tools/toolExecutor";
+import type { WebContentService } from "../../tools/webContentService";
+import { fromPromise, fromSync } from "../domain/threadEffect";
+import type { ThreadHistoryBuilder } from "../domain/threadHistoryBuilder";
+import type { ThreadCrudService } from "../lifecycle/threadCrudService";
 import type { ProviderSessionRuntimeService } from "./providerSessionRuntimeService";
 import type { ThreadAutoTitleService } from "./threadAutoTitleService";
-import type { ThreadCrudService } from "./threadCrudService";
-import { fromPromise, fromSync } from "./threadEffect";
 import type { ThreadEventPersistence } from "./threadEventPersistence";
-import type { ThreadHistoryBuilder } from "./threadHistoryBuilder";
 
 export class ThreadTurnRunner {
   readonly #runtimeState: RuntimeStateService;
@@ -86,7 +86,7 @@ export class ThreadTurnRunner {
     runtime: ProviderSessionRuntime,
     providerEvent: ProviderEvent,
     readFilesForTurn = new Set<string>(),
-  ): Effect.Effect<void, import("../runtime/errors").BackendError> => {
+  ): Effect.Effect<void, import("../../runtime/errors").BackendError> => {
     if (providerEvent.type !== "tool.call.requested") {
       const applied = this.#eventPersistence.applyProviderEvent(
         thread.id,

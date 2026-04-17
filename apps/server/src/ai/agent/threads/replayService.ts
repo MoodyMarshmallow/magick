@@ -2,8 +2,8 @@
 
 import type { DomainEvent, ThreadViewModel } from "@magick/contracts/chat";
 import { NotFoundError } from "../runtime/errors";
-import type { EventStore } from "./eventStore";
-import type { ThreadRepository } from "./threadRepository";
+import type { EventStore } from "./persistence/eventStore";
+import type { ThreadRepository } from "./persistence/threadRepository";
 
 export interface ReplayServiceApi {
   readonly getThreadState: (threadId: string) => ThreadViewModel;

@@ -1,8 +1,8 @@
 // Stores provider session metadata and native session references.
 
 import type { ProviderSessionRecord } from "@magick/contracts/provider";
-import type { DatabaseClient } from "../../../persistence/database";
-import { PersistenceError } from "../runtime/errors";
+import type { DatabaseClient } from "../../../../persistence/database";
+import { PersistenceError } from "../../runtime/errors";
 
 export class ProviderSessionRepository {
   readonly #database: DatabaseClient;

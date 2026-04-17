@@ -2,7 +2,7 @@ import {
   createThreadServicesContext,
   createThreadViewModel,
   run,
-} from "./threadTestSupport";
+} from "../test-support/threadTestSupport";
 
 describe("ThreadHistoryBuilder", () => {
   it("builds context messages from the projected thread snapshot", () => {

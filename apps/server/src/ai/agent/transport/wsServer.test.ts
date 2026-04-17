@@ -16,11 +16,11 @@ import {
   createIdGenerator,
   createRuntimeState,
 } from "../runtime/runtime";
-import { EventStore } from "../threads/eventStore";
-import { ProviderSessionRepository } from "../threads/providerSessionRepository";
+import { EventStore } from "../threads/persistence/eventStore";
+import { ProviderSessionRepository } from "../threads/persistence/providerSessionRepository";
+import { ThreadRepository } from "../threads/persistence/threadRepository";
 import { ReplayService } from "../threads/replayService";
 import { ThreadOrchestrator } from "../threads/threadOrchestrator";
-import { ThreadRepository } from "../threads/threadRepository";
 import { ToolExecutor } from "../tools/toolExecutor";
 import { WebContentService } from "../tools/webContentService";
 import { ConnectionRegistry } from "./connectionRegistry";

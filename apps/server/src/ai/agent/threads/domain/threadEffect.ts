@@ -8,7 +8,7 @@ import {
   ProviderFailureError,
   ProviderUnavailableError,
   ReplayError,
-} from "../runtime/errors";
+} from "../../runtime/errors";
 
 const toBackendError = (error: unknown): BackendError => {
   if (

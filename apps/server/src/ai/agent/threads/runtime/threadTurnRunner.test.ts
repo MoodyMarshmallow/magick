@@ -1,8 +1,11 @@
 import { Cause, Effect, Exit, Option, Stream } from "effect";
 
-import { FakeProviderAdapter } from "../providers/fake/fakeProviderAdapter";
-import { ProviderFailureError } from "../runtime/errors";
-import { createThreadServicesContext, run } from "./threadTestSupport";
+import { FakeProviderAdapter } from "../../providers/fake/fakeProviderAdapter";
+import { ProviderFailureError } from "../../runtime/errors";
+import {
+  createThreadServicesContext,
+  run,
+} from "../test-support/threadTestSupport";
 
 describe("ThreadTurnRunner", () => {
   it("sends a message through the provider runtime and completes the turn", async () => {

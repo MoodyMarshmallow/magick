@@ -5,34 +5,34 @@ import { join } from "node:path";
 import { Effect } from "effect";
 
 import type { ThreadViewModel } from "@magick/contracts/chat";
-import { DocumentService } from "../../../editor/documents/documentService";
-import { PathPresentationPolicy } from "../../../editor/workspace/pathPresentationPolicy";
-import { WorkspacePathPolicy } from "../../../editor/workspace/workspacePathPolicy";
-import { WorkspaceQueryService } from "../../../editor/workspace/workspaceQueryService";
-import { createDatabase } from "../../../persistence/database";
-import { FakeProviderAdapter } from "../providers/fake/fakeProviderAdapter";
-import { ProviderRegistry } from "../providers/providerRegistry";
+import { DocumentService } from "../../../../editor/documents/documentService";
+import { PathPresentationPolicy } from "../../../../editor/workspace/pathPresentationPolicy";
+import { WorkspacePathPolicy } from "../../../../editor/workspace/workspacePathPolicy";
+import { WorkspaceQueryService } from "../../../../editor/workspace/workspaceQueryService";
+import { createDatabase } from "../../../../persistence/database";
+import { FakeProviderAdapter } from "../../providers/fake/fakeProviderAdapter";
+import { ProviderRegistry } from "../../providers/providerRegistry";
 import type {
   ProviderAdapter,
   ProviderRegistryService,
-} from "../providers/providerTypes";
+} from "../../providers/providerTypes";
 import {
   type EventPublisherService,
   createRuntimeState,
-} from "../runtime/runtime";
-import { ToolExecutor } from "../tools/toolExecutor";
-import { WebContentService } from "../tools/webContentService";
-import { EventStore } from "./eventStore";
-import { ProviderSessionRepository } from "./providerSessionRepository";
-import { ProviderSessionRuntimeService } from "./providerSessionRuntimeService";
-import { ReplayService } from "./replayService";
-import { ThreadAutoTitleService } from "./threadAutoTitleService";
-import { ThreadCrudService } from "./threadCrudService";
-import { ThreadEventPersistence } from "./threadEventPersistence";
-import { ThreadHistoryBuilder } from "./threadHistoryBuilder";
-import { ThreadOrchestrator } from "./threadOrchestrator";
-import { ThreadRepository } from "./threadRepository";
-import { ThreadTurnRunner } from "./threadTurnRunner";
+} from "../../runtime/runtime";
+import { ToolExecutor } from "../../tools/toolExecutor";
+import { WebContentService } from "../../tools/webContentService";
+import { ThreadHistoryBuilder } from "../domain/threadHistoryBuilder";
+import { ThreadCrudService } from "../lifecycle/threadCrudService";
+import { EventStore } from "../persistence/eventStore";
+import { ProviderSessionRepository } from "../persistence/providerSessionRepository";
+import { ThreadRepository } from "../persistence/threadRepository";
+import { ReplayService } from "../replayService";
+import { ProviderSessionRuntimeService } from "../runtime/providerSessionRuntimeService";
+import { ThreadAutoTitleService } from "../runtime/threadAutoTitleService";
+import { ThreadEventPersistence } from "../runtime/threadEventPersistence";
+import { ThreadTurnRunner } from "../runtime/threadTurnRunner";
+import { ThreadOrchestrator } from "../threadOrchestrator";
 
 export const run = <A, E>(effect: Effect.Effect<A, E>) =>
   Effect.runPromise(effect);

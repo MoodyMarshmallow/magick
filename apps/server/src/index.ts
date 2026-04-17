@@ -19,11 +19,11 @@ import {
   createRuntimeState,
 } from "./ai/agent/runtime/runtime";
 import type { EventPublisherService } from "./ai/agent/runtime/runtime";
-import { EventStore } from "./ai/agent/threads/eventStore";
-import { ProviderSessionRepository } from "./ai/agent/threads/providerSessionRepository";
+import { EventStore } from "./ai/agent/threads/persistence/eventStore";
+import { ProviderSessionRepository } from "./ai/agent/threads/persistence/providerSessionRepository";
+import { ThreadRepository } from "./ai/agent/threads/persistence/threadRepository";
 import { ReplayService } from "./ai/agent/threads/replayService";
 import { ThreadOrchestrator } from "./ai/agent/threads/threadOrchestrator";
-import { ThreadRepository } from "./ai/agent/threads/threadRepository";
 import { ToolExecutor } from "./ai/agent/tools/toolExecutor";
 import { WebContentService } from "./ai/agent/tools/webContentService";
 import { ConnectionRegistry } from "./ai/agent/transport/connectionRegistry";
