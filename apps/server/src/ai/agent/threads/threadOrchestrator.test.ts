@@ -5,109 +5,34 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Cause, Effect, Exit, Option, Stream } from "effect";
 
-import { DocumentService } from "../../../editor/documents/documentService";
-import { PathPresentationPolicy } from "../../../editor/workspace/pathPresentationPolicy";
-import { WorkspacePathPolicy } from "../../../editor/workspace/workspacePathPolicy";
-import { WorkspaceQueryService } from "../../../editor/workspace/workspaceQueryService";
-import { createDatabase } from "../../../persistence/database";
 import { FakeProviderAdapter } from "../providers/fake/fakeProviderAdapter";
-import { ProviderRegistry } from "../providers/providerRegistry";
 import type {
   ProviderAdapter,
   ProviderSessionHandle,
 } from "../providers/providerTypes";
-import {
-  createClock,
-  createIdGenerator,
-  createRuntimeState,
-} from "../runtime/runtime";
-import { ToolExecutor } from "../tools/toolExecutor";
-import { WebContentService } from "../tools/webContentService";
-import { EventStore } from "./eventStore";
-import { ProviderSessionRepository } from "./providerSessionRepository";
-import { ReplayService } from "./replayService";
-import { ThreadOrchestrator } from "./threadOrchestrator";
-import { ThreadRepository } from "./threadRepository";
-
-const run = <A, E>(effect: Effect.Effect<A, E>) => Effect.runPromise(effect);
-
-const createToolServices = (workspaceRoot = process.cwd()) => {
-  const pathPolicy = new WorkspacePathPolicy(workspaceRoot);
-  const presentationPolicy = new PathPresentationPolicy("workspace-relative");
-  const documents = new DocumentService({
-    pathPolicy,
-    presentationPolicy,
-  });
-  return {
-    toolExecutor: new ToolExecutor(),
-    documents,
-    workspaceQuery: new WorkspaceQueryService({
-      pathPolicy,
-      presentationPolicy,
-      documents,
-    }),
-    webContent: new WebContentService(),
-  };
-};
+import { createThreadServicesContext, run } from "./threadTestSupport";
 
 const createTestContext = (
   adapter: FakeProviderAdapter,
   options: { readonly workspaceRoot?: string } = {},
-) => {
-  const database = createDatabase();
-  const publishedEvents: string[] = [];
-  const threadRepository = new ThreadRepository(database);
-  const toolServices = createToolServices(options.workspaceRoot);
-
-  return {
-    orchestrator: new ThreadOrchestrator({
-      providerRegistry: new ProviderRegistry([adapter]),
-      eventStore: new EventStore(database),
-      threadRepository,
-      providerSessionRepository: new ProviderSessionRepository(database),
-      publisher: {
-        publish: async (events) => {
-          publishedEvents.push(...events.map((event) => event.type));
-        },
-      },
-      runtimeState: createRuntimeState(),
-      clock: createClock(),
-      idGenerator: createIdGenerator(),
-      ...toolServices,
-    }),
-    replayService: new ReplayService({
-      eventStore: new EventStore(database),
-      threadRepository,
-    }),
-    providerSessionRepository: new ProviderSessionRepository(database),
-    publishedEvents,
-  };
-};
+) =>
+  createThreadServicesContext({
+    adapters: [adapter],
+    ...(options.workspaceRoot === undefined
+      ? {}
+      : { workspaceRoot: options.workspaceRoot }),
+  });
 
 const createProviderContext = (
   adapter: ProviderAdapter,
   options: { readonly workspaceRoot?: string } = {},
-) => {
-  const database = createDatabase();
-  const threadRepository = new ThreadRepository(database);
-  const toolServices = createToolServices(options.workspaceRoot);
-
-  return {
-    orchestrator: new ThreadOrchestrator({
-      providerRegistry: new ProviderRegistry([adapter]),
-      eventStore: new EventStore(database),
-      threadRepository,
-      providerSessionRepository: new ProviderSessionRepository(database),
-      publisher: {
-        publish: async () => undefined,
-      },
-      runtimeState: createRuntimeState(),
-      clock: createClock(),
-      idGenerator: createIdGenerator(),
-      ...toolServices,
-    }),
-  };
-};
+) =>
+  createThreadServicesContext({
+    adapters: [adapter],
+    ...(options.workspaceRoot === undefined
+      ? {}
+      : { workspaceRoot: options.workspaceRoot }),
+  });
 
 describe("ThreadOrchestrator", () => {
   it("creates a thread and streams a reply through the provider adapter", async () => {
