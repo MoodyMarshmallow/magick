@@ -139,6 +139,7 @@ describe("ThreadEventPersistence", () => {
             turnId: "turn_1",
             messageId: "message_1",
             channel: "final",
+            reason: "stop",
           },
         );
         if (!effect) {
@@ -249,6 +250,15 @@ describe("ThreadEventPersistence", () => {
         argsPreview: '{"path":"notes.md","url":"https://example.com"}',
         path: "notes.md",
         url: "https://example.com",
+      },
+    });
+
+    const assistantCompleted = events.find(
+      (event) => event.type === "message.assistant.completed",
+    );
+    expect(assistantCompleted).toMatchObject({
+      payload: {
+        reason: "stop",
       },
     });
 

@@ -1,4 +1,5 @@
 import type {
+  AssistantCompletionReason,
   AssistantOutputChannel,
   DomainEvent,
   ThreadSummary,
@@ -122,6 +123,10 @@ const toCommentThread = (thread: ThreadViewModel): CommentThread => ({
   toolActivities: thread.toolActivities,
   pendingToolApproval: thread.pendingToolApproval,
 });
+
+const completedAssistantStatus = (
+  reason: AssistantCompletionReason | null | undefined,
+): CommentMessageStatus => (reason === "incomplete" ? "streaming" : "complete");
 
 const sortThreads = (
   threads: readonly CommentThread[],
@@ -442,6 +447,7 @@ export const projectThreadEvent = (
                   toolActivity.toolCallId !== domainEvent.payload.toolCallId,
               ),
               {
+                turnId: domainEvent.payload.turnId,
                 toolCallId: domainEvent.payload.toolCallId,
                 toolName: domainEvent.payload.toolName,
                 title: domainEvent.payload.title,
@@ -562,7 +568,12 @@ export const projectThreadEvent = (
             updatedAt: domainEvent.occurredAt,
             messages: thread.messages.map((message) =>
               message.id === domainEvent.payload.messageId
-                ? { ...message, status: "complete" }
+                ? {
+                    ...message,
+                    status: completedAssistantStatus(
+                      domainEvent.payload.reason,
+                    ),
+                  }
                 : message,
             ),
           }));

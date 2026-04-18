@@ -1,6 +1,7 @@
 // Reduces thread domain events into UI-ready thread and summary projections.
 
 import type {
+  AssistantCompletionReason,
   DomainEvent,
   ThreadSummary,
   ThreadViewModel,
@@ -109,6 +110,11 @@ const findToolActivity = (
     (toolActivity) => toolActivity.toolCallId === toolCallId,
   );
 };
+
+const completedAssistantStatus = (
+  reason: AssistantCompletionReason | null | undefined,
+): TranscriptMessage["status"] =>
+  reason === "incomplete" ? "streaming" : "complete";
 
 export const projectThreadEvents = (
   seed: ThreadViewModel | null,
@@ -231,6 +237,7 @@ export const projectThreadEvents = (
               content: event.payload.delta,
               createdAt: event.occurredAt,
               status: "streaming",
+              reason: null,
             },
           ];
         }
@@ -247,7 +254,8 @@ export const projectThreadEvents = (
         if (existing) {
           state.messages = upsertMessage(state.messages, {
             ...existing,
-            status: "complete",
+            status: completedAssistantStatus(event.payload.reason),
+            reason: event.payload.reason ?? existing.reason ?? null,
           });
         }
         state.latestSequence = event.sequence;
@@ -314,6 +322,7 @@ export const projectThreadEvents = (
           });
         }
         state.toolActivities = upsertToolActivity(state.toolActivities, {
+          turnId: event.payload.turnId,
           toolCallId: event.payload.toolCallId,
           toolName: event.payload.toolName,
           title: event.payload.title,

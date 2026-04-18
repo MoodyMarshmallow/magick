@@ -83,6 +83,7 @@ describe("CodexResponsesClient", () => {
         type: "output.message.completed",
         itemKey: "msg_1",
         channel: "final",
+        reason: "stop",
       },
       { type: "turn.completed" },
     ]);
@@ -350,6 +351,120 @@ describe("CodexResponsesClient", () => {
     ]);
   });
 
+  it("does not emit buffered tool requests when the response fails", async () => {
+    const authRepository = {
+      get: vi.fn().mockReturnValue({
+        providerKey: "codex",
+        authMode: "chatgpt",
+        accessToken: "access",
+        refreshToken: "refresh",
+        expiresAt: Date.now() + 120_000,
+        accountId: null,
+        email: "user@example.com",
+        planType: null,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      }),
+      upsert: vi.fn(),
+      delete: vi.fn(),
+    };
+
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        'data: {"type":"response.output_item.done","item":{"type":"function_call","call_id":"call_1","name":"read","arguments":"{\\"path\\":\\"notes.md\\"}"}}\n\n' +
+          'data: {"type":"response.failed","message":"Boom"}\n\n',
+        {
+          status: 200,
+          headers: { "Content-Type": "text/event-stream" },
+        },
+      ),
+    );
+
+    const client = new CodexResponsesClient({
+      authRepository: authRepository as never,
+      authClient: { refreshAccessToken: vi.fn() } as unknown as CodexAuthClient,
+      fetch: fetchMock as never,
+    });
+
+    const events = await Effect.runPromise(
+      Stream.runCollect(
+        client.streamResponse({
+          messages: [{ role: "user", content: "Hello" }],
+          instructions: assistantInstructions,
+        }),
+      ),
+    );
+
+    expect(Array.from(events)).toEqual([
+      { type: "turn.failed", error: "Boom" },
+    ]);
+  });
+
+  it("fails truncated streams after preserving incomplete assistant output", async () => {
+    const authRepository = {
+      get: vi.fn().mockReturnValue({
+        providerKey: "codex",
+        authMode: "chatgpt",
+        accessToken: "access",
+        refreshToken: "refresh",
+        expiresAt: Date.now() + 120_000,
+        accountId: null,
+        email: "user@example.com",
+        planType: null,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      }),
+      upsert: vi.fn(),
+      delete: vi.fn(),
+    };
+
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        'data: {"type":"response.output_item.added","item":{"type":"message","id":"msg_1","role":"assistant","phase":"final_answer"}}\n\n' +
+          'data: {"type":"response.output_text.delta","delta":"Hello"}\n\n' +
+          'data: {"type":"response.output_item.done","item":{"type":"message","id":"msg_1","role":"assistant","phase":"final_answer","content":[{"type":"output_text","text":"Hello"}]}}\n\n',
+        {
+          status: 200,
+          headers: { "Content-Type": "text/event-stream" },
+        },
+      ),
+    );
+
+    const client = new CodexResponsesClient({
+      authRepository: authRepository as never,
+      authClient: { refreshAccessToken: vi.fn() } as unknown as CodexAuthClient,
+      fetch: fetchMock as never,
+    });
+
+    const events = await Effect.runPromise(
+      Stream.runCollect(
+        client.streamResponse({
+          messages: [{ role: "user", content: "Hello" }],
+          instructions: assistantInstructions,
+        }),
+      ),
+    );
+
+    expect(Array.from(events)).toEqual([
+      {
+        type: "output.delta",
+        itemKey: "msg_1",
+        channel: "final",
+        delta: "Hello",
+      },
+      {
+        type: "output.message.completed",
+        itemKey: "msg_1",
+        channel: "final",
+        reason: "incomplete",
+      },
+      {
+        type: "turn.failed",
+        error: "Codex stream ended before response.completed.",
+      },
+    ]);
+  });
+
   it("ignores later completion frames after an upstream failure", async () => {
     const authRepository = {
       get: vi.fn().mockReturnValue({
@@ -447,6 +562,12 @@ describe("CodexResponsesClient", () => {
 
     expect(Array.from(events)).toEqual([
       { type: "output.delta", itemKey: "msg_1", channel: "final", delta: "Hi" },
+      {
+        type: "output.message.completed",
+        itemKey: "msg_1",
+        channel: "final",
+        reason: "incomplete",
+      },
       { type: "turn.failed", error: "nested boom" },
     ]);
   });
@@ -504,7 +625,12 @@ describe("CodexResponsesClient", () => {
         channel: "final",
         delta: "Done",
       },
-      { type: "output.message.completed", itemKey: "msg_1", channel: "final" },
+      {
+        type: "output.message.completed",
+        itemKey: "msg_1",
+        channel: "final",
+        reason: "stop",
+      },
       { type: "turn.completed" },
     ]);
   });
@@ -565,6 +691,7 @@ describe("CodexResponsesClient", () => {
         type: "output.message.completed",
         itemKey: "msg_1",
         channel: "final",
+        reason: "stop",
       },
       { type: "turn.completed" },
     ]);
@@ -635,11 +762,13 @@ describe("CodexResponsesClient", () => {
         type: "output.message.completed",
         itemKey: "commentary_1",
         channel: "commentary",
+        reason: "stop",
       },
       {
         type: "output.message.completed",
         itemKey: "final_1",
         channel: "final",
+        reason: "stop",
       },
       { type: "turn.completed" },
     ]);
@@ -861,6 +990,7 @@ describe("CodexResponsesClient", () => {
         type: "output.message.completed",
         itemKey: "msg_1",
         channel: "final",
+        reason: "stop",
       },
       { type: "turn.completed" },
     ]);
@@ -910,6 +1040,74 @@ describe("CodexResponsesClient", () => {
     );
 
     expect(Array.from(events)).toEqual([
+      {
+        type: "tool.call.requested",
+        toolCallId: "call_1",
+        toolName: "read",
+        input: { path: "notes.md" },
+      },
+    ]);
+  });
+
+  it("emits assistant completion before tool requests in the same response step", async () => {
+    const authRepository = {
+      get: vi.fn().mockReturnValue({
+        providerKey: "codex",
+        authMode: "chatgpt",
+        accessToken: "access",
+        refreshToken: "refresh",
+        expiresAt: Date.now() + 120_000,
+        accountId: null,
+        email: "user@example.com",
+        planType: null,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      }),
+      upsert: vi.fn(),
+      delete: vi.fn(),
+    };
+
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(
+          'data: {"type":"response.output_item.added","item":{"type":"message","id":"msg_1","role":"assistant","phase":"commentary"}}\n\n' +
+            'data: {"type":"response.output_text.delta","delta":"Reviewing"}\n\n' +
+            'data: {"type":"response.output_item.done","item":{"type":"message","id":"msg_1","role":"assistant","phase":"commentary","content":[{"type":"output_text","text":"Reviewing"}]}}\n\n' +
+            'data: {"type":"response.output_item.done","item":{"type":"function_call","call_id":"call_1","name":"read","arguments":"{\\"path\\":\\"notes.md\\"}"}}\n\n' +
+            'data: {"type":"response.completed"}\n\n',
+          { status: 200, headers: { "Content-Type": "text/event-stream" } },
+        ),
+      );
+
+    const client = new CodexResponsesClient({
+      authRepository: authRepository as never,
+      authClient: { refreshAccessToken: vi.fn() } as unknown as CodexAuthClient,
+      fetch: fetchMock as never,
+    });
+
+    const events = await Effect.runPromise(
+      Stream.runCollect(
+        client.streamResponse({
+          messages: [{ role: "user", content: "Hello" }],
+          instructions: assistantInstructions,
+        }),
+      ),
+    );
+
+    expect(Array.from(events)).toEqual([
+      {
+        type: "output.delta",
+        itemKey: "msg_1",
+        channel: "commentary",
+        delta: "Reviewing",
+      },
+      {
+        type: "output.message.completed",
+        itemKey: "msg_1",
+        channel: "commentary",
+        reason: "tool_calls",
+      },
       {
         type: "tool.call.requested",
         toolCallId: "call_1",

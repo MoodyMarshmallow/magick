@@ -17,9 +17,10 @@ import type {
   ProviderAdapter,
   ProviderEvent,
   ProviderSessionHandle,
+  ProviderToolResult,
   ResumeProviderSessionInput,
   StartTurnInput,
-  SubmitToolResultInput,
+  SubmitToolResultsInput,
 } from "../providerTypes";
 import {
   CodexResponsesClient,
@@ -74,51 +75,115 @@ class CodexSessionHandle implements ProviderSessionHandle {
       readonly role: "user" | "assistant";
       readonly channel: "commentary" | "final" | null;
       readonly content: string;
+      readonly reason?: "tool_calls" | "stop" | "incomplete" | null;
     }[];
     readonly userMessage?: string;
   }) => {
-    const historyMessages =
-      args.historyItems.length > 0
-        ? args.historyItems.map((item) => {
-            switch (item.type) {
-              case "message":
-                return item.role === "assistant"
-                  ? {
-                      role: item.role,
-                      channel: item.channel ?? "final",
-                      content: item.content,
-                    }
-                  : {
-                      role: item.role,
-                      content: item.content,
-                    };
-              case "tool_call":
-                return {
-                  type: "function_call" as const,
-                  callId: item.toolCallId,
-                  name: item.toolName,
-                  input: item.input,
-                };
-              case "tool_result":
-                return {
-                  type: "function_call_output" as const,
-                  callId: item.toolCallId,
-                  output: item.output,
-                };
+    type CodexOutboundMessage =
+      | {
+          readonly role: "user";
+          readonly content: string;
+        }
+      | {
+          readonly role: "assistant";
+          readonly channel: "commentary" | "final";
+          readonly content: string;
+        }
+      | {
+          readonly type: "function_call";
+          readonly callId: string;
+          readonly name: string;
+          readonly input: unknown;
+        }
+      | {
+          readonly type: "function_call_output";
+          readonly callId: string;
+          readonly output: string;
+        };
+
+    const toCodexAssistantMessage = (message: {
+      readonly role: "assistant";
+      readonly channel: "commentary" | "final" | null;
+      readonly content: string;
+      readonly reason?: "tool_calls" | "stop" | "incomplete" | null;
+    }): Extract<
+      CodexOutboundMessage,
+      { readonly role: "assistant" }
+    > | null => {
+      if (message.reason === "incomplete") {
+        return null;
+      }
+
+      return {
+        role: message.role,
+        channel: message.channel ?? "final",
+        content: message.content,
+      };
+    };
+
+    const historyMessages: CodexOutboundMessage[] = [];
+
+    if (args.historyItems.length > 0) {
+      for (const item of args.historyItems) {
+        switch (item.type) {
+          case "message": {
+            if (item.role === "assistant") {
+              const assistantMessage = toCodexAssistantMessage({
+                role: "assistant",
+                channel: item.channel,
+                content: item.content,
+                reason: item.reason ?? null,
+              });
+              if (assistantMessage) {
+                historyMessages.push(assistantMessage);
+              }
+              break;
             }
-          })
-        : args.contextMessages.map((message) =>
-            message.role === "assistant"
-              ? {
-                  role: message.role,
-                  channel: message.channel ?? "final",
-                  content: message.content,
-                }
-              : {
-                  role: message.role,
-                  content: message.content,
-                },
-          );
+
+            historyMessages.push({
+              role: "user",
+              content: item.content,
+            });
+            break;
+          }
+          case "tool_call":
+            historyMessages.push({
+              type: "function_call",
+              callId: item.toolCallId,
+              name: item.toolName,
+              input: item.input,
+            });
+            break;
+          case "tool_result":
+            historyMessages.push({
+              type: "function_call_output",
+              callId: item.toolCallId,
+              output: item.output,
+            });
+            break;
+        }
+      }
+    } else {
+      for (const message of args.contextMessages) {
+        if (message.role === "assistant") {
+          const assistantMessage = toCodexAssistantMessage({
+            role: "assistant",
+            channel: message.channel,
+            content: message.content,
+            reason: message.reason ?? null,
+          });
+          if (assistantMessage) {
+            historyMessages.push(assistantMessage);
+          }
+          continue;
+        }
+
+        historyMessages.push({
+          role: "user",
+          content: message.content,
+        });
+      }
+    }
 
     return args.userMessage
       ? [
@@ -172,6 +237,7 @@ class CodexSessionHandle implements ProviderSessionHandle {
             readonly type: "output.message.completed";
             readonly itemKey: string;
             readonly channel: "commentary" | "final";
+            readonly reason: "tool_calls" | "stop" | "incomplete";
           }
         | { readonly type: "turn.completed" }
         | {
@@ -207,6 +273,7 @@ class CodexSessionHandle implements ProviderSessionHandle {
             turnId: args.turnId,
             messageId,
             channel: event.channel,
+            reason: event.reason,
           } satisfies ProviderEvent;
         }
         case "turn.completed":
@@ -275,8 +342,8 @@ class CodexSessionHandle implements ProviderSessionHandle {
         );
     });
 
-  readonly submitToolResult = (
-    input: SubmitToolResultInput,
+  readonly submitToolResults = (
+    input: SubmitToolResultsInput,
   ): Effect.Effect<
     Stream.Stream<ProviderEvent, ProviderFailureError>,
     ProviderFailureError

@@ -119,6 +119,181 @@ describe("ThreadTurnRunner", () => {
     expect(failed.toolActivities[0]?.error).not.toContain(workspaceRoot);
   });
 
+  it("waits for all sibling tool calls in a response step before submitting batched tool results", async () => {
+    type BatchedToolResults = {
+      toolResults: readonly {
+        toolCallId: string;
+        toolName: string;
+        output: string;
+      }[];
+      historyItems: readonly {
+        type: string;
+        toolCallId?: string;
+        output?: string;
+      }[];
+    };
+
+    let batchedToolResults: BatchedToolResults | null = null;
+
+    const provider = {
+      key: "parallel-tools-provider",
+      listCapabilities: () => ({
+        supportsNativeResume: false,
+        supportsInterrupt: true,
+        supportsAttachments: false,
+        supportsToolCalls: true,
+        supportsApprovals: false,
+        supportsServerSideSessions: false,
+      }),
+      getResumeStrategy: () => "rebuild" as const,
+      generateThreadTitle: () => Effect.succeed(null),
+      createSession: ({ sessionId }: { readonly sessionId: string }) =>
+        Effect.succeed({
+          sessionId,
+          providerSessionRef: null,
+          providerThreadRef: null,
+          startTurn: () =>
+            Effect.succeed(
+              Stream.fromIterable([
+                {
+                  type: "output.delta" as const,
+                  turnId: "turn_1",
+                  messageId: "turn_1:assistant:commentary:0",
+                  channel: "commentary" as const,
+                  delta: "Planning.",
+                },
+                {
+                  type: "output.message.completed" as const,
+                  turnId: "turn_1",
+                  messageId: "turn_1:assistant:commentary:0",
+                  channel: "commentary" as const,
+                  reason: "tool_calls" as const,
+                },
+                {
+                  type: "tool.call.requested" as const,
+                  turnId: "turn_1",
+                  toolCallId: "call_1",
+                  toolName: "read",
+                  input: { path: "notes.md" },
+                },
+                {
+                  type: "tool.call.requested" as const,
+                  turnId: "turn_1",
+                  toolCallId: "call_2",
+                  toolName: "grep",
+                  input: { pattern: "hello" },
+                },
+              ]),
+            ),
+          interruptTurn: () => Effect.void,
+          submitToolResults: (input: {
+            readonly toolResults: readonly {
+              toolCallId: string;
+              toolName: string;
+              output: string;
+            }[];
+            readonly historyItems: readonly {
+              type: string;
+              toolCallId?: string;
+              output?: string;
+            }[];
+          }) => {
+            batchedToolResults = {
+              toolResults: input.toolResults,
+              historyItems: input.historyItems,
+            };
+            return Effect.succeed(
+              Stream.fromIterable([
+                {
+                  type: "output.delta" as const,
+                  turnId: "turn_1",
+                  messageId: "turn_1:assistant:final",
+                  channel: "final" as const,
+                  delta: "Done.",
+                },
+                {
+                  type: "output.message.completed" as const,
+                  turnId: "turn_1",
+                  messageId: "turn_1:assistant:final",
+                  channel: "final" as const,
+                  reason: "stop" as const,
+                },
+                {
+                  type: "turn.completed" as const,
+                  turnId: "turn_1",
+                },
+              ]),
+            );
+          },
+          dispose: () => Effect.void,
+        }),
+      resumeSession: ({ sessionId }: { readonly sessionId: string }) =>
+        Effect.succeed({
+          sessionId,
+          providerSessionRef: null,
+          providerThreadRef: null,
+          startTurn: () => Effect.succeed(Stream.empty),
+          interruptTurn: () => Effect.void,
+          submitToolResults: () => Effect.succeed(Stream.empty),
+          dispose: () => Effect.void,
+        }),
+    };
+
+    const context = createThreadServicesContext({ adapters: [provider] });
+    vi.spyOn(context.toolExecutor, "execute").mockImplementation(
+      async ({ toolName }) => {
+        return {
+          title: `${toolName} result`,
+          resultPreview: `${toolName} preview`,
+          modelOutput: `${toolName} output`,
+          path: null,
+          url: null,
+          diff: null,
+        };
+      },
+    );
+
+    const thread = await run(
+      context.crudService.createThreadEffect({
+        workspaceId: "workspace_1",
+        providerKey: provider.key,
+      }),
+    );
+
+    const result = await run(
+      context.turnRunner.sendMessage(thread.threadId, "Do both tools"),
+    );
+    const submittedToolBatch = (() => {
+      if (!batchedToolResults) {
+        throw new Error("Expected batched tool results to be submitted.");
+      }
+
+      return batchedToolResults as BatchedToolResults;
+    })();
+
+    expect(result.runtimeState).toBe("idle");
+    expect(submittedToolBatch.toolResults).toEqual([
+      { toolCallId: "call_1", toolName: "read", output: "read output" },
+      { toolCallId: "call_2", toolName: "grep", output: "grep output" },
+    ]);
+    expect(
+      submittedToolBatch.historyItems.filter(
+        (item) => item.type === "tool_call",
+      ),
+    ).toEqual([
+      expect.objectContaining({ toolCallId: "call_1" }),
+      expect.objectContaining({ toolCallId: "call_2" }),
+    ]);
+    expect(
+      submittedToolBatch.historyItems.filter(
+        (item) => item.type === "tool_result",
+      ),
+    ).toEqual([
+      expect.objectContaining({ toolCallId: "call_1", output: "read output" }),
+      expect.objectContaining({ toolCallId: "call_2", output: "grep output" }),
+    ]);
+  });
+
   it("blocks concurrent turns, interrupts active turns, retries the last user message, and records provider stream failures", async () => {
     const adapter = new FakeProviderAdapter({
       mode: "stateful",
@@ -212,7 +387,7 @@ describe("ThreadTurnRunner", () => {
               ),
             ),
           interruptTurn: () => Effect.void,
-          submitToolResult: () => Effect.succeed(Stream.empty),
+          submitToolResults: () => Effect.succeed(Stream.empty),
           dispose: () => Effect.void,
         }),
       resumeSession: ({ sessionId }: { readonly sessionId: string }) =>
@@ -222,7 +397,7 @@ describe("ThreadTurnRunner", () => {
           providerThreadRef: null,
           startTurn: () => Effect.succeed(Stream.empty),
           interruptTurn: () => Effect.void,
-          submitToolResult: () => Effect.succeed(Stream.empty),
+          submitToolResults: () => Effect.succeed(Stream.empty),
           dispose: () => Effect.void,
         }),
     };
@@ -274,5 +449,223 @@ describe("ThreadTurnRunner", () => {
         id: "missing_runtime",
       });
     }
+  });
+
+  it("fails the turn instead of continuing when a provider requests a tool after assistant completion reason stop", async () => {
+    let toolExecuted = false;
+    let submitToolResultCalled = false;
+    const provider = {
+      key: "stop-reason-protocol-error",
+      listCapabilities: () => ({
+        supportsNativeResume: false,
+        supportsInterrupt: true,
+        supportsAttachments: false,
+        supportsToolCalls: true,
+        supportsApprovals: false,
+        supportsServerSideSessions: false,
+      }),
+      getResumeStrategy: () => "rebuild" as const,
+      generateThreadTitle: () => Effect.succeed(null),
+      createSession: ({ sessionId }: { readonly sessionId: string }) =>
+        Effect.succeed({
+          sessionId,
+          providerSessionRef: null,
+          providerThreadRef: null,
+          startTurn: () =>
+            Effect.succeed(
+              Stream.fromIterable([
+                {
+                  type: "output.delta" as const,
+                  turnId: "turn_1",
+                  messageId: "turn_1:assistant:final",
+                  channel: "final" as const,
+                  delta: "Done.",
+                },
+                {
+                  type: "output.message.completed" as const,
+                  turnId: "turn_1",
+                  messageId: "turn_1:assistant:final",
+                  channel: "final" as const,
+                  reason: "stop" as const,
+                },
+                {
+                  type: "tool.call.requested" as const,
+                  turnId: "turn_1",
+                  toolCallId: "call_1",
+                  toolName: "write_file",
+                  input: { path: "notes.md", content: "should not write" },
+                },
+                {
+                  type: "turn.completed" as const,
+                  turnId: "turn_1",
+                },
+              ]),
+            ),
+          interruptTurn: () => Effect.void,
+          submitToolResults: () => {
+            submitToolResultCalled = true;
+            return Effect.succeed(Stream.empty);
+          },
+          dispose: () => Effect.void,
+        }),
+      resumeSession: ({ sessionId }: { readonly sessionId: string }) =>
+        Effect.succeed({
+          sessionId,
+          providerSessionRef: null,
+          providerThreadRef: null,
+          startTurn: () => Effect.succeed(Stream.empty),
+          interruptTurn: () => Effect.void,
+          submitToolResults: () => Effect.succeed(Stream.empty),
+          dispose: () => Effect.void,
+        }),
+    };
+
+    const context = createThreadServicesContext({ adapters: [provider] });
+    const executeSpy = vi
+      .spyOn(context.toolExecutor, "execute")
+      .mockImplementation(async () => {
+        toolExecuted = true;
+        return {
+          title: "Wrote notes.md",
+          resultPreview: "wrote file",
+          modelOutput: "wrote file",
+          path: "notes.md",
+          url: null,
+          diff: null,
+        };
+      });
+    const thread = await run(
+      context.crudService.createThreadEffect({
+        workspaceId: "workspace_1",
+        providerKey: provider.key,
+      }),
+    );
+
+    const result = await run(
+      context.turnRunner.sendMessage(thread.threadId, "Do the thing"),
+    );
+
+    expect(toolExecuted).toBe(false);
+    expect(executeSpy).not.toHaveBeenCalled();
+    expect(submitToolResultCalled).toBe(false);
+    expect(result.runtimeState).toBe("failed");
+    expect(result.lastError).toBe(
+      "Provider requested tool continuation after assistant completion reason 'stop'.",
+    );
+  });
+
+  it("does not let unresolved tool activities from older turns keep a later stop-reason turn looping", async () => {
+    let submitToolResultCalled = false;
+    const provider = {
+      key: "turn-scoped-unresolved-tools",
+      listCapabilities: () => ({
+        supportsNativeResume: false,
+        supportsInterrupt: true,
+        supportsAttachments: false,
+        supportsToolCalls: true,
+        supportsApprovals: false,
+        supportsServerSideSessions: false,
+      }),
+      getResumeStrategy: () => "rebuild" as const,
+      generateThreadTitle: () => Effect.succeed(null),
+      createSession: ({ sessionId }: { readonly sessionId: string }) =>
+        Effect.succeed({
+          sessionId,
+          providerSessionRef: null,
+          providerThreadRef: null,
+          startTurn: () =>
+            Effect.succeed(
+              Stream.fromIterable([
+                {
+                  type: "output.delta" as const,
+                  turnId: "turn_2",
+                  messageId: "turn_2:assistant:final",
+                  channel: "final" as const,
+                  delta: "Done.",
+                },
+                {
+                  type: "output.message.completed" as const,
+                  turnId: "turn_2",
+                  messageId: "turn_2:assistant:final",
+                  channel: "final" as const,
+                  reason: "stop" as const,
+                },
+                {
+                  type: "tool.call.requested" as const,
+                  turnId: "turn_2",
+                  toolCallId: "call_new",
+                  toolName: "read",
+                  input: { path: "notes.md" },
+                },
+              ]),
+            ),
+          interruptTurn: () => Effect.void,
+          submitToolResults: () => {
+            submitToolResultCalled = true;
+            return Effect.succeed(Stream.empty);
+          },
+          dispose: () => Effect.void,
+        }),
+      resumeSession: ({ sessionId }: { readonly sessionId: string }) =>
+        Effect.succeed({
+          sessionId,
+          providerSessionRef: null,
+          providerThreadRef: null,
+          startTurn: () => Effect.succeed(Stream.empty),
+          interruptTurn: () => Effect.void,
+          submitToolResults: () => Effect.succeed(Stream.empty),
+          dispose: () => Effect.void,
+        }),
+    };
+
+    const context = createThreadServicesContext({ adapters: [provider] });
+    const thread = await run(
+      context.crudService.createThreadEffect({
+        workspaceId: "workspace_1",
+        providerKey: provider.key,
+      }),
+    );
+
+    await run(
+      context.eventPersistence.persistAndProject(thread.threadId, [
+        {
+          eventId: context.idGenerator.next("event"),
+          threadId: thread.threadId,
+          providerSessionId: thread.providerSessionId,
+          occurredAt: context.clock.now(),
+          type: "tool.requested",
+          payload: {
+            turnId: "turn_1",
+            toolCallId: "call_old",
+            toolName: "read",
+            title: "Read notes.md",
+            argsPreview: '{"path":"notes.md"}',
+            path: "notes.md",
+            url: null,
+          },
+        },
+        {
+          eventId: context.idGenerator.next("event"),
+          threadId: thread.threadId,
+          providerSessionId: thread.providerSessionId,
+          occurredAt: context.clock.now(),
+          type: "tool.started",
+          payload: {
+            turnId: "turn_1",
+            toolCallId: "call_old",
+          },
+        },
+      ]),
+    );
+
+    const result = await run(
+      context.turnRunner.sendMessage(thread.threadId, "Do the new thing"),
+    );
+
+    expect(submitToolResultCalled).toBe(false);
+    expect(result.runtimeState).toBe("failed");
+    expect(result.lastError).toBe(
+      "Provider requested tool continuation after assistant completion reason 'stop'.",
+    );
   });
 });

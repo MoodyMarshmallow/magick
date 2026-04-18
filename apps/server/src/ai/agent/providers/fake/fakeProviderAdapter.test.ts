@@ -103,11 +103,15 @@ describe("FakeProviderAdapter", () => {
     });
 
     const continuation = await Effect.runPromise(
-      session.submitToolResult({
+      session.submitToolResults({
         turnId: "turn_1",
-        toolCallId: "turn_1:tool:read",
-        toolName: "read",
-        output: "content",
+        toolResults: [
+          {
+            toolCallId: "turn_1:tool:read",
+            toolName: "read",
+            output: "content",
+          },
+        ],
         instructions: assistantInstructions,
         historyItems: [],
         tools: [],
@@ -189,6 +193,7 @@ describe("FakeProviderAdapter", () => {
         turnId: "turn_1",
         messageId: "turn_1:assistant:commentary:0",
         channel: "commentary",
+        reason: "tool_calls",
       },
       {
         type: "tool.call.requested",
@@ -200,11 +205,15 @@ describe("FakeProviderAdapter", () => {
     ]);
 
     const continuation = await Effect.runPromise(
-      session.submitToolResult({
+      session.submitToolResults({
         turnId: "turn_1",
-        toolCallId: "turn_1:tool:read",
-        toolName: "read",
-        output: "content",
+        toolResults: [
+          {
+            toolCallId: "turn_1:tool:read",
+            toolName: "read",
+            output: "content",
+          },
+        ],
         instructions: assistantInstructions,
         historyItems: [],
         tools: [],
@@ -241,6 +250,7 @@ describe("FakeProviderAdapter", () => {
         turnId: "turn_1",
         messageId: "turn_1:assistant:commentary:1",
         channel: "commentary",
+        reason: "stop",
       },
       {
         type: "output.delta",
@@ -261,6 +271,7 @@ describe("FakeProviderAdapter", () => {
         turnId: "turn_1",
         messageId: "turn_1:assistant:final",
         channel: "final",
+        reason: "stop",
       },
       {
         type: "turn.completed",

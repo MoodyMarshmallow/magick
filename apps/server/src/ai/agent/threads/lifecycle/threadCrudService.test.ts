@@ -111,7 +111,7 @@ describe("ThreadCrudService", () => {
         providerThreadRef: null,
         startTurn: vi.fn(),
         interruptTurn: vi.fn(),
-        submitToolResult: vi.fn(),
+        submitToolResults: vi.fn(),
         dispose,
       } as never,
     });

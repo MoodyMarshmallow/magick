@@ -9,6 +9,7 @@ export type ThreadRuntimeState =
   | "interrupted"
   | "failed";
 export type AssistantOutputChannel = "commentary" | "final";
+export type AssistantCompletionReason = "tool_calls" | "stop" | "incomplete";
 export type ToolActivityStatus =
   | "requested"
   | "running"
@@ -32,6 +33,7 @@ export interface FileDiffPreview {
 }
 
 export interface ToolActivityView {
+  readonly turnId: string;
   readonly toolCallId: string;
   readonly toolName: string;
   readonly title: string;
@@ -74,6 +76,7 @@ export interface TranscriptMessage {
   readonly content: string;
   readonly createdAt: string;
   readonly status: "streaming" | "complete" | "interrupted" | "failed";
+  readonly reason?: AssistantCompletionReason | null;
 }
 
 export interface ThreadViewModel {
@@ -150,6 +153,7 @@ export type DomainEvent =
         turnId: string;
         messageId: string;
         channel: AssistantOutputChannel;
+        reason?: AssistantCompletionReason;
       }
     >
   | EventBase<"turn.completed", { turnId: string }>

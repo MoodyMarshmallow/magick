@@ -4,7 +4,10 @@ import { inspect } from "node:util";
 
 import { Effect, Stream } from "effect";
 
-import type { AssistantOutputChannel } from "@magick/contracts/chat";
+import type {
+  AssistantCompletionReason,
+  AssistantOutputChannel,
+} from "@magick/contracts/chat";
 import type { ProviderAuthRecord } from "@magick/contracts/provider";
 import { maxThreadTitleLength } from "@magick/shared/threadTitle";
 import { nowIso } from "@magick/shared/time";
@@ -40,6 +43,7 @@ type CodexStreamEvent =
       readonly type: "output.message.completed";
       readonly channel: AssistantOutputChannel;
       readonly itemKey: string;
+      readonly reason: AssistantCompletionReason;
     }
   | { readonly type: "turn.completed" }
   | {
@@ -196,10 +200,12 @@ const summarizeCompletedAssistantMessage = (args: {
   readonly itemKey: string;
   readonly channel: AssistantOutputChannel;
   readonly content: string;
+  readonly reason: AssistantCompletionReason;
 }): Record<string, unknown> => ({
   kind: "assistant_message",
   itemKey: args.itemKey,
   channel: args.channel,
+  reason: args.reason,
   contentLength: args.content.length,
   contentTailPreview: tailPreviewForLog(args.content),
 });
@@ -549,8 +555,20 @@ interface ActiveAssistantOutputItem {
   readonly itemKey: string;
   readonly channel: AssistantOutputChannel;
   emittedText: string;
-  completed: boolean;
+  rawCompleted: boolean;
+  completedText: string | null;
 }
+
+type InternalStreamMessage =
+  | SseMessage
+  | {
+      readonly type: "stream_end";
+    };
+
+const isStreamEndMessage = (
+  message: InternalStreamMessage,
+): message is Extract<InternalStreamMessage, { readonly type: "stream_end" }> =>
+  "type" in message && message.type === "stream_end";
 
 const toStreamContractFailure = (detail: string): CodexStreamEvent => ({
   type: "turn.failed",
@@ -780,15 +798,26 @@ export class CodexResponsesClient {
     return Stream.unwrap(
       execute.pipe(
         Effect.map((body) =>
-          Stream.fromAsyncIterable(parseSseMessages(body), (error) =>
-            toProviderFailure(
-              "codex_stream_parse_failed",
-              error instanceof Error ? error.message : String(error),
+          Stream.concat(
+            Stream.fromAsyncIterable(parseSseMessages(body), (error) =>
+              toProviderFailure(
+                "codex_stream_parse_failed",
+                error instanceof Error ? error.message : String(error),
+              ),
             ),
+            Stream.succeed({
+              type: "stream_end",
+            } satisfies InternalStreamMessage),
           ).pipe(
             Stream.flatMap(
               (() => {
                 const messageContentByItemKey = new Map<string, string>();
+                const pendingToolCallRequests: Array<
+                  Extract<
+                    CodexStreamEvent,
+                    { readonly type: "tool.call.requested" }
+                  >
+                > = [];
                 const activeAssistantItems = new Map<
                   string,
                   ActiveAssistantOutputItem
@@ -816,6 +845,7 @@ export class CodexResponsesClient {
                           itemKey: event.itemKey,
                           channel: event.channel,
                           content: fullContent,
+                          reason: event.reason,
                         }),
                       );
                       return;
@@ -838,7 +868,8 @@ export class CodexResponsesClient {
                     itemKey: args.itemKey,
                     channel: args.channel,
                     emittedText: "",
-                    completed: false,
+                    rawCompleted: false,
+                    completedText: null,
                   };
                   if (args.channel === "final") {
                     if (finalItemKey && finalItemKey !== args.itemKey) {
@@ -857,7 +888,7 @@ export class CodexResponsesClient {
                 ): ActiveAssistantOutputItem | null => {
                   if (itemKey) {
                     const keyedItem = activeAssistantItems.get(itemKey);
-                    if (keyedItem && !keyedItem.completed) {
+                    if (keyedItem && !keyedItem.rawCompleted) {
                       return keyedItem;
                     }
 
@@ -868,7 +899,7 @@ export class CodexResponsesClient {
 
                   const activeItems = Array.from(
                     activeAssistantItems.values(),
-                  ).filter((item) => !item.completed);
+                  ).filter((item) => !item.rawCompleted);
                   if (activeItems.length === 1) {
                     return activeItems[0] ?? null;
                   }
@@ -880,22 +911,44 @@ export class CodexResponsesClient {
                   );
                 };
 
-                const emitCompletionForActiveItems = (
+                const finalizeAssistantItems = (
                   nextEvents: CodexStreamEvent[],
+                  reason: AssistantCompletionReason,
                 ): void => {
                   for (const item of Array.from(
                     activeAssistantItems.values(),
                   )) {
-                    emitCompletion(nextEvents, item, item.emittedText);
+                    finalizeAssistantItem(nextEvents, item, reason);
                   }
                 };
 
-                const emitCompletion = (
+                const flushPendingToolCallRequests = (
+                  nextEvents: CodexStreamEvent[],
+                ): void => {
+                  if (pendingToolCallRequests.length === 0) {
+                    return;
+                  }
+
+                  nextEvents.push(...pendingToolCallRequests);
+                  pendingToolCallRequests.length = 0;
+                };
+
+                const dropPendingToolCallRequests = (): void => {
+                  pendingToolCallRequests.length = 0;
+                };
+
+                const hasBufferedStepState = (): boolean =>
+                  activeAssistantItems.size > 0 ||
+                  pendingToolCallRequests.length > 0;
+
+                const finalizeAssistantItem = (
                   nextEvents: CodexStreamEvent[],
                   item: ActiveAssistantOutputItem,
-                  fullText: string,
+                  reason: AssistantCompletionReason,
                 ): void => {
-                  if (item.completed) {
+                  const fullText = item.completedText ?? item.emittedText;
+
+                  if (!activeAssistantItems.has(item.itemKey)) {
                     return;
                   }
 
@@ -914,14 +967,50 @@ export class CodexResponsesClient {
                     type: "output.message.completed",
                     itemKey: item.itemKey,
                     channel: item.channel,
+                    reason,
                   });
-                  item.completed = true;
                   activeAssistantItems.delete(item.itemKey);
                 };
 
-                return (message: SseMessage) => {
+                const emitResponseFailure = (
+                  nextEvents: CodexStreamEvent[],
+                  detail: string,
+                ): void => {
+                  terminalFailureSeen = true;
+                  finalizeAssistantItems(nextEvents, "incomplete");
+                  dropPendingToolCallRequests();
+                  nextEvents.push({ type: "turn.failed", error: detail });
+                };
+
+                const emitContractFailure = (
+                  nextEvents: CodexStreamEvent[],
+                  detail: string,
+                ): void => {
+                  terminalFailureSeen = true;
+                  dropPendingToolCallRequests();
+                  nextEvents.push(toStreamContractFailure(detail));
+                };
+
+                return (message: InternalStreamMessage) => {
                   if (terminalFailureSeen) {
                     return Stream.empty;
+                  }
+
+                  if (isStreamEndMessage(message)) {
+                    const nextEvents: CodexStreamEvent[] = [];
+
+                    if (!responseCompleted && hasBufferedStepState()) {
+                      emitResponseFailure(
+                        nextEvents,
+                        "Codex stream ended before response.completed.",
+                      );
+                    }
+
+                    for (const event of nextEvents) {
+                      recordStreamEvent(event);
+                    }
+
+                    return Stream.fromIterable(nextEvents);
                   }
 
                   const rawEvents = parseCodexStreamMessage(message);
@@ -968,35 +1057,37 @@ export class CodexResponsesClient {
                             itemKey: rawEvent.itemKey,
                             channel: rawEvent.channel,
                           });
-                          emitCompletion(nextEvents, item, rawEvent.text);
+                          item.completedText = rawEvent.text;
+                          item.rawCompleted = true;
                           break;
                         }
                         case "tool.call.requested":
                           sawToolCall = true;
-                          nextEvents.push(rawEvent);
+                          pendingToolCallRequests.push(rawEvent);
                           break;
                         case "response.completed":
                           if (!responseCompleted) {
                             responseCompleted = true;
-                            emitCompletionForActiveItems(nextEvents);
+                            finalizeAssistantItems(
+                              nextEvents,
+                              sawToolCall ? "tool_calls" : "stop",
+                            );
+                            flushPendingToolCallRequests(nextEvents);
                             if (!sawToolCall) {
                               nextEvents.push({ type: "turn.completed" });
                             }
                           }
                           break;
                         case "turn.failed":
-                          terminalFailureSeen = true;
-                          nextEvents.push(rawEvent);
+                          emitResponseFailure(nextEvents, rawEvent.error);
                           break;
                       }
                     }
                   } catch (error) {
-                    terminalFailureSeen = true;
                     nextEvents.length = 0;
-                    nextEvents.push(
-                      toStreamContractFailure(
-                        error instanceof Error ? error.message : String(error),
-                      ),
+                    emitContractFailure(
+                      nextEvents,
+                      error instanceof Error ? error.message : String(error),
                     );
                   }
 

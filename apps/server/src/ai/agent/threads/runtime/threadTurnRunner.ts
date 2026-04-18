@@ -8,6 +8,7 @@ import type {
   ProviderEvent,
   ProviderSessionRuntime,
   ProviderToolDefinition,
+  ProviderToolResult,
 } from "../../providers/providerTypes";
 import {
   InvalidStateError,
@@ -28,6 +29,13 @@ import type { ThreadCrudService } from "../lifecycle/threadCrudService";
 import type { ProviderSessionRuntimeService } from "./providerSessionRuntimeService";
 import type { ThreadAutoTitleService } from "./threadAutoTitleService";
 import type { ThreadEventPersistence } from "./threadEventPersistence";
+
+class ProviderStreamAbortError extends Error {
+  constructor() {
+    super("Abort provider stream processing");
+    this.name = "ProviderStreamAbortError";
+  }
+}
 
 export class ThreadTurnRunner {
   readonly #runtimeState: RuntimeStateService;
@@ -81,27 +89,89 @@ export class ThreadTurnRunner {
   readonly #normalizeWorkspaceToolPath = (path: string): string =>
     this.#documents.toAgentPath(this.#documents.resolveFile(path));
 
-  readonly #processProviderEvent = (
-    thread: ThreadRecord,
-    runtime: ProviderSessionRuntime,
-    providerEvent: ProviderEvent,
-    readFilesForTurn = new Set<string>(),
-  ): Effect.Effect<void, import("../../runtime/errors").BackendError> => {
-    if (providerEvent.type !== "tool.call.requested") {
-      const applied = this.#eventPersistence.applyProviderEvent(
-        thread.id,
-        thread.providerSessionId,
-        providerEvent,
-      );
-      if (!applied) {
-        return Effect.void;
+  readonly #findLatestAssistantMessageForTurn = (
+    snapshot: ThreadViewModel,
+    turnId: string,
+  ) => {
+    for (let index = snapshot.messages.length - 1; index >= 0; index -= 1) {
+      const message = snapshot.messages[index];
+      if (message?.id.startsWith(`${turnId}:assistant:`)) {
+        return message;
       }
-
-      return applied.pipe(Effect.asVoid);
     }
 
+    return null;
+  };
+
+  readonly #hasUnresolvedToolWorkForTurn = (
+    snapshot: ThreadViewModel,
+    turnId: string,
+  ): boolean =>
+    snapshot.toolActivities.some(
+      (toolActivity) =>
+        toolActivity.turnId === turnId &&
+        (toolActivity.status === "requested" ||
+          toolActivity.status === "running" ||
+          toolActivity.status === "awaiting_approval"),
+    );
+
+  readonly #shouldContinueAfterToolResult = (
+    snapshot: ThreadViewModel,
+    turnId: string,
+  ): boolean => {
+    if (this.#hasUnresolvedToolWorkForTurn(snapshot, turnId)) {
+      return true;
+    }
+
+    const latestAssistantMessage = this.#findLatestAssistantMessageForTurn(
+      snapshot,
+      turnId,
+    );
+    if (!latestAssistantMessage) {
+      return true;
+    }
+
+    return latestAssistantMessage.reason !== "stop";
+  };
+
+  readonly #recordToolCallRequest = (
+    thread: ThreadRecord,
+    providerEvent: Extract<
+      ProviderEvent,
+      { readonly type: "tool.call.requested" }
+    >,
+  ): Effect.Effect<
+    void,
+    import("../../runtime/errors").BackendError | ProviderStreamAbortError
+  > => {
     return Effect.gen(
       function* (this: ThreadTurnRunner) {
+        const snapshotBeforeToolRequest =
+          yield* this.#crudService.openThreadEffect(thread.id);
+        const latestAssistantMessage = this.#findLatestAssistantMessageForTurn(
+          snapshotBeforeToolRequest,
+          providerEvent.turnId,
+        );
+        if (latestAssistantMessage?.reason === "stop") {
+          yield* this.#eventPersistence
+            .persistAndProject(thread.id, [
+              {
+                eventId: this.#idGenerator.next("event"),
+                threadId: thread.id,
+                providerSessionId: thread.providerSessionId,
+                occurredAt: this.#clock.now(),
+                type: "turn.failed",
+                payload: {
+                  turnId: providerEvent.turnId,
+                  error:
+                    "Provider requested tool continuation after assistant completion reason 'stop'.",
+                },
+              },
+            ])
+            .pipe(Effect.asVoid);
+          return yield* Effect.fail(new ProviderStreamAbortError());
+        }
+
         yield* this.#eventPersistence
           .applyToolRequestedEvent(
             thread.id,
@@ -109,19 +179,63 @@ export class ThreadTurnRunner {
             providerEvent,
           )
           .pipe(Effect.asVoid);
-        yield* this.#eventPersistence
-          .persistToolStarted(
-            thread.id,
-            thread.providerSessionId,
-            providerEvent.turnId,
-            providerEvent.toolCallId,
-          )
-          .pipe(Effect.asVoid);
+      }.bind(this),
+    );
+  };
+
+  readonly #applyNonToolProviderEvent = (
+    thread: ThreadRecord,
+    providerEvent: Exclude<
+      ProviderEvent,
+      { readonly type: "tool.call.requested" }
+    >,
+  ): Effect.Effect<void, import("../../runtime/errors").BackendError> => {
+    const applied = this.#eventPersistence.applyProviderEvent(
+      thread.id,
+      thread.providerSessionId,
+      providerEvent,
+    );
+    if (!applied) {
+      return Effect.void;
+    }
+
+    return applied.pipe(Effect.asVoid);
+  };
+
+  readonly #executeToolBatch = (
+    thread: ThreadRecord,
+    runtime: ProviderSessionRuntime,
+    turnId: string,
+    toolCalls: readonly Extract<
+      ProviderEvent,
+      { readonly type: "tool.call.requested" }
+    >[],
+    readFilesForTurn: Set<string>,
+  ): Effect.Effect<void, import("../../runtime/errors").BackendError> =>
+    Effect.gen(
+      function* (this: ThreadTurnRunner) {
+        if (toolCalls.length === 0) {
+          return;
+        }
+
+        const batchTurnId = toolCalls[0]?.turnId;
+        if (
+          !batchTurnId ||
+          toolCalls.some((toolCall) => toolCall.turnId !== batchTurnId)
+        ) {
+          return yield* Effect.fail(
+            new InvalidStateError({
+              code: "provider_protocol_invalid",
+              detail:
+                "Provider emitted tool calls from multiple turns in a single response step.",
+            }),
+          );
+        }
 
         const toolContext = buildToolExecutionContext({
           workspaceId: thread.workspaceId,
           threadId: thread.id,
-          turnId: providerEvent.turnId,
+          turnId: batchTurnId,
           documents: this.#documents,
           workspaceQuery: this.#workspaceQuery,
           web: this.#webContent,
@@ -132,48 +246,74 @@ export class ThreadTurnRunner {
           },
         });
 
-        const toolResult = yield* Effect.either(
-          fromPromise(() =>
-            this.#toolExecutor.execute({
-              toolName: providerEvent.toolName,
-              input: providerEvent.input,
-              context: toolContext,
-            }),
-          ),
-        );
+        const toolResults: ProviderToolResult[] = [];
 
-        const continuationOutput = Either.isRight(toolResult)
-          ? toolResult.right.modelOutput
-          : `Tool execution failed: ${backendErrorMessage(toolResult.left)}`;
-
-        if (Either.isRight(toolResult)) {
+        for (const toolCall of toolCalls) {
           yield* this.#eventPersistence
-            .persistToolCompleted(
+            .persistToolStarted(
               thread.id,
               thread.providerSessionId,
-              providerEvent.turnId,
-              providerEvent.toolCallId,
-              toolResult.right,
+              toolCall.turnId,
+              toolCall.toolCallId,
             )
             .pipe(Effect.asVoid);
-        } else {
-          yield* this.#eventPersistence
-            .persistToolFailed(
-              thread.id,
-              thread.providerSessionId,
-              providerEvent.turnId,
-              providerEvent.toolCallId,
-              backendErrorMessage(toolResult.left),
-              continuationOutput,
-            )
-            .pipe(Effect.asVoid);
+
+          const toolResult = yield* Effect.either(
+            fromPromise(() =>
+              this.#toolExecutor.execute({
+                toolName: toolCall.toolName,
+                input: toolCall.input,
+                context: toolContext,
+              }),
+            ),
+          );
+
+          const continuationOutput = Either.isRight(toolResult)
+            ? toolResult.right.modelOutput
+            : `Tool execution failed: ${backendErrorMessage(toolResult.left)}`;
+
+          if (Either.isRight(toolResult)) {
+            yield* this.#eventPersistence
+              .persistToolCompleted(
+                thread.id,
+                thread.providerSessionId,
+                toolCall.turnId,
+                toolCall.toolCallId,
+                toolResult.right,
+              )
+              .pipe(Effect.asVoid);
+          } else {
+            yield* this.#eventPersistence
+              .persistToolFailed(
+                thread.id,
+                thread.providerSessionId,
+                toolCall.turnId,
+                toolCall.toolCallId,
+                backendErrorMessage(toolResult.left),
+                continuationOutput,
+              )
+              .pipe(Effect.asVoid);
+          }
+
+          toolResults.push({
+            toolCallId: toolCall.toolCallId,
+            toolName: toolCall.toolName,
+            output: continuationOutput,
+          });
         }
 
-        const continuation = yield* runtime.session.submitToolResult({
-          turnId: providerEvent.turnId,
-          toolCallId: providerEvent.toolCallId,
-          toolName: providerEvent.toolName,
-          output: continuationOutput,
+        const updatedSnapshot = yield* this.#crudService.openThreadEffect(
+          thread.id,
+        );
+        if (
+          !this.#shouldContinueAfterToolResult(updatedSnapshot, batchTurnId)
+        ) {
+          return;
+        }
+
+        const continuation = yield* runtime.session.submitToolResults({
+          turnId: batchTurnId,
+          toolResults,
           instructions: DEFAULT_ASSISTANT_INSTRUCTIONS,
           historyItems: this.#historyBuilder.buildConversationHistory(
             thread.id,
@@ -181,17 +321,76 @@ export class ThreadTurnRunner {
           tools: this.#listProviderTools(),
         });
 
-        yield* Stream.runForEach(continuation, (continuationEvent) =>
-          this.#processProviderEvent(
-            thread,
-            runtime,
-            continuationEvent,
-            readFilesForTurn,
-          ),
+        yield* this.#drainProviderStream(
+          thread,
+          runtime,
+          batchTurnId,
+          continuation,
+          readFilesForTurn,
         );
       }.bind(this),
     );
-  };
+
+  readonly #drainProviderStream = (
+    thread: ThreadRecord,
+    runtime: ProviderSessionRuntime,
+    turnId: string,
+    stream: Stream.Stream<
+      ProviderEvent,
+      import("../../runtime/errors").BackendError
+    >,
+    readFilesForTurn = new Set<string>(),
+  ): Effect.Effect<void, import("../../runtime/errors").BackendError> =>
+    Effect.gen(
+      function* (this: ThreadTurnRunner) {
+        const pendingToolCalls: Extract<
+          ProviderEvent,
+          { readonly type: "tool.call.requested" }
+        >[] = [];
+
+        yield* Stream.runForEach(stream, (providerEvent) =>
+          providerEvent.type === "tool.call.requested"
+            ? this.#recordToolCallRequest(thread, providerEvent).pipe(
+                Effect.tap(() =>
+                  Effect.sync(() => {
+                    pendingToolCalls.push(providerEvent);
+                  }),
+                ),
+              )
+            : this.#applyNonToolProviderEvent(thread, providerEvent),
+        ).pipe(
+          Effect.catchAll((error) =>
+            error instanceof ProviderStreamAbortError
+              ? Effect.void
+              : this.#eventPersistence
+                  .persistAndProject(thread.id, [
+                    {
+                      eventId: this.#idGenerator.next("event"),
+                      threadId: thread.id,
+                      providerSessionId: thread.providerSessionId,
+                      occurredAt: this.#clock.now(),
+                      type: "turn.failed",
+                      payload: {
+                        turnId,
+                        error: backendErrorMessage(error),
+                      },
+                    },
+                  ])
+                  .pipe(Effect.asVoid),
+          ),
+        );
+
+        if (pendingToolCalls.length > 0) {
+          yield* this.#executeToolBatch(
+            thread,
+            runtime,
+            turnId,
+            pendingToolCalls,
+            readFilesForTurn,
+          );
+        }
+      }.bind(this),
+    );
 
   readonly sendMessage = (threadId: string, content: string) =>
     Effect.gen(
@@ -269,25 +468,25 @@ export class ThreadTurnRunner {
           tools: this.#listProviderTools(),
         });
 
-        yield* Stream.runForEach(stream, (providerEvent) =>
-          this.#processProviderEvent(thread, runtime, providerEvent),
-        ).pipe(
+        yield* this.#drainProviderStream(thread, runtime, turnId, stream).pipe(
           Effect.catchAll((error) =>
-            this.#eventPersistence
-              .persistAndProject(threadId, [
-                {
-                  eventId: this.#idGenerator.next("event"),
-                  threadId,
-                  providerSessionId: thread.providerSessionId,
-                  occurredAt: this.#clock.now(),
-                  type: "turn.failed",
-                  payload: {
-                    turnId,
-                    error: backendErrorMessage(error),
-                  },
-                },
-              ])
-              .pipe(Effect.asVoid),
+            error instanceof ProviderStreamAbortError
+              ? Effect.void
+              : this.#eventPersistence
+                  .persistAndProject(threadId, [
+                    {
+                      eventId: this.#idGenerator.next("event"),
+                      threadId,
+                      providerSessionId: thread.providerSessionId,
+                      occurredAt: this.#clock.now(),
+                      type: "turn.failed",
+                      payload: {
+                        turnId,
+                        error: backendErrorMessage(error),
+                      },
+                    },
+                  ])
+                  .pipe(Effect.asVoid),
           ),
           Effect.ensuring(
             Effect.sync(() => this.#runtimeState.clearActiveTurn(threadId)),

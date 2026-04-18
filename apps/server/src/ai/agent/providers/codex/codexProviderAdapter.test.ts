@@ -184,6 +184,7 @@ describe("CodexProviderAdapter", () => {
         turnId: "turn_1",
         messageId: "turn_1:assistant:final",
         channel: "final",
+        reason: "stop",
       },
       {
         type: "turn.completed",
@@ -246,11 +247,15 @@ describe("CodexProviderAdapter", () => {
     await Effect.runPromise(
       Stream.runCollect(
         await Effect.runPromise(
-          session.submitToolResult({
+          session.submitToolResults({
             turnId: "turn_1",
-            toolCallId: "call_1",
-            toolName: "read",
-            output: "done",
+            toolResults: [
+              {
+                toolCallId: "call_1",
+                toolName: "read",
+                output: "done",
+              },
+            ],
             instructions: assistantInstructions,
             historyItems: [
               {
@@ -392,11 +397,15 @@ describe("CodexProviderAdapter", () => {
     ]);
 
     const secondStream = await Effect.runPromise(
-      session.submitToolResult({
+      session.submitToolResults({
         turnId: "turn_1",
-        toolCallId: "call_1",
-        toolName: "read",
-        output: "hello world",
+        toolResults: [
+          {
+            toolCallId: "call_1",
+            toolName: "read",
+            output: "hello world",
+          },
+        ],
         instructions: assistantInstructions,
         historyItems: [
           {
@@ -439,11 +448,15 @@ describe("CodexProviderAdapter", () => {
     ]);
 
     const finalStream = await Effect.runPromise(
-      session.submitToolResult({
+      session.submitToolResults({
         turnId: "turn_1",
-        toolCallId: "call_2",
-        toolName: "grep",
-        output: "notes.md:1:hello world",
+        toolResults: [
+          {
+            toolCallId: "call_2",
+            toolName: "grep",
+            output: "notes.md:1:hello world",
+          },
+        ],
         instructions: assistantInstructions,
         historyItems: [
           {
@@ -499,6 +512,7 @@ describe("CodexProviderAdapter", () => {
         turnId: "turn_1",
         messageId: "turn_1:assistant:final",
         channel: "final",
+        reason: "stop",
       },
       {
         type: "turn.completed",
@@ -550,6 +564,212 @@ describe("CodexProviderAdapter", () => {
         type: "function_call_output",
         call_id: "call_2",
         output: "notes.md:1:hello world",
+      },
+    ]);
+  });
+
+  it("skips incomplete assistant history messages when building Codex replay input", async () => {
+    const authRepository = {
+      get: vi.fn().mockReturnValue({
+        providerKey: "codex",
+        authMode: "chatgpt",
+        accessToken: "access",
+        refreshToken: "refresh",
+        expiresAt: Date.now() + 120_000,
+        accountId: "acct_1",
+        email: "user@example.com",
+        planType: null,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      }),
+      upsert: vi.fn(),
+      delete: vi.fn(),
+    };
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response("data: [DONE]\n\n", {
+        status: 200,
+        headers: { "Content-Type": "text/event-stream" },
+      }),
+    );
+
+    const factory = createCodexRuntimeFactory({
+      authRepository: authRepository as never,
+      authClient: {
+        refreshAccessToken: vi.fn().mockResolvedValue({
+          accessToken: "access",
+          refreshToken: "refresh",
+          expiresAt: Date.now() + 120_000,
+          accountId: "acct_1",
+          email: "user@example.com",
+        }),
+      } as unknown as CodexAuthClient,
+      fetch: fetchMock as unknown as typeof fetch,
+      defaultModel: "gpt-5.4",
+    });
+
+    const session = await Effect.runPromise(
+      factory.createSession({
+        workspaceId: "workspace_1",
+        sessionId: "session_1",
+      }),
+    );
+
+    await Effect.runPromise(
+      Stream.runCollect(
+        await Effect.runPromise(
+          session.startTurn({
+            threadId: "thread_1",
+            turnId: "turn_2",
+            messageId: "message_2",
+            userMessage: "Follow up",
+            instructions: assistantInstructions,
+            contextMessages: [],
+            historyItems: [
+              {
+                type: "message",
+                role: "user",
+                channel: null,
+                content: "First question",
+              },
+              {
+                type: "message",
+                role: "assistant",
+                channel: "final",
+                content: "Partial answer",
+                reason: "incomplete",
+              },
+              {
+                type: "message",
+                role: "assistant",
+                channel: "final",
+                content: "Complete answer",
+                reason: "stop",
+              },
+            ],
+            tools: [],
+          }),
+        ),
+      ),
+    );
+
+    const request = JSON.parse(
+      String(fetchMock.mock.calls[0]?.[1]?.body ?? "{}"),
+    );
+    expect(request.input).toEqual([
+      {
+        role: "user",
+        content: [{ type: "input_text", text: "First question" }],
+      },
+      {
+        role: "assistant",
+        content: [{ type: "output_text", text: "Complete answer" }],
+        phase: "final_answer",
+      },
+      {
+        role: "user",
+        content: [{ type: "input_text", text: "Follow up" }],
+      },
+    ]);
+  });
+
+  it("skips incomplete assistant fallback context messages when no history items exist", async () => {
+    const authRepository = {
+      get: vi.fn().mockReturnValue({
+        providerKey: "codex",
+        authMode: "chatgpt",
+        accessToken: "access",
+        refreshToken: "refresh",
+        expiresAt: Date.now() + 120_000,
+        accountId: "acct_1",
+        email: "user@example.com",
+        planType: null,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      }),
+      upsert: vi.fn(),
+      delete: vi.fn(),
+    };
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response("data: [DONE]\n\n", {
+        status: 200,
+        headers: { "Content-Type": "text/event-stream" },
+      }),
+    );
+
+    const factory = createCodexRuntimeFactory({
+      authRepository: authRepository as never,
+      authClient: {
+        refreshAccessToken: vi.fn().mockResolvedValue({
+          accessToken: "access",
+          refreshToken: "refresh",
+          expiresAt: Date.now() + 120_000,
+          accountId: "acct_1",
+          email: "user@example.com",
+        }),
+      } as unknown as CodexAuthClient,
+      fetch: fetchMock as unknown as typeof fetch,
+      defaultModel: "gpt-5.4",
+    });
+
+    const session = await Effect.runPromise(
+      factory.createSession({
+        workspaceId: "workspace_1",
+        sessionId: "session_1",
+      }),
+    );
+
+    await Effect.runPromise(
+      Stream.runCollect(
+        await Effect.runPromise(
+          session.startTurn({
+            threadId: "thread_1",
+            turnId: "turn_2",
+            messageId: "message_2",
+            userMessage: "Follow up",
+            instructions: assistantInstructions,
+            contextMessages: [
+              {
+                role: "user",
+                channel: null,
+                content: "First question",
+                reason: null,
+              },
+              {
+                role: "assistant",
+                channel: "final",
+                content: "Partial answer",
+                reason: "incomplete",
+              },
+              {
+                role: "assistant",
+                channel: "final",
+                content: "Complete answer",
+                reason: "stop",
+              },
+            ],
+            historyItems: [],
+            tools: [],
+          }),
+        ),
+      ),
+    );
+
+    const request = JSON.parse(
+      String(fetchMock.mock.calls[0]?.[1]?.body ?? "{}"),
+    );
+    expect(request.input).toEqual([
+      {
+        role: "user",
+        content: [{ type: "input_text", text: "First question" }],
+      },
+      {
+        role: "assistant",
+        content: [{ type: "output_text", text: "Complete answer" }],
+        phase: "final_answer",
+      },
+      {
+        role: "user",
+        content: [{ type: "input_text", text: "Follow up" }],
       },
     ]);
   });
@@ -665,6 +885,7 @@ describe("CodexProviderAdapter", () => {
         turnId: "turn_1",
         messageId: "turn_1:assistant:commentary:0",
         channel: "commentary",
+        reason: "tool_calls",
       },
       {
         type: "tool.call.requested",
@@ -676,11 +897,15 @@ describe("CodexProviderAdapter", () => {
     ]);
 
     const secondStream = await Effect.runPromise(
-      session.submitToolResult({
+      session.submitToolResults({
         turnId: "turn_1",
-        toolCallId: "call_1",
-        toolName: "read",
-        output: "replay notes",
+        toolResults: [
+          {
+            toolCallId: "call_1",
+            toolName: "read",
+            output: "replay notes",
+          },
+        ],
         instructions: assistantInstructions,
         historyItems: [
           {
@@ -725,6 +950,7 @@ describe("CodexProviderAdapter", () => {
         turnId: "turn_1",
         messageId: "turn_1:assistant:commentary:1",
         channel: "commentary",
+        reason: "tool_calls",
       },
       {
         type: "tool.call.requested",
@@ -736,11 +962,15 @@ describe("CodexProviderAdapter", () => {
     ]);
 
     const finalStream = await Effect.runPromise(
-      session.submitToolResult({
+      session.submitToolResults({
         turnId: "turn_1",
-        toolCallId: "call_2",
-        toolName: "grep",
-        output: "notes.md:1:replay",
+        toolResults: [
+          {
+            toolCallId: "call_2",
+            toolName: "grep",
+            output: "notes.md:1:replay",
+          },
+        ],
         instructions: assistantInstructions,
         historyItems: [
           {
@@ -797,6 +1027,7 @@ describe("CodexProviderAdapter", () => {
         turnId: "turn_1",
         messageId: "turn_1:assistant:final",
         channel: "final",
+        reason: "stop",
       },
       {
         type: "turn.completed",
@@ -895,12 +1126,14 @@ describe("CodexProviderAdapter", () => {
         turnId: "turn_1",
         messageId: "turn_1:assistant:commentary:0",
         channel: "commentary",
+        reason: "stop",
       },
       {
         type: "output.message.completed",
         turnId: "turn_1",
         messageId: "turn_1:assistant:commentary:1",
         channel: "commentary",
+        reason: "stop",
       },
       {
         type: "turn.completed",

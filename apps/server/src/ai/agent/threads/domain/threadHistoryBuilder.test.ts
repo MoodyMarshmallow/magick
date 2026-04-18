@@ -31,8 +31,13 @@ describe("ThreadHistoryBuilder", () => {
     );
 
     expect(contextMessages).toEqual([
-      { role: "user", channel: null, content: "hello" },
-      { role: "assistant", channel: "commentary", content: "working" },
+      { role: "user", channel: null, content: "hello", reason: null },
+      {
+        role: "assistant",
+        channel: "commentary",
+        content: "working",
+        reason: null,
+      },
     ]);
   });
 
@@ -138,6 +143,19 @@ describe("ThreadHistoryBuilder", () => {
           },
         },
         {
+          eventId: "event_assistant_completed_1",
+          threadId: thread.threadId,
+          providerSessionId: "session_1",
+          occurredAt: "2026-04-17T00:00:00.000Z",
+          type: "message.assistant.completed",
+          payload: {
+            turnId: "turn_1",
+            messageId: "assistant_1",
+            channel: "commentary",
+            reason: "tool_calls",
+          },
+        },
+        {
           eventId: "event_tool_completed_1",
           threadId: thread.threadId,
           providerSessionId: "session_1",
@@ -208,6 +226,7 @@ describe("ThreadHistoryBuilder", () => {
         role: "assistant",
         channel: "commentary",
         content: "Thinking",
+        reason: "tool_calls",
       },
       {
         type: "tool_call",

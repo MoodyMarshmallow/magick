@@ -346,6 +346,7 @@ describe("CommentSidebar", () => {
         messages: [],
         toolActivities: [
           {
+            turnId: "turn_1",
             toolCallId: "tool_1",
             toolName: "apply_patch",
             title: "Patched notes.md",

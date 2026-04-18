@@ -11,6 +11,7 @@ type MutableAssistantHistoryMessage = {
   role: "assistant";
   channel: "commentary" | "final";
   content: string;
+  reason?: "tool_calls" | "stop" | "incomplete";
 };
 
 export class ThreadHistoryBuilder {
@@ -27,6 +28,7 @@ export class ThreadHistoryBuilder {
       role: message.role,
       channel: message.channel,
       content: message.content,
+      reason: message.reason ?? null,
     }));
   };
 
@@ -95,6 +97,15 @@ export class ThreadHistoryBuilder {
             ),
           });
           break;
+        case "message.assistant.completed": {
+          const assistantMessage = assistantMessages.get(
+            event.payload.messageId,
+          );
+          if (assistantMessage && event.payload.reason) {
+            assistantMessage.reason = event.payload.reason;
+          }
+          break;
+        }
         case "tool.completed":
           history.push({
             type: "tool_result",

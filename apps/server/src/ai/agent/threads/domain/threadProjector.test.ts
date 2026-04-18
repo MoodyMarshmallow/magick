@@ -103,6 +103,7 @@ describe("projectThreadEvents", () => {
           turnId: "turn_1",
           messageId: "turn_1:assistant:final",
           channel: "final",
+          reason: "stop",
         },
       }),
       makeEvent({
@@ -117,6 +118,7 @@ describe("projectThreadEvents", () => {
     expect(thread.messages[1]).toMatchObject({
       content: "Hi",
       status: "complete",
+      reason: "stop",
     });
   });
 
@@ -414,6 +416,54 @@ describe("projectThreadEvents", () => {
       expect.objectContaining({
         id: "turn_1:assistant:commentary:0",
         status: "complete",
+      }),
+    );
+  });
+
+  it("marks incomplete assistant completions as failed when the turn later fails", () => {
+    const failed = projectThreadEvents(null, [
+      createdEvent(),
+      makeEvent({
+        sequence: 2,
+        occurredAt: "2026-01-01T00:00:01.000Z",
+        type: "turn.started",
+        payload: { turnId: "turn_1", parentTurnId: null },
+      }),
+      makeEvent({
+        sequence: 3,
+        occurredAt: "2026-01-01T00:00:02.000Z",
+        type: "message.assistant.delta",
+        payload: {
+          turnId: "turn_1",
+          messageId: "turn_1:assistant:final",
+          channel: "final",
+          delta: "Partial answer",
+        },
+      }),
+      makeEvent({
+        sequence: 4,
+        occurredAt: "2026-01-01T00:00:02.500Z",
+        type: "message.assistant.completed",
+        payload: {
+          turnId: "turn_1",
+          messageId: "turn_1:assistant:final",
+          channel: "final",
+          reason: "incomplete",
+        },
+      }),
+      makeEvent({
+        sequence: 5,
+        occurredAt: "2026-01-01T00:00:03.000Z",
+        type: "turn.failed",
+        payload: { turnId: "turn_1", error: "Socket lost" },
+      }),
+    ]);
+
+    expect(failed.messages).toContainEqual(
+      expect.objectContaining({
+        id: "turn_1:assistant:final",
+        status: "failed",
+        reason: "incomplete",
       }),
     );
   });

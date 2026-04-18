@@ -2,7 +2,10 @@
 
 import type { Effect, Stream } from "effect";
 
-import type { AssistantOutputChannel } from "@magick/contracts/chat";
+import type {
+  AssistantCompletionReason,
+  AssistantOutputChannel,
+} from "@magick/contracts/chat";
 import type {
   ProviderCapabilities,
   ProviderKey,
@@ -17,6 +20,7 @@ export interface ConversationContextMessage {
   readonly role: "user" | "assistant";
   readonly channel: AssistantOutputChannel | null;
   readonly content: string;
+  readonly reason?: AssistantCompletionReason | null;
 }
 
 export type ConversationHistoryItem =
@@ -25,6 +29,7 @@ export type ConversationHistoryItem =
       readonly role: "user" | "assistant";
       readonly channel: AssistantOutputChannel | null;
       readonly content: string;
+      readonly reason?: AssistantCompletionReason;
     }
   | {
       readonly type: "tool_call";
@@ -65,11 +70,15 @@ export interface ProviderToolDefinition {
   readonly inputSchema: Record<string, unknown>;
 }
 
-export interface SubmitToolResultInput {
-  readonly turnId: string;
+export interface ProviderToolResult {
   readonly toolCallId: string;
   readonly toolName: string;
   readonly output: string;
+}
+
+export interface SubmitToolResultsInput {
+  readonly turnId: string;
+  readonly toolResults: readonly ProviderToolResult[];
   readonly instructions: string;
   readonly historyItems: readonly ConversationHistoryItem[];
   readonly tools: readonly ProviderToolDefinition[];
@@ -98,6 +107,7 @@ export type ProviderEvent =
       readonly turnId: string;
       readonly messageId: string;
       readonly channel: AssistantOutputChannel;
+      readonly reason: AssistantCompletionReason;
     }
   | {
       readonly type: "turn.completed";
@@ -137,8 +147,8 @@ export interface ProviderSessionHandle {
   readonly interruptTurn: (
     input: InterruptTurnInput,
   ) => Effect.Effect<void, ProviderFailureError>;
-  readonly submitToolResult: (
-    input: SubmitToolResultInput,
+  readonly submitToolResults: (
+    input: SubmitToolResultsInput,
   ) => Effect.Effect<
     Stream.Stream<ProviderEvent, ProviderFailureError>,
     ProviderFailureError

@@ -187,6 +187,7 @@ describe("ThreadOrchestrator", () => {
         role: "assistant",
         channel: "final",
         content: "Tool saw: helloworld",
+        reason: "stop",
       },
     ]);
   });
@@ -361,7 +362,7 @@ describe("ThreadOrchestrator", () => {
                 },
               ]),
             ),
-          submitToolResult: () => Effect.succeed(Stream.empty),
+          submitToolResults: () => Effect.succeed(Stream.empty),
           interruptTurn: () => Effect.void,
           dispose: () => Effect.void,
         } as unknown as ProviderSessionHandle),
@@ -371,7 +372,7 @@ describe("ThreadOrchestrator", () => {
           providerSessionRef: null,
           providerThreadRef: null,
           startTurn: () => Effect.die("unused"),
-          submitToolResult: () => Effect.succeed(Stream.empty),
+          submitToolResults: () => Effect.succeed(Stream.empty),
           interruptTurn: () => Effect.void,
           dispose: () => Effect.void,
         } as unknown as ProviderSessionHandle),

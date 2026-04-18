@@ -228,6 +228,7 @@ export class ThreadEventPersistence {
               turnId: providerEvent.turnId,
               messageId: providerEvent.messageId,
               channel: providerEvent.channel,
+              reason: providerEvent.reason,
             },
           },
         ]);

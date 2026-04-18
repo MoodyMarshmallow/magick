@@ -1,6 +1,9 @@
 // Provides a deterministic in-memory provider used for orchestration and transport tests.
 
-import type { AssistantOutputChannel } from "@magick/contracts/chat";
+import type {
+  AssistantCompletionReason,
+  AssistantOutputChannel,
+} from "@magick/contracts/chat";
 import type { ProviderCapabilities } from "@magick/contracts/provider";
 import { Effect, Option, Stream } from "effect";
 import type { ProviderFailureError } from "../../runtime/errors";
@@ -13,7 +16,7 @@ import type {
   ProviderSessionHandle,
   ResumeProviderSessionInput,
   StartTurnInput,
-  SubmitToolResultInput,
+  SubmitToolResultsInput,
 } from "../providerTypes";
 
 type FakeProviderMode = "stateful" | "stateless";
@@ -28,6 +31,7 @@ export type FakeProviderResponse =
   | FakeToolResponse;
 
 type FakeProviderResponseStep =
+  | string
   | {
       readonly channel: AssistantOutputChannel;
       readonly content: string;
@@ -55,11 +59,14 @@ class FakeProviderSession implements ProviderSessionHandle {
   readonly #interruptedTurns = new Set<string>();
   readonly #pendingToolContinuations = new Map<
     string,
-    {
-      readonly toolCallId: string;
-      readonly toolName: string;
-      readonly onResult: (output: string) => FakeProviderResponse;
-    }
+    Map<
+      string,
+      {
+        readonly toolCallId: string;
+        readonly toolName: string;
+        readonly onResult: (output: string) => FakeProviderResponse;
+      }
+    >
   >();
   readonly #chunkDelayMs: number;
   readonly #responder: (input: StartTurnInput) => FakeProviderResponse;
@@ -90,6 +97,7 @@ class FakeProviderSession implements ProviderSessionHandle {
     response:
       | string
       | { readonly channel: AssistantOutputChannel; readonly content: string },
+    reason: AssistantCompletionReason = "stop",
   ): Stream.Stream<ProviderEvent, ProviderFailureError> => {
     const turnMessageState = this.#turnMessageState.get(turnId) ?? {
       commentaryIndex: 0,
@@ -125,6 +133,7 @@ class FakeProviderSession implements ProviderSessionHandle {
         turnId,
         messageId,
         channel: message.channel,
+        reason,
       });
     }
 
@@ -189,9 +198,18 @@ class FakeProviderSession implements ProviderSessionHandle {
     }
 
     if (Array.isArray(response)) {
-      const streams = response.map((step) => {
+      const streams = response.map((step, index) => {
+        const nextStep = response[index + 1];
+        const reason: AssistantCompletionReason =
+          nextStep &&
+          typeof nextStep === "object" &&
+          nextStep !== null &&
+          "toolName" in nextStep
+            ? "tool_calls"
+            : "stop";
+
         if (typeof step === "string" || "channel" in step) {
-          return this.#streamTextResponse(turnId, step);
+          return this.#streamTextResponse(turnId, step, reason);
         }
 
         return this.#streamResponse(turnId, step);
@@ -228,11 +246,14 @@ class FakeProviderSession implements ProviderSessionHandle {
 
     const toolResponse = response as FakeToolResponse;
     const toolCallId = `${turnId}:tool:${toolResponse.toolName}`;
-    this.#pendingToolContinuations.set(turnId, {
+    const pendingContinuations =
+      this.#pendingToolContinuations.get(turnId) ?? new Map();
+    pendingContinuations.set(toolCallId, {
       toolCallId,
       toolName: toolResponse.toolName,
       onResult: toolResponse.onResult,
     });
+    this.#pendingToolContinuations.set(turnId, pendingContinuations);
 
     return Stream.succeed({
       type: "tool.call.requested" as const,
@@ -254,32 +275,55 @@ class FakeProviderSession implements ProviderSessionHandle {
       return this.#streamResponse(input.turnId, this.#responder(input));
     });
 
-  readonly submitToolResult = (
-    input: SubmitToolResultInput,
+  readonly submitToolResults = (
+    input: SubmitToolResultsInput,
   ): Effect.Effect<
     Stream.Stream<ProviderEvent, ProviderFailureError>,
     ProviderFailureError
   > =>
     Effect.sync(() => {
-      const pendingContinuation = this.#pendingToolContinuations.get(
+      const pendingContinuations = this.#pendingToolContinuations.get(
         input.turnId,
       );
-      if (
-        !pendingContinuation ||
-        pendingContinuation.toolCallId !== input.toolCallId ||
-        pendingContinuation.toolName !== input.toolName
-      ) {
+      if (!pendingContinuations || pendingContinuations.size === 0) {
         return Stream.succeed({
           type: "turn.failed" as const,
           turnId: input.turnId,
-          error: `Missing pending tool continuation for '${input.toolCallId}'.`,
+          error: `Missing pending tool continuations for '${input.turnId}'.`,
         } satisfies ProviderEvent);
       }
 
       this.#pendingToolContinuations.delete(input.turnId);
+      const toolResultsById = new Map(
+        input.toolResults.map((result) => [result.toolCallId, result]),
+      );
+      const pendingEntries = Array.from(pendingContinuations.values());
+      if (
+        pendingEntries.length !== input.toolResults.length ||
+        pendingEntries.some((pending) => {
+          const result = toolResultsById.get(pending.toolCallId);
+          return !result || result.toolName !== pending.toolName;
+        })
+      ) {
+        return Stream.succeed({
+          type: "turn.failed" as const,
+          turnId: input.turnId,
+          error: `Missing pending tool continuation results for '${input.turnId}'.`,
+        } satisfies ProviderEvent);
+      }
+
+      const nextResponses = pendingEntries.flatMap((pending) => {
+        const toolResult = toolResultsById.get(pending.toolCallId);
+        if (!toolResult) {
+          return [];
+        }
+        const response = pending.onResult(toolResult.output);
+        return Array.isArray(response) ? response : [response];
+      });
+
       return this.#streamResponse(
         input.turnId,
-        pendingContinuation.onResult(input.output),
+        nextResponses.length === 1 ? (nextResponses[0] ?? []) : nextResponses,
       );
     });
 

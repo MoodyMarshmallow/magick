@@ -37,7 +37,7 @@ describe("ProviderSessionRuntimeService", () => {
         providerThreadRef: null,
         startTurn: vi.fn(),
         interruptTurn: vi.fn(),
-        submitToolResult: vi.fn(),
+        submitToolResults: vi.fn(),
         dispose: vi.fn(),
       } as unknown as ProviderSessionHandle,
     };
@@ -88,7 +88,7 @@ describe("ProviderSessionRuntimeService", () => {
         providerThreadRef: "provider_thread_1",
         startTurn: vi.fn(),
         interruptTurn: vi.fn(),
-        submitToolResult: vi.fn(),
+        submitToolResults: vi.fn(),
         dispose: vi.fn(),
       } as unknown as ProviderSessionHandle),
     );
@@ -160,7 +160,7 @@ describe("ProviderSessionRuntimeService", () => {
         providerThreadRef: "provider_thread_1",
         startTurn: vi.fn(),
         interruptTurn: vi.fn(),
-        submitToolResult: vi.fn(),
+        submitToolResults: vi.fn(),
         dispose: vi.fn(),
       } as unknown as ProviderSessionHandle),
     );

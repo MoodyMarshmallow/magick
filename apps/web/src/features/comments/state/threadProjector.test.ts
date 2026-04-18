@@ -135,6 +135,70 @@ describe("projectThreadEvent", () => {
     expect(settled[0]?.messages.at(-1)?.status).toBe("complete");
   });
 
+  it("keeps incomplete assistant completions streaming until the turn fails", () => {
+    const initial = projectThreadEvent([], {
+      type: "snapshot.loaded",
+      threads: [summary],
+      activeThread: {
+        ...thread,
+        runtimeState: "running",
+        activeTurnId: "turn_1",
+        messages: [
+          ...thread.messages,
+          {
+            id: "turn_1:assistant:final",
+            role: "assistant",
+            channel: "final",
+            content: "Partial",
+            createdAt: "2026-04-02T10:01:00.000Z",
+            status: "streaming",
+            reason: null,
+          },
+        ],
+      },
+    });
+
+    const incomplete = projectThreadEvent(initial, {
+      type: "domain.event",
+      threadId: "thread_1",
+      event: {
+        eventId: "event_3",
+        threadId: "thread_1",
+        providerSessionId: "session_1",
+        sequence: 3,
+        occurredAt: "2026-04-02T10:02:00.000Z",
+        type: "message.assistant.completed",
+        payload: {
+          turnId: "turn_1",
+          messageId: "turn_1:assistant:final",
+          channel: "final",
+          reason: "incomplete",
+        },
+      },
+    });
+
+    expect(incomplete[0]?.messages.at(-1)?.status).toBe("streaming");
+
+    const failed = projectThreadEvent(incomplete, {
+      type: "domain.event",
+      threadId: "thread_1",
+      event: {
+        eventId: "event_4",
+        threadId: "thread_1",
+        providerSessionId: "session_1",
+        sequence: 4,
+        occurredAt: "2026-04-02T10:03:00.000Z",
+        type: "turn.failed",
+        payload: {
+          turnId: "turn_1",
+          error: "Socket lost",
+        },
+      },
+    });
+
+    expect(failed[0]?.messages.at(-1)?.status).toBe("failed");
+  });
+
   it("merges replayed assistant deltas into an existing completed message without duplication", () => {
     const initial = projectThreadEvent([], {
       type: "snapshot.loaded",
