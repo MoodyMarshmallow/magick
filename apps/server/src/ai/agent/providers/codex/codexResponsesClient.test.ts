@@ -3,12 +3,19 @@
 import { Cause, Effect, Exit, Option, Stream } from "effect";
 
 import type { CodexAuthClient } from "../../../auth/codex/codexAuthClient";
-import { CodexResponsesClient } from "./codexResponsesClient";
+import {
+  CodexResponsesClient,
+  setCodexTransportDebugEnabled,
+} from "./codexResponsesClient";
 
 const assistantInstructions = "Assistant instructions";
 const titleInstructions = "Title instructions";
 
 describe("CodexResponsesClient", () => {
+  afterEach(() => {
+    setCodexTransportDebugEnabled(false);
+  });
+
   it("refreshes auth when needed and streams response deltas", async () => {
     const authRepository = {
       get: vi.fn().mockReturnValue({
@@ -86,6 +93,81 @@ describe("CodexResponsesClient", () => {
     expect(typeof request.instructions).toBe("string");
     expect(request.store).toBe(false);
     expect(request.input[0].content[0].type).toBe("input_text");
+  });
+
+  it("emits truncated structured debug logs when transport debugging is enabled", async () => {
+    setCodexTransportDebugEnabled(true);
+    const debugSpy = vi.spyOn(console, "debug").mockImplementation(() => {});
+
+    try {
+      const authRepository = {
+        get: vi.fn().mockReturnValue({
+          providerKey: "codex",
+          authMode: "chatgpt",
+          accessToken: "access",
+          refreshToken: "refresh",
+          expiresAt: Date.now() + 120_000,
+          accountId: null,
+          email: "user@example.com",
+          planType: null,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        }),
+        upsert: vi.fn(),
+        delete: vi.fn(),
+      };
+
+      const longPrompt = "A".repeat(180);
+      const longDelta = "B".repeat(180);
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValue(
+          new Response(
+            `event: response.output_item.added\ndata: {"type":"response.output_item.added","item":{"type":"message","id":"msg_1","role":"assistant","phase":"final_answer"}}\n\nevent: response.output_text.delta\ndata: ${JSON.stringify({ type: "response.output_text.delta", delta: longDelta })}\n\nevent: response.output_item.done\ndata: ${JSON.stringify({ type: "response.output_item.done", item: { type: "message", id: "msg_1", role: "assistant", phase: "final_answer", content: [{ type: "output_text", text: longDelta }] } })}\n\nevent: response.completed\ndata: {"type":"response.completed"}\n\n`,
+            { status: 200, headers: { "Content-Type": "text/event-stream" } },
+          ),
+        );
+
+      const client = new CodexResponsesClient({
+        authRepository: authRepository as never,
+        authClient: {
+          refreshAccessToken: vi.fn(),
+        } as unknown as CodexAuthClient,
+        fetch: fetchMock as never,
+      });
+
+      await Effect.runPromise(
+        Stream.runCollect(
+          client.streamResponse({
+            messages: [{ role: "user", content: longPrompt }],
+            instructions: assistantInstructions,
+          }),
+        ),
+      );
+
+      const requestLog = String(debugSpy.mock.calls[0]?.[0] ?? "");
+      const responseLog = String(debugSpy.mock.calls[1]?.[0] ?? "");
+
+      expect(requestLog).toContain("[codex-stream] request");
+      expect(requestLog).toContain("kind: 'user_message'");
+      expect(requestLog).toContain("contentLength: 180");
+      expect(requestLog).toContain(
+        `contentTailPreview: '...${"A".repeat(120)}'`,
+      );
+      expect(requestLog).toContain("instruction:");
+      expect(requestLog).toContain("tailPreview:");
+
+      expect(responseLog).toContain("[codex-stream] response.message");
+      expect(responseLog).toContain("kind: 'assistant_message'");
+      expect(responseLog).toContain("channel: 'final'");
+      expect(responseLog).toContain("contentLength: 180");
+      expect(responseLog).toContain(
+        `contentTailPreview: '...${"B".repeat(120)}'`,
+      );
+      expect(debugSpy).toHaveBeenCalledTimes(2);
+    } finally {
+      debugSpy.mockRestore();
+    }
   });
 
   it("serializes assistant history as output_text when rebuilding context", async () => {

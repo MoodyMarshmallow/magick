@@ -1,5 +1,7 @@
 // Executes direct Codex HTTP requests, refreshes auth when needed, and parses streaming responses.
 
+import { inspect } from "node:util";
+
 import { Effect, Stream } from "effect";
 
 import type { AssistantOutputChannel } from "@magick/contracts/chat";
@@ -12,6 +14,13 @@ import { ProviderFailureError } from "../../runtime/errors";
 
 const CODEX_API_ENDPOINT = "https://chatgpt.com/backend-api/codex/responses";
 const REFRESH_SAFETY_MARGIN_MS = 60_000;
+const DEBUG_LOG_TEXT_LIMIT = 120;
+let debugAgentTransportEnabled = false;
+
+export const setCodexTransportDebugEnabled = (enabled: boolean): void => {
+  debugAgentTransportEnabled = enabled;
+};
+
 export interface CodexResponsesClientOptions {
   readonly fetch?: typeof fetch;
   readonly endpoint?: string;
@@ -81,15 +90,74 @@ const toProviderFailure = (code: string, detail: string, retryable = true) =>
     retryable,
   });
 
-const DEBUG_STREAM = process.env.MAGICK_CODEX_DEBUG === "1";
+const isDebugStreamEnabled = (): boolean => debugAgentTransportEnabled;
 
 const logDebug = (label: string, payload: unknown): void => {
-  if (!DEBUG_STREAM) {
+  if (!isDebugStreamEnabled()) {
     return;
   }
 
-  console.debug(`[codex-stream] ${label}`, payload);
+  console.debug(
+    `[codex-stream] ${label} ${inspect(
+      {
+        timestamp: nowIso(),
+        payload,
+      },
+      {
+        depth: null,
+        colors: false,
+        compact: false,
+        breakLength: 100,
+      },
+    )}`,
+  );
 };
+
+const tailPreviewForLog = (
+  value: string,
+  limit = DEBUG_LOG_TEXT_LIMIT,
+): string => {
+  if (value.length <= limit) {
+    return value;
+  }
+
+  return `...${value.slice(-limit)}`;
+};
+
+const summarizeUnknownValue = (value: unknown) => {
+  if (typeof value === "string") {
+    return {
+      kind: "string",
+      length: value.length,
+      tailPreview: tailPreviewForLog(value),
+    } as const;
+  }
+
+  if (
+    typeof value === "number" ||
+    typeof value === "boolean" ||
+    value === null ||
+    value === undefined
+  ) {
+    return value;
+  }
+
+  try {
+    const serialized = JSON.stringify(value);
+    return {
+      kind: Array.isArray(value) ? "array" : "object",
+      serializedLength: serialized.length,
+      tailPreview: tailPreviewForLog(serialized),
+    } as const;
+  } catch {
+    return { kind: typeof value, tailPreview: "[unserializable]" } as const;
+  }
+};
+
+const summarizeInstructionText = (instructions: string) => ({
+  length: instructions.length,
+  tailPreview: tailPreviewForLog(instructions),
+});
 
 const summarizeRequestMessages = (
   messages: readonly (
@@ -97,16 +165,44 @@ const summarizeRequestMessages = (
     | CodexToolCallMessage
     | CodexToolResultMessage
   )[],
-): readonly string[] =>
+): readonly Record<string, unknown>[] =>
   messages.map((message) => {
     if ("type" in message) {
       return message.type === "function_call"
-        ? `tool_call:${message.name}`
-        : `tool_result:${message.callId}`;
+        ? {
+            kind: "tool_call",
+            toolName: message.name,
+            callId: message.callId,
+            input: summarizeUnknownValue(message.input),
+          }
+        : {
+            kind: "tool_result",
+            callId: message.callId,
+            outputLength: message.output.length,
+            outputTailPreview: tailPreviewForLog(message.output),
+          };
     }
 
-    return `${message.role}:${message.content.slice(0, 40)}`;
+    return {
+      kind: message.role === "user" ? "user_message" : "assistant_message",
+      role: message.role,
+      channel: message.channel ?? null,
+      contentLength: message.content.length,
+      contentTailPreview: tailPreviewForLog(message.content),
+    };
   });
+
+const summarizeCompletedAssistantMessage = (args: {
+  readonly itemKey: string;
+  readonly channel: AssistantOutputChannel;
+  readonly content: string;
+}): Record<string, unknown> => ({
+  kind: "assistant_message",
+  itemKey: args.itemKey,
+  channel: args.channel,
+  contentLength: args.content.length,
+  contentTailPreview: tailPreviewForLog(args.content),
+});
 
 const parseSseMessages = async function* (
   stream: ReadableStream<Uint8Array>,
@@ -327,7 +423,6 @@ const parseCodexStreamMessage = (
 
   const parsed = JSON.parse(message.data) as Record<string, unknown>;
   const type = String(parsed.type ?? message.event ?? "");
-  logDebug("event", { event: message.event, type, payload: parsed });
 
   switch (type) {
     case "response.created":
@@ -434,7 +529,6 @@ const parseCodexStreamMessage = (
     case "error":
       return [{ type: "turn.failed", error: extractError(parsed) }];
     default:
-      logDebug("ignored", { event: message.event, type, payload: parsed });
       return [];
   }
 };
@@ -579,12 +673,9 @@ export class CodexResponsesClient {
     readonly instructions: string;
   }): Stream.Stream<CodexStreamEvent, ProviderFailureError> {
     logDebug("request", {
-      messageCount: input.messages.length,
       messages: summarizeRequestMessages(input.messages),
+      instruction: summarizeInstructionText(input.instructions),
       toolNames: input.tools?.map((tool) => tool.name) ?? [],
-      continuation:
-        input.messages.length > 0 &&
-        input.messages.every((message) => "type" in message),
     });
 
     const execute = this.ensureAuthenticated().pipe(
@@ -697,6 +788,7 @@ export class CodexResponsesClient {
           ).pipe(
             Stream.flatMap(
               (() => {
+                const messageContentByItemKey = new Map<string, string>();
                 const activeAssistantItems = new Map<
                   string,
                   ActiveAssistantOutputItem
@@ -705,6 +797,33 @@ export class CodexResponsesClient {
                 let responseCompleted = false;
                 let terminalFailureSeen = false;
                 let finalItemKey: string | null = null;
+
+                const recordStreamEvent = (event: CodexStreamEvent): void => {
+                  switch (event.type) {
+                    case "output.delta":
+                      messageContentByItemKey.set(
+                        event.itemKey,
+                        `${messageContentByItemKey.get(event.itemKey) ?? ""}${event.delta}`,
+                      );
+                      return;
+                    case "output.message.completed": {
+                      const fullContent =
+                        messageContentByItemKey.get(event.itemKey) ?? "";
+                      messageContentByItemKey.delete(event.itemKey);
+                      logDebug(
+                        "response.message",
+                        summarizeCompletedAssistantMessage({
+                          itemKey: event.itemKey,
+                          channel: event.channel,
+                          content: fullContent,
+                        }),
+                      );
+                      return;
+                    }
+                    default:
+                      return;
+                  }
+                };
 
                 const ensureAssistantItem = (args: {
                   readonly itemKey: string;
@@ -879,6 +998,10 @@ export class CodexResponsesClient {
                         error instanceof Error ? error.message : String(error),
                       ),
                     );
+                  }
+
+                  for (const event of nextEvents) {
+                    recordStreamEvent(event);
                   }
 
                   return Stream.fromIterable(nextEvents);

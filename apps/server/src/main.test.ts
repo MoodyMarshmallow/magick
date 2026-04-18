@@ -1,4 +1,30 @@
-import { resolveBackendBinding } from "./main";
+import {
+  AGENT_TRANSPORT_DEBUG_FLAG,
+  applyBackendRuntimeOptions,
+  resolveBackendBinding,
+  resolveBackendRuntimeOptions,
+} from "./main";
+
+const { setCodexTransportDebugEnabledMock } = vi.hoisted(() => ({
+  setCodexTransportDebugEnabledMock: vi.fn(),
+}));
+
+vi.mock("./ai/agent/providers/codex/codexResponsesClient", () => ({
+  setCodexTransportDebugEnabled: setCodexTransportDebugEnabledMock,
+}));
+
+vi.mock("./index", () => ({
+  attachWebSocketServer: vi.fn(),
+  createBackendServices: vi.fn(() => ({
+    providerAuthService: {},
+    providerRegistry: {},
+    replayService: {},
+    threadOrchestrator: {},
+    connections: {},
+    database: {},
+    databasePath: ":memory:",
+  })),
+}));
 
 describe("resolveBackendBinding", () => {
   it("uses the default local binding", () => {
@@ -26,5 +52,41 @@ describe("resolveBackendBinding", () => {
         MAGICK_BACKEND_PORT: "99999",
       }),
     ).toThrow("Invalid MAGICK_BACKEND_PORT");
+  });
+});
+
+describe("resolveBackendRuntimeOptions", () => {
+  it("enables agent transport debugging when the flag is present", () => {
+    expect(resolveBackendRuntimeOptions([AGENT_TRANSPORT_DEBUG_FLAG])).toEqual({
+      debugAgentTransport: true,
+    });
+  });
+
+  it("leaves agent transport debugging disabled by default", () => {
+    expect(resolveBackendRuntimeOptions([])).toEqual({
+      debugAgentTransport: false,
+    });
+  });
+});
+
+describe("applyBackendRuntimeOptions", () => {
+  beforeEach(() => {
+    setCodexTransportDebugEnabledMock.mockReset();
+  });
+
+  it("enables Codex transport debugging when the run flag is enabled", () => {
+    applyBackendRuntimeOptions({
+      debugAgentTransport: true,
+    });
+
+    expect(setCodexTransportDebugEnabledMock).toHaveBeenCalledWith(true);
+  });
+
+  it("disables Codex transport debugging when the run flag is not enabled", () => {
+    applyBackendRuntimeOptions({
+      debugAgentTransport: false,
+    });
+
+    expect(setCodexTransportDebugEnabledMock).toHaveBeenCalledWith(false);
   });
 });

@@ -1,5 +1,8 @@
 import { createServer } from "node:http";
+import { setCodexTransportDebugEnabled } from "./ai/agent/providers/codex/codexResponsesClient";
 import { attachWebSocketServer, createBackendServices } from "./index";
+
+export const AGENT_TRANSPORT_DEBUG_FLAG = "--debug-agent-transport";
 
 export const resolveBackendBinding = (env: NodeJS.ProcessEnv = process.env) => {
   const host = env.MAGICK_BACKEND_HOST?.trim() || "127.0.0.1";
@@ -18,9 +21,27 @@ export const resolveBackendBinding = (env: NodeJS.ProcessEnv = process.env) => {
   } as const;
 };
 
+export const resolveBackendRuntimeOptions = (
+  argv: readonly string[] = process.argv.slice(2),
+) => {
+  return {
+    debugAgentTransport: argv.includes(AGENT_TRANSPORT_DEBUG_FLAG),
+  } as const;
+};
+
+export const applyBackendRuntimeOptions = (
+  runtimeOptions: ReturnType<typeof resolveBackendRuntimeOptions>,
+): void => {
+  setCodexTransportDebugEnabled(runtimeOptions.debugAgentTransport);
+};
+
 export const startBackendServer = async (
   env: NodeJS.ProcessEnv = process.env,
+  argv: readonly string[] = process.argv.slice(2),
 ) => {
+  const runtimeOptions = resolveBackendRuntimeOptions(argv);
+  applyBackendRuntimeOptions(runtimeOptions);
+
   const services = createBackendServices();
   const server = createServer();
   attachWebSocketServer(server, services);
@@ -33,15 +54,19 @@ export const startBackendServer = async (
 
   return {
     binding,
+    runtimeOptions,
     server,
   } as const;
 };
 
 const run = async () => {
-  const { binding, server } = await startBackendServer();
+  const { binding, runtimeOptions, server } = await startBackendServer();
   process.stdout.write(
     `Magick backend listening on ws://${binding.host}:${binding.port}\n`,
   );
+  if (runtimeOptions.debugAgentTransport) {
+    process.stdout.write("Agent transport debug logging enabled\n");
+  }
 
   const shutdown = () => {
     server.close(() => {

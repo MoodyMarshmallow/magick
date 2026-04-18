@@ -47,3 +47,15 @@ bun run server:start
 ```
 
 Starts the local backend server on `ws://127.0.0.1:8787`.
+
+```bash
+bun run server:start -- --debug-agent-transport
+```
+
+Starts the local backend server with verbose agent transport debug logging for Codex request and stream summaries.
+
+```bash
+bun run server:dev -- --debug-agent-transport
+```
+
+Starts the watched backend server with the same agent transport debug logging enabled.
