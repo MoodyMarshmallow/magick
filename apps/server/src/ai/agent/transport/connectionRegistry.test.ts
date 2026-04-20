@@ -84,4 +84,43 @@ describe("ConnectionRegistry", () => {
     expect(receivedA).toHaveLength(1);
     expect(receivedB).toHaveLength(1);
   });
+
+  it("drops failed connections without failing delivery to healthy subscribers", async () => {
+    const registry = new ConnectionRegistry();
+    const received: unknown[] = [];
+
+    registry.register({
+      id: "conn_bad",
+      send: async () => {
+        throw new Error("socket closed");
+      },
+    });
+    registry.register({
+      id: "conn_good",
+      send: async (message) => {
+        received.push(message);
+      },
+    });
+
+    registry.subscribeThread("conn_bad", "thread_1");
+    registry.subscribeThread("conn_good", "thread_1");
+
+    await expect(
+      registry.publishToThread("thread_1", {
+        channel: "transport.connectionState",
+        state: "connected",
+        detail: "ok",
+      }),
+    ).resolves.toBeUndefined();
+
+    await expect(
+      registry.broadcast({
+        channel: "transport.connectionState",
+        state: "connected",
+        detail: "ok",
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(received).toHaveLength(2);
+  });
 });

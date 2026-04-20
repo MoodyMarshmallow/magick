@@ -37,6 +37,20 @@ class ProviderStreamAbortError extends Error {
   }
 }
 
+type PendingToolCallEvent = Extract<
+  ProviderEvent,
+  { readonly type: "tool.call.requested" }
+>;
+
+type ProviderStreamDrainOutcome =
+  | {
+      readonly kind: "completed";
+      readonly pendingToolCalls: readonly PendingToolCallEvent[];
+    }
+  | {
+      readonly kind: "suppressed";
+    };
+
 export class ThreadTurnRunner {
   readonly #runtimeState: RuntimeStateService;
   readonly #clock: ClockService;
@@ -136,10 +150,7 @@ export class ThreadTurnRunner {
 
   readonly #recordToolCallRequest = (
     thread: ThreadRecord,
-    providerEvent: Extract<
-      ProviderEvent,
-      { readonly type: "tool.call.requested" }
-    >,
+    providerEvent: PendingToolCallEvent,
   ): Effect.Effect<
     void,
     import("../../runtime/errors").BackendError | ProviderStreamAbortError
@@ -206,10 +217,7 @@ export class ThreadTurnRunner {
     thread: ThreadRecord,
     runtime: ProviderSessionRuntime,
     turnId: string,
-    toolCalls: readonly Extract<
-      ProviderEvent,
-      { readonly type: "tool.call.requested" }
-    >[],
+    toolCalls: readonly PendingToolCallEvent[],
     readFilesForTurn: Set<string>,
   ): Effect.Effect<void, import("../../runtime/errors").BackendError> =>
     Effect.gen(
@@ -340,55 +348,120 @@ export class ThreadTurnRunner {
       import("../../runtime/errors").BackendError
     >,
     readFilesForTurn = new Set<string>(),
+  ): Effect.Effect<
+    ProviderStreamDrainOutcome,
+    import("../../runtime/errors").BackendError
+  > =>
+    Effect.gen(
+      function* (this: ThreadTurnRunner) {
+        const pendingToolCalls: PendingToolCallEvent[] = [];
+
+        const streamOutcome = yield* Stream.runForEach(
+          stream,
+          (providerEvent) =>
+            providerEvent.type === "tool.call.requested"
+              ? this.#recordToolCallRequest(thread, providerEvent).pipe(
+                  Effect.tap(() =>
+                    Effect.sync(() => {
+                      pendingToolCalls.push(providerEvent);
+                    }),
+                  ),
+                )
+              : this.#applyNonToolProviderEvent(thread, providerEvent),
+        ).pipe(
+          Effect.catchAll((error) => {
+            if (error instanceof ProviderStreamAbortError) {
+              return Effect.succeed({
+                kind: "suppressed",
+              } satisfies ProviderStreamDrainOutcome);
+            }
+
+            return this.#eventPersistence
+              .persistAndProject(thread.id, [
+                {
+                  eventId: this.#idGenerator.next("event"),
+                  threadId: thread.id,
+                  providerSessionId: thread.providerSessionId,
+                  occurredAt: this.#clock.now(),
+                  type: "turn.failed",
+                  payload: {
+                    turnId,
+                    error: backendErrorMessage(error),
+                  },
+                },
+              ])
+              .pipe(
+                Effect.as({
+                  kind: "suppressed",
+                } satisfies ProviderStreamDrainOutcome),
+              );
+          }),
+        );
+
+        if (streamOutcome) {
+          return streamOutcome;
+        }
+
+        return {
+          kind: "completed",
+          pendingToolCalls,
+        } satisfies ProviderStreamDrainOutcome;
+      }.bind(this),
+    );
+
+  readonly #continueAfterStream = (
+    thread: ThreadRecord,
+    runtime: ProviderSessionRuntime,
+    turnId: string,
+    outcome: ProviderStreamDrainOutcome,
+    readFilesForTurn = new Set<string>(),
   ): Effect.Effect<void, import("../../runtime/errors").BackendError> =>
     Effect.gen(
       function* (this: ThreadTurnRunner) {
-        const pendingToolCalls: Extract<
-          ProviderEvent,
-          { readonly type: "tool.call.requested" }
-        >[] = [];
+        if (
+          outcome.kind !== "completed" ||
+          outcome.pendingToolCalls.length === 0
+        ) {
+          return;
+        }
 
-        yield* Stream.runForEach(stream, (providerEvent) =>
-          providerEvent.type === "tool.call.requested"
-            ? this.#recordToolCallRequest(thread, providerEvent).pipe(
-                Effect.tap(() =>
-                  Effect.sync(() => {
-                    pendingToolCalls.push(providerEvent);
-                  }),
-                ),
-              )
-            : this.#applyNonToolProviderEvent(thread, providerEvent),
-        ).pipe(
-          Effect.catchAll((error) =>
-            error instanceof ProviderStreamAbortError
-              ? Effect.void
-              : this.#eventPersistence
-                  .persistAndProject(thread.id, [
-                    {
-                      eventId: this.#idGenerator.next("event"),
-                      threadId: thread.id,
-                      providerSessionId: thread.providerSessionId,
-                      occurredAt: this.#clock.now(),
-                      type: "turn.failed",
-                      payload: {
-                        turnId,
-                        error: backendErrorMessage(error),
-                      },
-                    },
-                  ])
-                  .pipe(Effect.asVoid),
-          ),
+        yield* this.#executeToolBatch(
+          thread,
+          runtime,
+          turnId,
+          outcome.pendingToolCalls,
+          readFilesForTurn,
+        );
+      }.bind(this),
+    );
+
+  readonly #runProviderStream = (
+    thread: ThreadRecord,
+    runtime: ProviderSessionRuntime,
+    turnId: string,
+    stream: Stream.Stream<
+      ProviderEvent,
+      import("../../runtime/errors").BackendError
+    >,
+    readFilesForTurn = new Set<string>(),
+  ): Effect.Effect<void, import("../../runtime/errors").BackendError> =>
+    Effect.gen(
+      function* (this: ThreadTurnRunner) {
+        const drainOutcome = yield* this.#drainProviderStream(
+          thread,
+          runtime,
+          turnId,
+          stream,
+          readFilesForTurn,
         );
 
-        if (pendingToolCalls.length > 0) {
-          yield* this.#executeToolBatch(
-            thread,
-            runtime,
-            turnId,
-            pendingToolCalls,
-            readFilesForTurn,
-          );
-        }
+        yield* this.#continueAfterStream(
+          thread,
+          runtime,
+          turnId,
+          drainOutcome,
+          readFilesForTurn,
+        );
       }.bind(this),
     );
 
@@ -468,7 +541,7 @@ export class ThreadTurnRunner {
           tools: this.#listProviderTools(),
         });
 
-        yield* this.#drainProviderStream(thread, runtime, turnId, stream).pipe(
+        yield* this.#runProviderStream(thread, runtime, turnId, stream).pipe(
           Effect.catchAll((error) =>
             error instanceof ProviderStreamAbortError
               ? Effect.void

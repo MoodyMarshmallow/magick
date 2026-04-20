@@ -3,7 +3,7 @@
 import type { Server } from "node:http";
 
 import { Cause, Effect, Exit, Option } from "effect";
-import { type WebSocket, WebSocketServer } from "ws";
+import { WebSocket, WebSocketServer } from "ws";
 
 import type { DomainEvent } from "@magick/contracts/chat";
 import type { ProviderAuthState } from "@magick/contracts/provider";
@@ -39,7 +39,20 @@ class WsPushConnection implements PushConnection {
   }
 
   async send(message: unknown): Promise<void> {
-    this.#socket.send(JSON.stringify(message));
+    if (this.#socket.readyState !== WebSocket.OPEN) {
+      throw new Error("WebSocket is not open");
+    }
+
+    await new Promise<void>((resolve, reject) => {
+      this.#socket.send(JSON.stringify(message), (error) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+
+        resolve();
+      });
+    });
   }
 }
 

@@ -419,6 +419,85 @@ describe("ThreadTurnRunner", () => {
       failingContext.runtimeState.getActiveTurn(failingThread.threadId),
     ).toBeUndefined();
   });
+  it("does not execute pending tool calls after the provider stream fails", async () => {
+    const submitToolResults = vi.fn(() => Effect.succeed(Stream.empty));
+    const provider = {
+      key: "tool-failure-after-request",
+      listCapabilities: () => ({
+        supportsNativeResume: false,
+        supportsInterrupt: true,
+        supportsAttachments: false,
+        supportsToolCalls: true,
+        supportsApprovals: false,
+        supportsServerSideSessions: false,
+      }),
+      getResumeStrategy: () => "rebuild" as const,
+      generateThreadTitle: () => Effect.succeed(null),
+      createSession: ({ sessionId }: { readonly sessionId: string }) =>
+        Effect.succeed({
+          sessionId,
+          providerSessionRef: null,
+          providerThreadRef: null,
+          startTurn: () =>
+            Effect.succeed(
+              Stream.concat(
+                Stream.fromIterable([
+                  {
+                    type: "tool.call.requested" as const,
+                    turnId: "turn_1",
+                    toolCallId: "call_1",
+                    toolName: "read",
+                    input: { path: "notes.md" },
+                  },
+                ]),
+                Stream.fail(
+                  new ProviderFailureError({
+                    providerKey: "tool-failure-after-request",
+                    code: "stream_failed",
+                    detail: "stream failed after requesting a tool",
+                    retryable: false,
+                  }),
+                ),
+              ),
+            ),
+          interruptTurn: () => Effect.void,
+          submitToolResults,
+          dispose: () => Effect.void,
+        }),
+      resumeSession: ({ sessionId }: { readonly sessionId: string }) =>
+        Effect.succeed({
+          sessionId,
+          providerSessionRef: null,
+          providerThreadRef: null,
+          startTurn: () => Effect.succeed(Stream.empty),
+          interruptTurn: () => Effect.void,
+          submitToolResults,
+          dispose: () => Effect.void,
+        }),
+    };
+
+    const context = createThreadServicesContext({ adapters: [provider] });
+    const executeTool = vi.spyOn(context.toolExecutor, "execute");
+    const thread = await run(
+      context.crudService.createThreadEffect({
+        workspaceId: "workspace_1",
+        providerKey: provider.key,
+      }),
+    );
+
+    const failed = await run(
+      context.turnRunner.sendMessage(thread.threadId, "Try a tool"),
+    );
+
+    expect(failed.runtimeState).toBe("failed");
+    expect(failed.lastError).toBe("stream failed after requesting a tool");
+    expect(executeTool).not.toHaveBeenCalled();
+    expect(submitToolResults).not.toHaveBeenCalled();
+    expect(failed.toolActivities[0]).toMatchObject({
+      toolCallId: "call_1",
+      status: "requested",
+    });
+  });
 
   it("returns the current snapshot when stopTurn is called without an active turn or throws if runtime is missing", async () => {
     const adapter = new FakeProviderAdapter({ mode: "stateful" });

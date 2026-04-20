@@ -11,6 +11,17 @@ export class ConnectionRegistry {
   readonly #connections = new Map<string, PushConnection>();
   readonly #threadSubscriptions = new Map<string, Set<string>>();
 
+  async #sendToConnection(
+    connection: PushConnection,
+    message: ServerPushEnvelope,
+  ): Promise<void> {
+    try {
+      await connection.send(message);
+    } catch {
+      this.unregister(connection.id);
+    }
+  }
+
   register(connection: PushConnection): void {
     this.#connections.set(connection.id, connection);
   }
@@ -44,14 +55,14 @@ export class ConnectionRegistry {
         .filter((connection): connection is PushConnection =>
           Boolean(connection),
         )
-        .map((connection) => connection.send(message)),
+        .map((connection) => this.#sendToConnection(connection, message)),
     );
   }
 
   async broadcast(message: ServerPushEnvelope): Promise<void> {
     await Promise.all(
       [...this.#connections.values()].map((connection) =>
-        connection.send(message),
+        this.#sendToConnection(connection, message),
       ),
     );
   }
