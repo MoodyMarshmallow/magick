@@ -9,17 +9,20 @@ const { setCodexTransportDebugEnabledMock } = vi.hoisted(() => ({
   setCodexTransportDebugEnabledMock: vi.fn(),
 }));
 
-vi.mock("./ai/agent/providers/codex/codexResponsesClient", () => ({
-  setCodexTransportDebugEnabled: setCodexTransportDebugEnabledMock,
-}));
+vi.mock(
+  "./ai/agent/modules/provider-runtime/codex/codexResponsesClient",
+  () => ({
+    setCodexTransportDebugEnabled: setCodexTransportDebugEnabledMock,
+  }),
+);
 
 vi.mock("./index", () => ({
   attachWebSocketServer: vi.fn(),
   createBackendServices: vi.fn(() => ({
     providerAuthService: {},
     providerRegistry: {},
-    replayService: {},
-    threadOrchestrator: {},
+    contextCore: {},
+    assistantTurnEngine: {},
     connections: {},
     database: {},
     databasePath: ":memory:",

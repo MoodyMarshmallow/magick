@@ -1,6 +1,5 @@
 {
   "compilerOptions": {
-    "baseUrl": ".",
     "target": "ES2022",
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "module": "ESNext",
@@ -17,19 +16,19 @@
     "skipLibCheck": true,
     "jsx": "react-jsx",
     "paths": {
-      "@magick/contracts/chat": ["packages/contracts/src/chat.ts"],
-      "@magick/contracts/provider": ["packages/contracts/src/provider.ts"],
-      "@magick/contracts/ws": ["packages/contracts/src/ws.ts"],
-      "@magick/shared/errors": ["packages/shared/src/errors.ts"],
-      "@magick/shared/id": ["packages/shared/src/id.ts"],
+      "@magick/contracts/chat": ["./packages/contracts/src/chat.ts"],
+      "@magick/contracts/provider": ["./packages/contracts/src/provider.ts"],
+      "@magick/contracts/ws": ["./packages/contracts/src/ws.ts"],
+      "@magick/shared/errors": ["./packages/shared/src/errors.ts"],
+      "@magick/shared/id": ["./packages/shared/src/id.ts"],
       "@magick/shared/localWorkspace": [
-        "packages/shared/src/localWorkspace.ts"
+        "./packages/shared/src/localWorkspace.ts"
       ],
       "@magick/shared/localWorkspaceNode": [
-        "packages/shared/src/localWorkspaceNode.ts"
+        "./packages/shared/src/localWorkspaceNode.ts"
       ],
-      "@magick/shared/threadTitle": ["packages/shared/src/threadTitle.ts"],
-      "@magick/shared/time": ["packages/shared/src/time.ts"]
+      "@magick/shared/threadTitle": ["./packages/shared/src/threadTitle.ts"],
+      "@magick/shared/time": ["./packages/shared/src/time.ts"]
     },
     "types": ["bun-types", "vitest/globals"]
   },

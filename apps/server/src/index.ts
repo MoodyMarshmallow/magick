@@ -3,31 +3,26 @@ import type { Server } from "node:http";
 import { dirname, join, resolve } from "node:path";
 import { resolveLocalWorkspaceDir } from "../../../packages/shared/src/localWorkspaceNode";
 
+import { AssistantTurnEngine } from "./ai/agent/modules/assistant-turn-engine/assistantTurnEngine";
+import { ContextCore } from "./ai/agent/modules/context-core/contextCore";
 import {
   CodexProviderAdapter,
   createCodexRuntimeFactory,
-} from "./ai/agent/providers/codex/codexProviderAdapter";
+} from "./ai/agent/modules/provider-runtime/codex/codexProviderAdapter";
 import {
   FakeProviderAdapter,
   type FakeProviderResponse,
-} from "./ai/agent/providers/fake/fakeProviderAdapter";
-import { ProviderRegistry } from "./ai/agent/providers/providerRegistry";
-import type { ProviderAdapter } from "./ai/agent/providers/providerTypes";
-import {
-  createClock,
-  createIdGenerator,
-  createRuntimeState,
-} from "./ai/agent/runtime/runtime";
-import type { EventPublisherService } from "./ai/agent/runtime/runtime";
-import { EventStore } from "./ai/agent/threads/persistence/eventStore";
-import { ProviderSessionRepository } from "./ai/agent/threads/persistence/providerSessionRepository";
-import { ThreadRepository } from "./ai/agent/threads/persistence/threadRepository";
-import { ReplayService } from "./ai/agent/threads/replayService";
-import { ThreadOrchestrator } from "./ai/agent/threads/threadOrchestrator";
-import { ToolExecutor } from "./ai/agent/tools/toolExecutor";
-import { WebContentService } from "./ai/agent/tools/webContentService";
-import { ConnectionRegistry } from "./ai/agent/transport/connectionRegistry";
-import { WebSocketCommandServer } from "./ai/agent/transport/wsServer";
+} from "./ai/agent/modules/provider-runtime/fake/fakeProviderAdapter";
+import { DEFAULT_ASSISTANT_INSTRUCTIONS } from "./ai/agent/modules/provider-runtime/providerPrompts";
+import { ProviderRegistry } from "./ai/agent/modules/provider-runtime/providerRegistry";
+import { ProviderRuntime } from "./ai/agent/modules/provider-runtime/providerRuntime";
+import type { ProviderAdapter } from "./ai/agent/modules/provider-runtime/providerTypes";
+import { ToolExecutor } from "./ai/agent/modules/tool-runtime/toolExecutor";
+import { ToolRuntime } from "./ai/agent/modules/tool-runtime/toolRuntime";
+import { WebContentService } from "./ai/agent/modules/tool-runtime/webContentService";
+import { ConnectionRegistry } from "./ai/agent/modules/transport/connectionRegistry";
+import { WebSocketCommandServer } from "./ai/agent/modules/transport/wsServer";
+import { createClock, createIdGenerator } from "./ai/agent/shared/runtime";
 import { ProviderAuthRepositoryClient } from "./ai/auth/providerAuthRepository";
 import { ProviderAuthService } from "./ai/auth/providerAuthService";
 import { DocumentService } from "./editor/documents/documentService";
@@ -42,8 +37,8 @@ export interface BackendServices {
   readonly connections: ConnectionRegistry;
   readonly providerRegistry: ProviderRegistry;
   readonly providerAuthService: ProviderAuthService;
-  readonly replayService: ReplayService;
-  readonly threadOrchestrator: ThreadOrchestrator;
+  readonly contextCore: ContextCore;
+  readonly assistantTurnEngine: AssistantTurnEngine;
 }
 
 export interface BackendServiceOptions {
@@ -99,13 +94,7 @@ const createAiServices = (args: {
 }) => {
   const clock = createClock();
   const idGenerator = createIdGenerator();
-  const runtimeState = createRuntimeState();
-  const eventStore = new EventStore(args.database);
   const providerAuthRepository = new ProviderAuthRepositoryClient(
-    args.database,
-  );
-  const threadRepository = new ThreadRepository(args.database);
-  const providerSessionRepository = new ProviderSessionRepository(
     args.database,
   );
   const webContent = new WebContentService();
@@ -173,43 +162,45 @@ const createAiServices = (args: {
   }
 
   const providerRegistry = new ProviderRegistry(providers);
-  const publisher: EventPublisherService = {
-    publish: async (events) => {
-      await Promise.all(
-        events.map((event) =>
-          args.connections.publishToThread(event.threadId, {
-            channel: "orchestration.domainEvent",
-            threadId: event.threadId,
-            event,
-          }),
-        ),
-      );
+  const contextCore = new ContextCore({
+    database: args.database,
+    clock,
+    idGenerator,
+  });
+  contextCore.bootstrap({ instructions: DEFAULT_ASSISTANT_INSTRUCTIONS });
+  const toolRuntime = new ToolRuntime({
+    toolExecutor,
+    documents: args.documents,
+    workspaceQuery: args.workspaceQuery,
+    webContent,
+  });
+  const providerRuntime = new ProviderRuntime({ providerRegistry });
+  const assistantTurnEngine = new AssistantTurnEngine({
+    contextCore,
+    providerRuntime,
+    toolRuntime,
+    clock,
+    idGenerator,
+    defaultAssistantInstructions: DEFAULT_ASSISTANT_INSTRUCTIONS,
+    publishBranchUpdate: async (branch) => {
+      await args.connections.publishToBookmark(branch.bookmarkId, {
+        channel: "branch.updated",
+        bookmarkId: branch.bookmarkId,
+        update: {
+          bookmarkId: branch.bookmarkId,
+          branch,
+        },
+      });
     },
-  };
+  });
 
   return {
     providerRegistry,
     providerAuthService: new ProviderAuthService({
       authRepository: providerAuthRepository,
     }),
-    replayService: new ReplayService({
-      eventStore,
-      threadRepository,
-    }),
-    threadOrchestrator: new ThreadOrchestrator({
-      providerRegistry,
-      eventStore,
-      threadRepository,
-      providerSessionRepository,
-      publisher,
-      runtimeState,
-      clock,
-      idGenerator,
-      toolExecutor,
-      documents: args.documents,
-      workspaceQuery: args.workspaceQuery,
-      webContent,
-    }),
+    contextCore,
+    assistantTurnEngine,
   };
 };
 
@@ -239,8 +230,8 @@ export const createBackendServices = (
     connections,
     providerRegistry: aiServices.providerRegistry,
     providerAuthService: aiServices.providerAuthService,
-    replayService: aiServices.replayService,
-    threadOrchestrator: aiServices.threadOrchestrator,
+    contextCore: aiServices.contextCore,
+    assistantTurnEngine: aiServices.assistantTurnEngine,
   };
 };
 
@@ -252,8 +243,8 @@ export const attachWebSocketServer = (
     httpServer,
     providerAuth: services.providerAuthService,
     providerRegistry: services.providerRegistry,
-    replayService: services.replayService,
-    threadOrchestrator: services.threadOrchestrator,
+    contextCore: services.contextCore,
+    assistantTurnEngine: services.assistantTurnEngine,
     connections: services.connections,
   });
 };

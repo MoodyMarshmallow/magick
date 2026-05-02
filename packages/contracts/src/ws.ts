@@ -1,10 +1,10 @@
 // Defines the websocket request, response, and push message contracts.
 
 import type {
+  BookmarkSummary,
+  BranchUpdate,
+  BranchViewModel,
   ClientCommand,
-  DomainEvent,
-  ThreadSummary,
-  ThreadViewModel,
 } from "./chat";
 import type {
   ProviderAuthLoginStartResult,
@@ -14,8 +14,8 @@ import type {
 } from "./provider";
 
 export interface AppBootstrapData {
-  readonly threadSummaries: readonly ThreadSummary[];
-  readonly activeThread: ThreadViewModel | null;
+  readonly bookmarkSummaries: readonly BookmarkSummary[];
+  readonly activeBranch: BranchViewModel | null;
   readonly providerAuth: Readonly<Record<ProviderKey, ProviderAuthState>>;
   readonly providerCapabilities: Readonly<
     Record<ProviderKey, ProviderCapabilities>
@@ -36,21 +36,20 @@ export type CommandResult =
             readonly bootstrap: AppBootstrapData;
           }
         | {
-            readonly kind: "threadList";
-            readonly threadSummaries: readonly ThreadSummary[];
+            readonly kind: "bookmarkList";
+            readonly bookmarkSummaries: readonly BookmarkSummary[];
           }
         | {
-            readonly kind: "threadState";
-            readonly thread: ThreadViewModel;
-            readonly replayedEvents?: readonly DomainEvent[];
+            readonly kind: "branchState";
+            readonly branch: BranchViewModel;
           }
         | {
             readonly kind: "accepted";
-            readonly threadId: string;
+            readonly bookmarkId: string;
           }
         | {
-            readonly kind: "threadDeleted";
-            readonly threadId: string;
+            readonly kind: "bookmarkDeleted";
+            readonly bookmarkId: string;
           }
         | {
             readonly kind: "providerAuthState";
@@ -76,14 +75,13 @@ export interface CommandResponseEnvelope {
 
 export type ServerPushEnvelope =
   | {
-      readonly channel: "orchestration.domainEvent";
-      readonly threadId: string;
-      readonly event: DomainEvent;
+      readonly channel: "branch.updated";
+      readonly bookmarkId: string;
+      readonly update: BranchUpdate;
     }
   | {
-      readonly channel: "thread.deleted";
-      readonly threadId: string;
-      readonly workspaceId: string;
+      readonly channel: "bookmark.deleted";
+      readonly bookmarkId: string;
     }
   | {
       readonly channel: "provider.authStateChanged";
@@ -102,6 +100,5 @@ export type ServerPushEnvelope =
     }
   | {
       readonly channel: "transport.replayRequired";
-      readonly threadId: string;
-      readonly latestSequence: number;
+      readonly bookmarkId: string;
     };

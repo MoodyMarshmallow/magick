@@ -105,67 +105,68 @@ describe("createBackendServices", () => {
     }
   });
 
-  it("persists thread renames across backend restarts", async () => {
+  it("persists bookmark renames across backend restarts", () => {
     const testDirectory = join(process.cwd(), ".magick-test-rename");
     const databasePath = join(testDirectory, "backend.db");
     removeTestDatabaseDirectory(testDirectory);
 
     const firstServices = createBackendServices({ databasePath });
-    const createdThread = await firstServices.threadOrchestrator.createThread({
-      workspaceId: "workspace_1",
+    const createdBranch = firstServices.contextCore.createBookmark({
       providerKey: "codex",
       title: "Original chat",
     });
 
-    await firstServices.threadOrchestrator.renameThread(
-      createdThread.threadId,
-      "Persisted rename",
-    );
+    firstServices.contextCore.renameBookmark({
+      bookmarkId: createdBranch.bookmarkId,
+      title: "Persisted rename",
+    });
 
     const restartedServices = createBackendServices({ databasePath });
-    const restartedThreads =
-      await restartedServices.threadOrchestrator.listThreads("workspace_1");
-    const reopenedThread =
-      await restartedServices.threadOrchestrator.openThread(
-        createdThread.threadId,
-      );
+    const restartedBookmarks = restartedServices.contextCore.listBookmarks();
+    const reopenedBranch = restartedServices.contextCore.selectBookmark({
+      bookmarkId: createdBranch.bookmarkId,
+    });
 
-    expect(restartedThreads).toEqual([
+    expect(restartedBookmarks).toEqual([
       expect.objectContaining({
-        threadId: createdThread.threadId,
+        bookmarkId: createdBranch.bookmarkId,
         title: "Persisted rename",
       }),
     ]);
-    expect(reopenedThread.title).toBe("Persisted rename");
+    expect(reopenedBranch.title).toBe("Persisted rename");
 
     removeTestDatabaseDirectory(testDirectory);
   });
 
-  it("persists thread deletions across backend restarts", async () => {
+  it("persists bookmark deletions across backend restarts", () => {
     const testDirectory = join(process.cwd(), ".magick-test-delete");
     const databasePath = join(testDirectory, "backend.db");
     removeTestDatabaseDirectory(testDirectory);
 
     const firstServices = createBackendServices({ databasePath });
-    const createdThread = await firstServices.threadOrchestrator.createThread({
-      workspaceId: "workspace_1",
+    const createdBranch = firstServices.contextCore.createBookmark({
       providerKey: "codex",
       title: "Disposable chat",
     });
 
-    await firstServices.threadOrchestrator.deleteThread(createdThread.threadId);
+    firstServices.contextCore.deleteBookmark({
+      bookmarkId: createdBranch.bookmarkId,
+    });
 
     const restartedServices = createBackendServices({ databasePath });
-    const restartedThreads =
-      await restartedServices.threadOrchestrator.listThreads("workspace_1");
+    const restartedBookmarks = restartedServices.contextCore.listBookmarks();
 
-    expect(restartedThreads).toEqual([]);
-    await expect(
-      restartedServices.threadOrchestrator.openThread(createdThread.threadId),
-    ).rejects.toMatchObject({
-      entity: "thread",
-      id: createdThread.threadId,
-    });
+    expect(restartedBookmarks).toEqual([]);
+    expect(() =>
+      restartedServices.contextCore.selectBookmark({
+        bookmarkId: createdBranch.bookmarkId,
+      }),
+    ).toThrowError(
+      expect.objectContaining({
+        entity: "bookmark",
+        id: createdBranch.bookmarkId,
+      }),
+    );
 
     removeTestDatabaseDirectory(testDirectory);
   });

@@ -11,7 +11,7 @@ import { nowIso } from "@magick/shared/time";
 import {
   InvalidStateError,
   ProviderUnavailableError,
-} from "../agent/runtime/errors";
+} from "../agent/shared/errors";
 import {
   CodexAuthClient,
   type CodexAuthClientOptions,

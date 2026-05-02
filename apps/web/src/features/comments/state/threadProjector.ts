@@ -1,9 +1,7 @@
 import type {
-  AssistantCompletionReason,
   AssistantOutputChannel,
-  DomainEvent,
-  ThreadSummary,
-  ThreadViewModel,
+  BookmarkSummary,
+  BranchViewModel,
   ToolActivityView,
   ToolApprovalView,
 } from "@magick/contracts/chat";
@@ -42,57 +40,23 @@ export interface CommentThread {
   readonly pendingToolApproval: ToolApprovalView | null;
 }
 
-export type CommentThreadEvent =
+type CommentThreadEvent =
   | {
       readonly type: "snapshot.loaded";
-      readonly threads: readonly ThreadSummary[];
-      readonly activeThread: ThreadViewModel | null;
+      readonly bookmarks: readonly BookmarkSummary[];
+      readonly activeBranch: BranchViewModel | null;
     }
   | {
-      readonly type: "thread.loaded";
-      readonly thread: ThreadViewModel;
+      readonly type: "branch.loaded";
+      readonly branch: BranchViewModel;
     }
   | {
-      readonly type: "domain.event";
-      readonly threadId: string;
-      readonly event: DomainEvent;
-    }
-  | {
-      readonly type: "thread.created";
-      readonly thread: CommentThread;
-    }
-  | {
-      readonly type: "thread.deleted";
-      readonly threadId: string;
-    }
-  | {
-      readonly type: "thread.statusChanged";
-      readonly threadId: string;
-      readonly status: CommentThreadStatus;
-      readonly updatedAt: string;
-    }
-  | {
-      readonly type: "message.added";
-      readonly threadId: string;
-      readonly message: CommentMessage;
-      readonly updatedAt: string;
-    }
-  | {
-      readonly type: "message.delta";
-      readonly threadId: string;
-      readonly messageId: string;
-      readonly delta: string;
-      readonly updatedAt: string;
-    }
-  | {
-      readonly type: "message.completed";
-      readonly threadId: string;
-      readonly messageId: string;
-      readonly updatedAt: string;
+      readonly type: "bookmark.deleted";
+      readonly bookmarkId: string;
     };
 
 const toCommentMessage = (
-  message: ThreadViewModel["messages"][number],
+  message: BranchViewModel["messages"][number],
 ): CommentMessage => ({
   id: message.id,
   author: message.role === "user" ? "human" : "ai",
@@ -102,10 +66,10 @@ const toCommentMessage = (
   status: message.status,
 });
 
-const toCommentThreadSummary = (summary: ThreadSummary): CommentThread => ({
-  threadId: summary.threadId,
+const toCommentThreadSummary = (summary: BookmarkSummary): CommentThread => ({
+  threadId: summary.bookmarkId,
   title: summary.title,
-  status: summary.resolutionState,
+  status: "open",
   runtimeState: summary.runtimeState,
   updatedAt: summary.updatedAt,
   messages: [],
@@ -113,20 +77,16 @@ const toCommentThreadSummary = (summary: ThreadSummary): CommentThread => ({
   pendingToolApproval: null,
 });
 
-const toCommentThread = (thread: ThreadViewModel): CommentThread => ({
-  threadId: thread.threadId,
-  title: thread.title,
-  status: thread.resolutionState,
-  runtimeState: thread.runtimeState,
-  updatedAt: thread.updatedAt,
-  messages: thread.messages.map(toCommentMessage),
-  toolActivities: thread.toolActivities,
-  pendingToolApproval: thread.pendingToolApproval,
+const toCommentThread = (branch: BranchViewModel): CommentThread => ({
+  threadId: branch.bookmarkId,
+  title: branch.title,
+  status: "open",
+  runtimeState: branch.runtimeState,
+  updatedAt: branch.updatedAt,
+  messages: branch.messages.map(toCommentMessage),
+  toolActivities: branch.toolActivities,
+  pendingToolApproval: branch.pendingToolApproval,
 });
-
-const completedAssistantStatus = (
-  reason: AssistantCompletionReason | null | undefined,
-): CommentMessageStatus => (reason === "incomplete" ? "streaming" : "complete");
 
 const sortThreads = (
   threads: readonly CommentThread[],
@@ -169,415 +129,20 @@ const upsertThread = (
   );
 };
 
-const updateThread = (
-  threads: readonly CommentThread[],
-  threadId: string,
-  updater: (thread: CommentThread) => CommentThread,
-): readonly CommentThread[] => {
-  return sortThreads(
-    threads.map((thread) =>
-      thread.threadId === threadId ? updater(thread) : thread,
-    ),
-  );
-};
-
-const assistantMessageIdPrefix = (turnId: string) => `${turnId}:assistant:`;
-
-const isAssistantMessageForTurn = (
-  messageId: string,
-  turnId: string,
-): boolean => {
-  return messageId.startsWith(assistantMessageIdPrefix(turnId));
-};
-
-const findLatestAssistantMessageByTurn = (
-  thread: CommentThread,
-  turnId: string,
-): CommentMessage | undefined => {
-  for (let index = thread.messages.length - 1; index >= 0; index -= 1) {
-    const message = thread.messages[index];
-    if (message && isAssistantMessageForTurn(message.id, turnId)) {
-      return message;
-    }
-  }
-
-  return undefined;
-};
-
-const findStreamingAssistantMessagesByTurn = (
-  thread: CommentThread,
-  turnId: string,
-): readonly CommentMessage[] => {
-  return thread.messages.filter(
-    (message) =>
-      isAssistantMessageForTurn(message.id, turnId) &&
-      message.status === "streaming",
-  );
-};
-
-const ensureThread = (
-  threads: readonly CommentThread[],
-  threadId: string,
-): readonly CommentThread[] => {
-  if (threads.some((thread) => thread.threadId === threadId)) {
-    return threads;
-  }
-
-  return [
-    {
-      threadId,
-      title: "New chat",
-      status: "open",
-      runtimeState: "idle",
-      updatedAt: new Date(0).toISOString(),
-      messages: [],
-      toolActivities: [],
-      pendingToolApproval: null,
-    },
-    ...threads,
-  ];
-};
-
 export const projectThreadEvent = (
   threads: readonly CommentThread[],
   event: CommentThreadEvent,
 ): readonly CommentThread[] => {
   switch (event.type) {
     case "snapshot.loaded": {
-      const merged = event.threads.map(toCommentThreadSummary);
-      return event.activeThread
-        ? upsertThread(merged, toCommentThread(event.activeThread))
+      const merged = event.bookmarks.map(toCommentThreadSummary);
+      return event.activeBranch
+        ? upsertThread(merged, toCommentThread(event.activeBranch))
         : sortThreads(merged);
     }
-    case "thread.loaded":
-      return upsertThread(threads, toCommentThread(event.thread));
-    case "thread.created":
-      return upsertThread(threads, event.thread);
-    case "thread.deleted":
-      return threads.filter((thread) => thread.threadId !== event.threadId);
-    case "thread.statusChanged":
-      return updateThread(threads, event.threadId, (thread) => ({
-        ...thread,
-        status: event.status,
-        updatedAt: event.updatedAt,
-      }));
-    case "message.added":
-      return updateThread(threads, event.threadId, (thread) => ({
-        ...thread,
-        updatedAt: event.updatedAt,
-        messages: [...thread.messages, event.message],
-      }));
-    case "message.delta":
-      return updateThread(threads, event.threadId, (thread) => ({
-        ...thread,
-        updatedAt: event.updatedAt,
-        messages: thread.messages.map((message) =>
-          message.id === event.messageId
-            ? { ...message, body: `${message.body}${event.delta}` }
-            : message,
-        ),
-      }));
-    case "message.completed":
-      return updateThread(threads, event.threadId, (thread) => ({
-        ...thread,
-        updatedAt: event.updatedAt,
-        messages: thread.messages.map((message) =>
-          message.id === event.messageId
-            ? { ...message, status: "complete" }
-            : message,
-        ),
-      }));
-    case "domain.event": {
-      const nextThreads = ensureThread(threads, event.threadId);
-      const domainEvent = event.event;
-      switch (domainEvent.type) {
-        case "thread.created":
-          return upsertThread(nextThreads, {
-            threadId: event.threadId,
-            title: domainEvent.payload.title,
-            status: "open",
-            runtimeState: "idle",
-            updatedAt: domainEvent.occurredAt,
-            messages: [],
-            toolActivities: [],
-            pendingToolApproval: null,
-          });
-        case "thread.renamed":
-          return updateThread(nextThreads, event.threadId, (thread) => ({
-            ...thread,
-            title: domainEvent.payload.title,
-            updatedAt: domainEvent.occurredAt,
-          }));
-        case "thread.resolved":
-          return updateThread(nextThreads, event.threadId, (thread) => ({
-            ...thread,
-            status: "resolved",
-            updatedAt: domainEvent.occurredAt,
-          }));
-        case "thread.reopened":
-          return updateThread(nextThreads, event.threadId, (thread) => ({
-            ...thread,
-            status: "open",
-            updatedAt: domainEvent.occurredAt,
-          }));
-        case "provider.session.disconnected":
-          return updateThread(nextThreads, event.threadId, (thread) => ({
-            ...thread,
-            runtimeState: "failed",
-            updatedAt: domainEvent.occurredAt,
-          }));
-        case "turn.failed":
-          return updateThread(nextThreads, event.threadId, (thread) => ({
-            ...thread,
-            runtimeState: "failed",
-            updatedAt: domainEvent.occurredAt,
-            messages: thread.messages.map((message) =>
-              findStreamingAssistantMessagesByTurn(
-                thread,
-                domainEvent.payload.turnId,
-              ).some((streamingMessage) => streamingMessage.id === message.id)
-                ? { ...message, status: "failed" }
-                : message,
-            ),
-          }));
-        case "tool.approval.requested":
-          return updateThread(nextThreads, event.threadId, (thread) => ({
-            ...thread,
-            runtimeState: "awaiting_approval",
-            toolActivities: thread.toolActivities.map((toolActivity) =>
-              toolActivity.toolCallId === domainEvent.payload.toolCallId
-                ? {
-                    ...toolActivity,
-                    status: "awaiting_approval",
-                    updatedAt: domainEvent.occurredAt,
-                  }
-                : toolActivity,
-            ),
-            pendingToolApproval: {
-              toolCallId: domainEvent.payload.toolCallId,
-              toolName: domainEvent.payload.toolName,
-              path: domainEvent.payload.path,
-              reason: domainEvent.payload.reason,
-              requestedAt: domainEvent.occurredAt,
-            },
-            updatedAt: domainEvent.occurredAt,
-          }));
-        case "tool.approval.resolved":
-          return updateThread(nextThreads, event.threadId, (thread) => ({
-            ...thread,
-            runtimeState:
-              domainEvent.payload.decision === "approved"
-                ? "running"
-                : "failed",
-            toolActivities: thread.toolActivities.map((toolActivity) =>
-              toolActivity.toolCallId === domainEvent.payload.toolCallId
-                ? {
-                    ...toolActivity,
-                    status:
-                      domainEvent.payload.decision === "approved"
-                        ? "running"
-                        : "failed",
-                    error:
-                      domainEvent.payload.decision === "approved"
-                        ? toolActivity.error
-                        : "Tool execution was rejected.",
-                    updatedAt: domainEvent.occurredAt,
-                  }
-                : toolActivity,
-            ),
-            pendingToolApproval: null,
-            updatedAt: domainEvent.occurredAt,
-          }));
-        case "turn.started":
-          return updateThread(nextThreads, event.threadId, (thread) => ({
-            ...thread,
-            runtimeState: "running",
-            updatedAt: domainEvent.occurredAt,
-          }));
-        case "turn.interrupted":
-          return updateThread(nextThreads, event.threadId, (thread) => ({
-            ...thread,
-            runtimeState: "interrupted",
-            updatedAt: domainEvent.occurredAt,
-            messages: thread.messages.map((message) =>
-              findStreamingAssistantMessagesByTurn(
-                thread,
-                domainEvent.payload.turnId,
-              ).some((streamingMessage) => streamingMessage.id === message.id)
-                ? { ...message, status: "interrupted" }
-                : message,
-            ),
-          }));
-        case "turn.completed":
-          return updateThread(nextThreads, event.threadId, (thread) => ({
-            ...thread,
-            runtimeState: "idle",
-            updatedAt: domainEvent.occurredAt,
-            messages: thread.messages.map((message) =>
-              message.id ===
-              findLatestAssistantMessageByTurn(
-                thread,
-                domainEvent.payload.turnId,
-              )?.id
-                ? { ...message, status: "complete" }
-                : message,
-            ),
-          }));
-        case "provider.session.started":
-        case "provider.session.recovered":
-          return updateThread(nextThreads, event.threadId, (thread) => ({
-            ...thread,
-            updatedAt: domainEvent.occurredAt,
-          }));
-        case "tool.requested":
-          return updateThread(nextThreads, event.threadId, (thread) => ({
-            ...thread,
-            updatedAt: domainEvent.occurredAt,
-            messages: thread.messages.map((message) =>
-              findStreamingAssistantMessagesByTurn(
-                thread,
-                domainEvent.payload.turnId,
-              ).some((streamingMessage) => streamingMessage.id === message.id)
-                ? { ...message, status: "complete" }
-                : message,
-            ),
-            toolActivities: [
-              ...thread.toolActivities.filter(
-                (toolActivity) =>
-                  toolActivity.toolCallId !== domainEvent.payload.toolCallId,
-              ),
-              {
-                turnId: domainEvent.payload.turnId,
-                toolCallId: domainEvent.payload.toolCallId,
-                toolName: domainEvent.payload.toolName,
-                title: domainEvent.payload.title,
-                status: "requested",
-                argsPreview: domainEvent.payload.argsPreview,
-                resultPreview: null,
-                path: domainEvent.payload.path,
-                url: domainEvent.payload.url,
-                diff: null,
-                error: null,
-                createdAt: domainEvent.occurredAt,
-                updatedAt: domainEvent.occurredAt,
-              },
-            ],
-          }));
-        case "tool.started":
-          return updateThread(nextThreads, event.threadId, (thread) => ({
-            ...thread,
-            updatedAt: domainEvent.occurredAt,
-            toolActivities: thread.toolActivities.map((toolActivity) =>
-              toolActivity.toolCallId === domainEvent.payload.toolCallId
-                ? {
-                    ...toolActivity,
-                    status: "running",
-                    updatedAt: domainEvent.occurredAt,
-                  }
-                : toolActivity,
-            ),
-          }));
-        case "tool.completed":
-          return updateThread(nextThreads, event.threadId, (thread) => ({
-            ...thread,
-            updatedAt: domainEvent.occurredAt,
-            toolActivities: thread.toolActivities.map((toolActivity) =>
-              toolActivity.toolCallId === domainEvent.payload.toolCallId
-                ? {
-                    ...toolActivity,
-                    status: "completed",
-                    resultPreview: domainEvent.payload.resultPreview,
-                    path: domainEvent.payload.path ?? toolActivity.path,
-                    url: domainEvent.payload.url ?? toolActivity.url,
-                    diff: domainEvent.payload.diff,
-                    updatedAt: domainEvent.occurredAt,
-                  }
-                : toolActivity,
-            ),
-          }));
-        case "tool.failed":
-          return updateThread(nextThreads, event.threadId, (thread) => ({
-            ...thread,
-            updatedAt: domainEvent.occurredAt,
-            toolActivities: thread.toolActivities.map((toolActivity) =>
-              toolActivity.toolCallId === domainEvent.payload.toolCallId
-                ? {
-                    ...toolActivity,
-                    status: "failed",
-                    error: domainEvent.payload.error,
-                    updatedAt: domainEvent.occurredAt,
-                  }
-                : toolActivity,
-            ),
-          }));
-        case "message.user.created":
-          return updateThread(nextThreads, event.threadId, (thread) => ({
-            ...thread,
-            updatedAt: domainEvent.occurredAt,
-            messages: [
-              ...thread.messages,
-              {
-                id: domainEvent.payload.messageId,
-                author: "human",
-                channel: null,
-                body: domainEvent.payload.content,
-                createdAt: domainEvent.occurredAt,
-                status: "complete",
-              },
-            ],
-          }));
-        case "message.assistant.delta":
-          return updateThread(nextThreads, event.threadId, (thread) => {
-            const existingMessage = thread.messages.find(
-              (message) => message.id === domainEvent.payload.messageId,
-            );
-
-            return {
-              ...thread,
-              runtimeState: "running",
-              updatedAt: domainEvent.occurredAt,
-              messages: existingMessage
-                ? thread.messages.map((message) =>
-                    message.id === existingMessage.id
-                      ? {
-                          ...message,
-                          body: `${message.body}${domainEvent.payload.delta}`,
-                          status:
-                            message.status === "streaming"
-                              ? "streaming"
-                              : message.status,
-                        }
-                      : message,
-                  )
-                : [
-                    ...thread.messages,
-                    {
-                      id: domainEvent.payload.messageId,
-                      author: "ai",
-                      channel: domainEvent.payload.channel,
-                      body: domainEvent.payload.delta,
-                      createdAt: domainEvent.occurredAt,
-                      status: "streaming",
-                    },
-                  ],
-            };
-          });
-        case "message.assistant.completed":
-          return updateThread(nextThreads, event.threadId, (thread) => ({
-            ...thread,
-            updatedAt: domainEvent.occurredAt,
-            messages: thread.messages.map((message) =>
-              message.id === domainEvent.payload.messageId
-                ? {
-                    ...message,
-                    status: completedAssistantStatus(
-                      domainEvent.payload.reason,
-                    ),
-                  }
-                : message,
-            ),
-          }));
-      }
-    }
+    case "branch.loaded":
+      return upsertThread(threads, toCommentThread(event.branch));
+    case "bookmark.deleted":
+      return threads.filter((thread) => thread.threadId !== event.bookmarkId);
   }
 };

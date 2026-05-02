@@ -5,7 +5,7 @@ import type {
   ProviderKey,
 } from "@magick/contracts/provider";
 import type { DatabaseClient } from "../../persistence/database";
-import { PersistenceError } from "../agent/runtime/errors";
+import { PersistenceError } from "../agent/shared/errors";
 
 export class ProviderAuthRepositoryClient {
   readonly #database: DatabaseClient;

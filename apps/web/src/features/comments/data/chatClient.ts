@@ -1,4 +1,8 @@
-import type { ClientCommand, ThreadViewModel } from "@magick/contracts/chat";
+import type {
+  BookmarkSummary,
+  BranchViewModel,
+  ClientCommand,
+} from "@magick/contracts/chat";
 import type {
   ProviderAuthState,
   ProviderKey,
@@ -11,27 +15,24 @@ import type {
 } from "@magick/contracts/ws";
 
 interface ChatBootstrap {
-  readonly threads: readonly import("@magick/contracts/chat").ThreadSummary[];
-  readonly activeThread: ThreadViewModel | null;
+  readonly bookmarks: readonly BookmarkSummary[];
+  readonly activeBranch: BranchViewModel | null;
   readonly providerAuth: Readonly<Record<ProviderKey, ProviderAuthState>>;
 }
 
 interface ChatClient {
-  getBootstrap: (args: {
-    workspaceId: string;
-    threadId?: string;
-  }) => Promise<ChatBootstrap>;
-  createThread: (args: {
-    workspaceId: string;
+  getBootstrap: (args: { bookmarkId?: string }) => Promise<ChatBootstrap>;
+  createBookmark: (args: {
     providerKey: ProviderKey;
     title?: string;
-  }) => Promise<ThreadViewModel>;
-  openThread: (threadId: string) => Promise<ThreadViewModel>;
-  renameThread: (threadId: string, title: string) => Promise<ThreadViewModel>;
-  deleteThread: (threadId: string) => Promise<void>;
-  sendThreadMessage: (threadId: string, content: string) => Promise<void>;
-  resolveThread: (threadId: string) => Promise<ThreadViewModel>;
-  reopenThread: (threadId: string) => Promise<ThreadViewModel>;
+  }) => Promise<BranchViewModel>;
+  selectBookmark: (bookmarkId: string) => Promise<BranchViewModel>;
+  renameBookmark: (
+    bookmarkId: string,
+    title: string,
+  ) => Promise<BranchViewModel>;
+  deleteBookmark: (bookmarkId: string) => Promise<void>;
+  sendBookmarkMessage: (bookmarkId: string, content: string) => Promise<void>;
   startLogin: (
     providerKey: ProviderKey,
   ) => Promise<{ loginId: string; popup: Window | null }>;
@@ -49,7 +50,7 @@ const defaultBackendUrl = (): string => {
   return "ws://127.0.0.1:8787";
 };
 
-export const parseChatMessageData = async (
+const parseChatMessageData = async (
   data: MessageEvent["data"],
 ): Promise<CommandResponseEnvelope | ServerPushEnvelope> => {
   if (typeof data === "string") {
@@ -153,10 +154,7 @@ class WebSocketChatClient implements ChatClient {
   ): Promise<Extract<CommandResult, { readonly ok: true }>["data"]> {
     const socket = await this.#getSocket();
     const requestId = `request_${this.#requestCounter++}`;
-    const envelope: CommandEnvelope = {
-      requestId,
-      command,
-    };
+    const envelope: CommandEnvelope = { requestId, command };
 
     const response = await new Promise<CommandResponseEnvelope>(
       (resolve, reject) => {
@@ -172,101 +170,64 @@ class WebSocketChatClient implements ChatClient {
     return response.result.data;
   }
 
-  async getBootstrap(args: { workspaceId: string; threadId?: string }) {
-    const result = await this.#send({
-      type: "app.bootstrap",
-      payload: args,
-    });
+  async getBootstrap(args: { bookmarkId?: string }) {
+    const result = await this.#send({ type: "app.bootstrap", payload: args });
     if (result.kind !== "bootstrap") {
       throw new Error("Unexpected bootstrap response.");
     }
 
     return {
-      threads: result.bootstrap.threadSummaries,
-      activeThread: result.bootstrap.activeThread,
+      bookmarks: result.bootstrap.bookmarkSummaries,
+      activeBranch: result.bootstrap.activeBranch,
       providerAuth: result.bootstrap.providerAuth,
     };
   }
 
-  async createThread(args: {
-    workspaceId: string;
-    providerKey: ProviderKey;
-    title?: string;
-  }) {
-    const result = await this.#send({
-      type: "thread.create",
-      payload: args,
-    });
-    if (result.kind !== "threadState") {
-      throw new Error("Unexpected thread create response.");
+  async createBookmark(args: { providerKey: ProviderKey; title?: string }) {
+    const result = await this.#send({ type: "bookmark.create", payload: args });
+    if (result.kind !== "branchState") {
+      throw new Error("Unexpected bookmark create response.");
     }
-
-    return result.thread;
+    return result.branch;
   }
 
-  async openThread(threadId: string) {
+  async selectBookmark(bookmarkId: string) {
     const result = await this.#send({
-      type: "thread.open",
-      payload: { threadId },
+      type: "bookmark.select",
+      payload: { bookmarkId },
     });
-    if (result.kind !== "threadState") {
-      throw new Error("Unexpected thread open response.");
+    if (result.kind !== "branchState") {
+      throw new Error("Unexpected bookmark select response.");
     }
-
-    return result.thread;
+    return result.branch;
   }
 
-  async renameThread(threadId: string, title: string) {
+  async renameBookmark(bookmarkId: string, title: string) {
     const result = await this.#send({
-      type: "thread.rename",
-      payload: { threadId, title },
+      type: "bookmark.rename",
+      payload: { bookmarkId, title },
     });
-    if (result.kind !== "threadState") {
-      throw new Error("Unexpected thread rename response.");
+    if (result.kind !== "branchState") {
+      throw new Error("Unexpected bookmark rename response.");
     }
-
-    return result.thread;
+    return result.branch;
   }
 
-  async deleteThread(threadId: string) {
+  async deleteBookmark(bookmarkId: string) {
     const result = await this.#send({
-      type: "thread.delete",
-      payload: { threadId },
+      type: "bookmark.delete",
+      payload: { bookmarkId },
     });
-    if (result.kind !== "threadDeleted") {
-      throw new Error("Unexpected thread delete response.");
+    if (result.kind !== "bookmarkDeleted") {
+      throw new Error("Unexpected bookmark delete response.");
     }
   }
 
-  async sendThreadMessage(threadId: string, content: string) {
+  async sendBookmarkMessage(bookmarkId: string, content: string) {
     await this.#send({
-      type: "thread.sendMessage",
-      payload: { threadId, content },
+      type: "bookmark.sendMessage",
+      payload: { bookmarkId, content },
     });
-  }
-
-  async resolveThread(threadId: string) {
-    const result = await this.#send({
-      type: "thread.resolve",
-      payload: { threadId },
-    });
-    if (result.kind !== "threadState") {
-      throw new Error("Unexpected thread resolve response.");
-    }
-
-    return result.thread;
-  }
-
-  async reopenThread(threadId: string) {
-    const result = await this.#send({
-      type: "thread.reopen",
-      payload: { threadId },
-    });
-    if (result.kind !== "threadState") {
-      throw new Error("Unexpected thread reopen response.");
-    }
-
-    return result.thread;
   }
 
   async startLogin(providerKey: ProviderKey) {

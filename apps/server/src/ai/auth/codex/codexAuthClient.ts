@@ -1,6 +1,6 @@
 // Implements direct OAuth code exchange and token refresh for Codex browser auth.
 
-import { ProviderFailureError } from "../../agent/runtime/errors";
+import { ProviderFailureError } from "../../agent/shared/errors";
 import {
   extractAccountIdFromClaims,
   extractEmailFromClaims,

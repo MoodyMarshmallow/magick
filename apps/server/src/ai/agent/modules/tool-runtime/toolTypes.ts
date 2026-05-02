@@ -1,0 +1,48 @@
+import type { ZodType, z } from "zod";
+import type { DocumentService } from "../../../../editor/documents/documentService";
+import type { FileDiffPreview } from "../../../../editor/documents/fileDiffPreview";
+import type { WorkspaceQueryService } from "../../../../editor/workspace/workspaceQueryService";
+import type { WebContentService } from "./webContentService";
+
+export interface ToolExecutionContext {
+  readonly workspaceId: string;
+  readonly bookmarkId: string;
+  readonly turnId: string;
+  readonly documents: DocumentService;
+  readonly workspaceQuery: WorkspaceQueryService;
+  readonly web: WebContentService;
+  readonly hasReadFile: (path: string) => boolean;
+  readonly markFileRead: (path: string) => void;
+}
+
+export interface ToolExecutionResult {
+  readonly title: string;
+  readonly modelOutput: string;
+  readonly resultPreview: string | null;
+  readonly path: string | null;
+  readonly url: string | null;
+  readonly diff: FileDiffPreview | null;
+}
+
+export interface ToolDefinition<TSchema extends ZodType> {
+  readonly id: string;
+  readonly description: string;
+  readonly schema: TSchema;
+  readonly execute: (
+    args: z.infer<TSchema>,
+    context: ToolExecutionContext,
+  ) => Promise<ToolExecutionResult>;
+}
+
+export interface RegisteredTool {
+  readonly id: string;
+  readonly description: string;
+  readonly inputSchemaJson: Record<string, unknown>;
+}
+
+export class ToolExecutionError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ToolExecutionError";
+  }
+}

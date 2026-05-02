@@ -23,6 +23,8 @@ If a tradeoff is required, choose correctness and robustness over short-term con
 
 Long term maintainability is a core priority. If you add new functionality, first check if there are shared logic that can be extracted to a separate module. Duplicate logic across mulitple files is a code smell and should be avoided. Don't be afraid to change existing code. Don't take shortcuts by just adding local logic to solve a problem. In addition, you need to make sure your code is easy to evaluate and debug. Towards this end, you should always write unit testing for all files with logic that you write. You should also ensure that variables and functions have names that are unambiguous and clearly communicate their exact function, rather be a more verbose with naming than giving them names that may be confusing to understand. Lastly, you should make extensive logging that is clear, detailed, and specific.
 
+When adding, removing, or renaming agent backend Modules under `apps/server/src/ai/agent/modules/`, update `scripts/check-agent-module-boundaries.mjs` so `bun lint` continues enforcing the intended interface-only module boundaries.
+
 ## Testing
 
 - Use the `tdd` skill for any non-trivial code change when it is available.

@@ -106,9 +106,8 @@ export function AppShell() {
     queryKey: ["workspace-thread-bootstrap"],
     queryFn: () =>
       chatClient.getBootstrap({
-        workspaceId: defaultWorkspaceId,
         ...(activeThreadId && activeThreadId !== draftThreadId
-          ? { threadId: activeThreadId }
+          ? { bookmarkId: activeThreadId }
           : {}),
       }),
     refetchInterval: 2000,
@@ -157,15 +156,15 @@ export function AppShell() {
 
     dispatch({
       type: "snapshot.loaded",
-      threads: threadBootstrapQuery.data.threads,
-      activeThread: threadBootstrapQuery.data.activeThread,
+      bookmarks: threadBootstrapQuery.data.bookmarks,
+      activeBranch: threadBootstrapQuery.data.activeBranch,
     });
     setProviderAuthByKey(threadBootstrapQuery.data.providerAuth);
     if (
       activeThreadIdRef.current &&
       activeThreadIdRef.current !== draftThreadId &&
-      !threadBootstrapQuery.data.threads.some(
-        (thread) => thread.threadId === activeThreadIdRef.current,
+      !threadBootstrapQuery.data.bookmarks.some(
+        (bookmark) => bookmark.bookmarkId === activeThreadIdRef.current,
       )
     ) {
       setActiveThreadId(null);
@@ -174,25 +173,20 @@ export function AppShell() {
 
   useEffect(() => {
     return chatClient.subscribe((event: ServerPushEnvelope) => {
-      if (event.channel === "orchestration.domainEvent") {
+      if (event.channel === "branch.updated") {
         dispatch({
-          type: "domain.event",
-          threadId: event.threadId,
-          event: event.event,
+          type: "branch.loaded",
+          branch: event.update.branch,
         });
         return;
       }
 
-      if (event.channel === "thread.deleted") {
-        if (event.workspaceId !== defaultWorkspaceId) {
-          return;
-        }
-
+      if (event.channel === "bookmark.deleted") {
         dispatch({
-          type: "thread.deleted",
-          threadId: event.threadId,
+          type: "bookmark.deleted",
+          bookmarkId: event.bookmarkId,
         });
-        if (activeThreadIdRef.current === event.threadId) {
+        if (activeThreadIdRef.current === event.bookmarkId) {
           setActiveThreadId(null);
         }
         return;
@@ -270,10 +264,10 @@ export function AppShell() {
   }, [leftRailWidth, rightRailWidth]);
 
   const handleSelectThread = (threadId: string) => {
-    void chatClient.openThread(threadId).then((thread) => {
+    void chatClient.selectBookmark(threadId).then((branch) => {
       dispatch({
-        type: "thread.loaded",
-        thread,
+        type: "branch.loaded",
+        branch,
       });
     });
     setActiveThreadId(threadId);
@@ -575,61 +569,41 @@ export function AppShell() {
             setActiveThreadId(draftThreadId);
           }}
           onDeleteThread={async (threadId: string) => {
-            await chatClient.deleteThread(threadId);
+            await chatClient.deleteBookmark(threadId);
             dispatch({
-              type: "thread.deleted",
-              threadId,
+              type: "bookmark.deleted",
+              bookmarkId: threadId,
             });
             if (activeThreadIdRef.current === threadId) {
               setActiveThreadId(null);
             }
           }}
           onRenameThread={async (threadId: string, title: string) => {
-            const thread = await chatClient.renameThread(threadId, title);
+            const branch = await chatClient.renameBookmark(threadId, title);
             dispatch({
-              type: "thread.loaded",
-              thread,
+              type: "branch.loaded",
+              branch,
             });
           }}
           onShowLedger={() => setActiveThreadId(null)}
           onSendReply={async (threadId: string, message: string) => {
             if (threadId === draftThreadId) {
-              const thread = await chatClient.createThread({
-                workspaceId: defaultWorkspaceId,
+              const branch = await chatClient.createBookmark({
                 providerKey: defaultProviderKey,
               });
               dispatch({
-                type: "thread.loaded",
-                thread,
+                type: "branch.loaded",
+                branch,
               });
-              setActiveThreadId(thread.threadId);
-              await chatClient.sendThreadMessage(thread.threadId, message);
-              const refreshedThread = await chatClient.openThread(
-                thread.threadId,
-              );
-              dispatch({
-                type: "thread.loaded",
-                thread: refreshedThread,
-              });
+              setActiveThreadId(branch.bookmarkId);
+              await chatClient.sendBookmarkMessage(branch.bookmarkId, message);
               return;
             }
 
-            await chatClient.sendThreadMessage(threadId, message);
+            await chatClient.sendBookmarkMessage(threadId, message);
             setActiveThreadId(threadId);
           }}
-          onToggleResolved={async (threadId: string) => {
-            const thread = threads.find(
-              (candidate) => candidate.threadId === threadId,
-            );
-            const updatedThread =
-              thread?.status === "resolved"
-                ? await chatClient.reopenThread(threadId)
-                : await chatClient.resolveThread(threadId);
-            dispatch({
-              type: "thread.loaded",
-              thread: updatedThread,
-            });
-          }}
+          onToggleResolved={async () => {}}
         />
       )}
     </main>

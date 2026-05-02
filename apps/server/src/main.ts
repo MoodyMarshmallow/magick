@@ -1,5 +1,5 @@
 import { createServer } from "node:http";
-import { setCodexTransportDebugEnabled } from "./ai/agent/providers/codex/codexResponsesClient";
+import { setCodexTransportDebugEnabled } from "./ai/agent/modules/provider-runtime/codex/codexResponsesClient";
 import { attachWebSocketServer, createBackendServices } from "./index";
 
 export const AGENT_TRANSPORT_DEBUG_FLAG = "--debug-agent-transport";

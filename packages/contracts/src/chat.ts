@@ -1,8 +1,8 @@
-// Defines shared chat records, command payloads, and domain event contracts.
+// Defines shared branch, bookmark, command, and update contracts.
 
-import type { ProviderKey, ResumeStrategy } from "./provider";
+import type { ProviderKey } from "./provider";
 
-export type ThreadRuntimeState =
+export type BranchRuntimeState =
   | "idle"
   | "running"
   | "awaiting_approval"
@@ -56,19 +56,6 @@ export interface ToolApprovalView {
   readonly requestedAt: string;
 }
 
-export type ThreadResolutionState = "open" | "resolved";
-
-export interface ThreadRecord {
-  readonly id: string;
-  readonly workspaceId: string;
-  readonly providerKey: ProviderKey;
-  readonly providerSessionId: string;
-  readonly title: string;
-  readonly resolutionState: ThreadResolutionState;
-  readonly createdAt: string;
-  readonly updatedAt: string;
-}
-
 export interface TranscriptMessage {
   readonly id: string;
   readonly role: "user" | "assistant";
@@ -79,19 +66,25 @@ export interface TranscriptMessage {
   readonly reason?: AssistantCompletionReason | null;
 }
 
-export interface ThreadViewModel {
-  readonly threadId: string;
-  readonly workspaceId: string;
+export interface BookmarkSummary {
+  readonly bookmarkId: string;
   readonly providerKey: ProviderKey;
-  readonly providerSessionId: string;
   readonly title: string;
-  readonly resolutionState: ThreadResolutionState;
-  readonly runtimeState: ThreadRuntimeState;
+  readonly runtimeState: BranchRuntimeState;
+  readonly latestActivityAt: string;
+  readonly updatedAt: string;
+}
+
+export interface BranchViewModel {
+  readonly bookmarkId: string;
+  readonly headNodeId: string;
+  readonly providerKey: ProviderKey;
+  readonly title: string;
+  readonly runtimeState: BranchRuntimeState;
   readonly messages: readonly TranscriptMessage[];
   readonly toolActivities: readonly ToolActivityView[];
   readonly pendingToolApproval: ToolApprovalView | null;
   readonly activeTurnId: string | null;
-  readonly latestSequence: number;
   readonly lastError: string | null;
   readonly lastUserMessageAt: string | null;
   readonly lastAssistantMessageAt: string | null;
@@ -99,196 +92,117 @@ export interface ThreadViewModel {
   readonly updatedAt: string;
 }
 
-export interface ThreadSummary {
-  readonly threadId: string;
-  readonly workspaceId: string;
-  readonly providerKey: ProviderKey;
-  readonly title: string;
-  readonly resolutionState: ThreadResolutionState;
-  readonly runtimeState: ThreadRuntimeState;
-  readonly latestSequence: number;
-  readonly latestActivityAt: string;
-  readonly updatedAt: string;
-}
+export type ContextNodeKind =
+  | "root"
+  | "system_prompt"
+  | "global_prompt"
+  | "user_message"
+  | "assistant_message"
+  | "tool_call"
+  | "tool_result";
 
-interface EventBase<TType extends string, TPayload> {
-  readonly eventId: string;
-  readonly threadId: string;
-  readonly providerSessionId: string;
-  readonly sequence: number;
-  readonly occurredAt: string;
-  readonly type: TType;
-  readonly payload: Readonly<TPayload>;
-}
+export type ProviderPayloadItem =
+  | {
+      readonly type: "message";
+      readonly role: "user" | "assistant";
+      readonly channel: AssistantOutputChannel | null;
+      readonly content: string;
+      readonly reason?: AssistantCompletionReason;
+    }
+  | {
+      readonly type: "tool_call";
+      readonly toolCallId: string;
+      readonly toolName: string;
+      readonly input: unknown;
+    }
+  | {
+      readonly type: "tool_result";
+      readonly toolCallId: string;
+      readonly output: string;
+    };
 
-export type DomainEvent =
-  | EventBase<
-      "thread.created",
-      { workspaceId: string; providerKey: ProviderKey; title: string }
-    >
-  | EventBase<"thread.renamed", { title: string }>
-  | EventBase<
-      "provider.session.started",
-      {
-        providerKey: ProviderKey;
-        resumeStrategy: ResumeStrategy;
-      }
-    >
-  | EventBase<"provider.session.disconnected", { reason: string }>
-  | EventBase<"provider.session.recovered", { reason: string }>
-  | EventBase<"message.user.created", { messageId: string; content: string }>
-  | EventBase<"turn.started", { turnId: string; parentTurnId: string | null }>
-  | EventBase<
-      "message.assistant.delta",
-      {
-        turnId: string;
-        messageId: string;
-        channel: AssistantOutputChannel;
-        delta: string;
-      }
-    >
-  | EventBase<
-      "message.assistant.completed",
-      {
-        turnId: string;
-        messageId: string;
-        channel: AssistantOutputChannel;
-        reason?: AssistantCompletionReason;
-      }
-    >
-  | EventBase<"turn.completed", { turnId: string }>
-  | EventBase<"turn.interrupted", { turnId: string; reason: string }>
-  | EventBase<"turn.failed", { turnId: string; error: string }>
-  | EventBase<
-      "tool.requested",
-      {
-        turnId: string;
-        toolCallId: string;
-        toolName: string;
-        title: string;
-        argsPreview: string | null;
-        input?: unknown;
-        path: string | null;
-        url: string | null;
-      }
-    >
-  | EventBase<"tool.started", { turnId: string; toolCallId: string }>
-  | EventBase<
-      "tool.completed",
-      {
-        turnId: string;
-        toolCallId: string;
-        resultPreview: string | null;
-        modelOutput?: string | null;
-        path: string | null;
-        url: string | null;
-        diff: FileDiffPreview | null;
-      }
-    >
-  | EventBase<
-      "tool.failed",
-      {
-        turnId: string;
-        toolCallId: string;
-        error: string;
-        modelOutput?: string | null;
-      }
-    >
-  | EventBase<
-      "tool.approval.requested",
-      {
-        turnId: string;
-        toolCallId: string;
-        toolName: string;
-        path: string | null;
-        reason: string;
-      }
-    >
-  | EventBase<
-      "tool.approval.resolved",
-      {
-        turnId: string;
-        toolCallId: string;
-        decision: "approved" | "rejected";
-      }
-    >
-  | EventBase<"thread.resolved", Record<string, never>>
-  | EventBase<"thread.reopened", Record<string, never>>;
+export interface BranchUpdate {
+  readonly bookmarkId: string;
+  readonly branch: BranchViewModel;
+}
 
 export type ClientCommand =
   | {
       readonly type: "app.bootstrap";
-      readonly payload: { workspaceId: string; threadId?: string };
+      readonly payload: { readonly bookmarkId?: string };
     }
   | {
-      readonly type: "thread.list";
-      readonly payload: { workspaceId: string };
+      readonly type: "bookmark.list";
+      readonly payload: Record<string, never>;
     }
   | {
-      readonly type: "thread.create";
+      readonly type: "bookmark.create";
       readonly payload: {
-        workspaceId: string;
-        providerKey: ProviderKey;
-        title?: string;
+        readonly providerKey: ProviderKey;
+        readonly title?: string;
       };
     }
   | {
-      readonly type: "thread.open";
-      readonly payload: { threadId: string };
+      readonly type: "bookmark.select";
+      readonly payload: { readonly bookmarkId: string };
     }
   | {
-      readonly type: "thread.rename";
-      readonly payload: { threadId: string; title: string };
+      readonly type: "bookmark.rename";
+      readonly payload: { readonly bookmarkId: string; readonly title: string };
     }
   | {
-      readonly type: "thread.delete";
-      readonly payload: { threadId: string };
+      readonly type: "bookmark.delete";
+      readonly payload: { readonly bookmarkId: string };
     }
   | {
-      readonly type: "thread.sendMessage";
-      readonly payload: { threadId: string; content: string };
+      readonly type: "bookmark.sendMessage";
+      readonly payload: {
+        readonly bookmarkId: string;
+        readonly content: string;
+      };
     }
   | {
-      readonly type: "thread.resolve";
-      readonly payload: { threadId: string };
+      readonly type: "bookmark.stopTurn";
+      readonly payload: { readonly bookmarkId: string };
     }
   | {
-      readonly type: "thread.reopen";
-      readonly payload: { threadId: string };
+      readonly type: "bookmark.retryTurn";
+      readonly payload: { readonly bookmarkId: string };
     }
   | {
-      readonly type: "thread.stopTurn";
-      readonly payload: { threadId: string };
-    }
-  | {
-      readonly type: "thread.retryTurn";
-      readonly payload: { threadId: string };
-    }
-  | {
-      readonly type: "thread.resume";
-      readonly payload: { threadId: string; afterSequence?: number };
+      readonly type: "bookmark.resume";
+      readonly payload: { readonly bookmarkId: string };
     }
   | {
       readonly type: "tool.approval.respond";
       readonly payload: {
-        threadId: string;
-        toolCallId: string;
-        decision: "approved" | "rejected";
+        readonly bookmarkId: string;
+        readonly toolCallId: string;
+        readonly decision: "approved" | "rejected";
       };
     }
   | {
       readonly type: "provider.auth.read";
-      readonly payload: { providerKey: ProviderKey; refreshToken?: boolean };
+      readonly payload: {
+        readonly providerKey: ProviderKey;
+        readonly refreshToken?: boolean;
+      };
     }
   | {
       readonly type: "provider.auth.login.start";
-      readonly payload: { providerKey: ProviderKey; mode: "chatgpt" };
+      readonly payload: {
+        readonly providerKey: ProviderKey;
+        readonly mode: "chatgpt";
+      };
     }
   | {
       readonly type: "provider.auth.login.cancel";
-      readonly payload: { providerKey: ProviderKey; loginId: string };
+      readonly payload: {
+        readonly providerKey: ProviderKey;
+        readonly loginId: string;
+      };
     }
   | {
       readonly type: "provider.auth.logout";
-      readonly payload: { providerKey: ProviderKey };
+      readonly payload: { readonly providerKey: ProviderKey };
     };

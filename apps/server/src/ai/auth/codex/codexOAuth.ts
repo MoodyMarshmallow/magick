@@ -3,7 +3,7 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { type Server as HttpServer, createServer } from "node:http";
 
-import { ProviderFailureError } from "../../agent/runtime/errors";
+import { ProviderFailureError } from "../../agent/shared/errors";
 
 const CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann";
 const ISSUER = "https://auth.openai.com";

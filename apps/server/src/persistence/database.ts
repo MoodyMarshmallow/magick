@@ -40,50 +40,31 @@ export const createDatabase = (filename = ":memory:"): DatabaseClient => {
       updated_at TEXT NOT NULL
     );
 
-    CREATE TABLE IF NOT EXISTS threads (
+    CREATE TABLE IF NOT EXISTS context_nodes (
       id TEXT PRIMARY KEY,
-      workspace_id TEXT NOT NULL,
-      provider_key TEXT NOT NULL,
-      provider_session_id TEXT NOT NULL,
-      title TEXT NOT NULL,
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS thread_events (
-      id TEXT PRIMARY KEY,
-      thread_id TEXT NOT NULL,
-      provider_session_id TEXT NOT NULL,
+      parent_id TEXT,
+      kind TEXT NOT NULL,
       sequence INTEGER NOT NULL,
-      type TEXT NOT NULL,
+      provider_key TEXT,
       payload_json TEXT NOT NULL,
-      occurred_at TEXT NOT NULL,
-      UNIQUE(thread_id, sequence)
-    );
-
-    CREATE TABLE IF NOT EXISTS thread_snapshots (
-      thread_id TEXT PRIMARY KEY,
-      summary_json TEXT NOT NULL,
-      thread_json TEXT NOT NULL,
-      updated_at TEXT NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS connection_checkpoints (
-      connection_id TEXT NOT NULL,
-      thread_id TEXT NOT NULL,
-      latest_sequence INTEGER NOT NULL,
+      status TEXT,
+      created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
-      PRIMARY KEY (connection_id, thread_id)
+      FOREIGN KEY(parent_id) REFERENCES context_nodes(id) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS context_nodes_parent_sequence_idx
+      ON context_nodes(parent_id, sequence);
+
+    CREATE TABLE IF NOT EXISTS bookmarks (
+      id TEXT PRIMARY KEY,
+      provider_key TEXT NOT NULL,
+      title TEXT NOT NULL,
+      target_node_id TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY(target_node_id) REFERENCES context_nodes(id) ON DELETE RESTRICT
     );
   `);
-
-  try {
-    database.exec(
-      "ALTER TABLE threads ADD COLUMN resolution_state TEXT NOT NULL DEFAULT 'open'",
-    );
-  } catch {
-    // Existing databases already have the column.
-  }
-
   return database;
 };
