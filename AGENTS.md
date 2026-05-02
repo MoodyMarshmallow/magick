@@ -25,20 +25,10 @@ Long term maintainability is a core priority. If you add new functionality, firs
 
 ## Testing
 
-- Always write comprehensive unit tests for the code you add or change when that code contains logic.
-- Build tests bottom-up: start with the smallest pure helpers and reducers first, then add tests for higher-level orchestration built on top of them.
-- After writing tests, use a file read tool to read them again and think to yourself about whether the test cases cover all edge cases that would be encountered in real usage. If tests are not absolutely comprehensive, you should iterate on them.
-- Prefer small, deterministic tests with explicit inputs and outputs over broad tests that are hard to debug.
-- Test failure paths, malformed input, replay or duplicate events, persistence boundaries, and recovery behavior whenever those concerns exist in the code under test.
-- When state changes over time, test the full lifecycle: initial state, transition states, terminal states, and no-op or invalid transitions.
-- For streaming or async behavior, make tests deterministic by controlling time, ids, scheduling, and network or provider boundaries with test doubles.
-- Keep tests close to the logic they verify, and structure them so a future contributor can understand the intended behavior from the test file alone.
-- Avoid shallow tests that only assert implementation details. Focus on observable behavior, invariants, and contract guarantees.
-- Do not write tests that pin prompt wording or other prompt text verbatim. Prompts are implementation detail unless user-visible behavior or request shape depends on a specific field being present.
-- If you add a new bug fix, add or update a regression test that would have failed before the fix.
-- If a change affects UI, always verify it with Playwright against the running app, not just unit tests.
-- For UI verification with Playwright, inspect the result both structurally and visually: read extracted DOM/text state with Playwright code or snapshots, and capture a targeted screenshot of the changed area.
-- Store Playwright screenshots and named snapshot artifacts under `.playwright-cli/` instead of the repo root, for example `.playwright-cli/feature-name.png` and `.playwright-cli/feature-name.yaml`.
+- Use the `tdd` skill for any non-trivial code change when it is available.
+- Add or update tests for every logic change. Keep them small, deterministic, and close to the code they verify.
+- Cover observable behavior, edge cases, failure paths, and regressions. Do not pin prompt wording unless it is user-visible behavior.
+- For UI changes, verify with Playwright and store screenshots or snapshots under `.playwright-cli/`.
 
 ## Effect vs Promise Guidance
 
@@ -55,13 +45,6 @@ Use promises/plain TypeScript when:
 - The code is straightforward request/response logic, repository access, fetch wrappers, mapping, validation, or application service orchestration.
 - The module mainly performs synchronous database work or simple async calls and Effect would just wrap thrown errors in extra ceremony.
 - A plain class with constructor injection and `async` methods is easier to read and provides the same reliability.
-
-Specific guidance for this repo:
-
-- Prefer promises for persistence, auth helpers, transport handlers, composition roots, and simple application services.
-- Keep Effect in the provider streaming/runtime path only where it is already central to the design.
-- Do not introduce `Context.GenericTag`, `Layer`, or runtime plumbing for new code unless the module truly needs Effect-style dependency management.
-- If a module could reasonably be written either way, choose the version that is easier for a new contributor to read and debug.
 
 ## Package Roles
 
@@ -84,10 +67,7 @@ The frontend Magick should feel like digital magick expressed through a restrain
 - Use color sparingly and intentionally. Aqua, yellow, green, and red should read as signals, not decoration.
 - Default toward icon + text pairings that are austere and legible. Icons should feel barebones and utilitarian, not friendly or over-detailed.
 - Keep layout simple. The interface should feel clean, and only surface the most important information to the user.
-- Titles and labels should be short, plain, and operational. Avoid marketing-style copy in product UI.
-- Hover states should feel crisp and understated. Selection and active states should be stronger than hover, but still minimal.
 - Scrollbars, dividers, and overlays are part of the visual language. Treat them as deliberate interface elements rather than browser defaults.
-- When adding new UI, match the existing workspace/sidebar/tab chrome instead of introducing a separate visual system.
 - If a design choice is between “clean but slightly severe” and “soft and friendly,” prefer the cleaner, more severe option.
 
 ## Codex Integration (Important)
@@ -115,3 +95,17 @@ Docs:
 - T3 code: https://github.com/pingdotgg/t3code
 
 Use these as implementation references when designing protocol handling, UX flows, and operational safeguards.
+
+## Agent skills
+
+### Issue tracker
+
+Issues are tracked in GitHub Issues for this repository. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Use the default triage labels: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, and `wontfix`. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Treat this repo as single-context: use a root `CONTEXT.md` and root `docs/adr/` when present. See `docs/agents/domain.md`.
