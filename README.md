@@ -9,9 +9,11 @@ Claude Code but for deep learning and thinking. Still a VERY EARLY WIP. Currentl
 
 2. Rework chat history handling to tree model — We should move from the current raw session-based session handling to a tree format: All chats should be stored as a single giant tree. When chats need to be sent to the api, we should walk up from the current node to the root to fetch the full history. (We may need to implement a node-merging function here to reduce traversals). This is also in preparation for step 4.
 
-4. Move away from the thread model and instead adopt an infinite chat + bookmakrs format — We should have a single, unified chat with a bookmarking system so users can go back to sections they saved. This should allow for much better continuous context flow.P
+3. Move away from the thread model and instead adopt an infinite chat + bookmakrs format — We should have a single, unified chat with a bookmarking system so users can go back to sections they saved. This should allow for much better continuous context flow.
 
-3. Modularize frontend — I've decided that we shouldn't have fixed sidebars, but rather a fully modular interface. We should have presets, but th euser hsould be able to configure their interface at will.
+4. Modularize frontend — I've decided that we shouldn't have fixed sidebars, but rather a fully modular interface. We should have presets, but th euser hsould be able to configure their interface at will.
+
+5. (Potentially) Make the cool zoom-out graph view of chat. This should help users naviigate long chat histories very quickly.
 
 
 
