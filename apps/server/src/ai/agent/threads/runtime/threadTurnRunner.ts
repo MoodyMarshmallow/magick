@@ -216,7 +216,6 @@ export class ThreadTurnRunner {
   readonly #executeToolBatch = (
     thread: ThreadRecord,
     runtime: ProviderSessionRuntime,
-    turnId: string,
     toolCalls: readonly PendingToolCallEvent[],
     readFilesForTurn: Set<string>,
   ): Effect.Effect<void, import("../../runtime/errors").BackendError> =>
@@ -329,7 +328,7 @@ export class ThreadTurnRunner {
           tools: this.#listProviderTools(),
         });
 
-        yield* this.#drainProviderStream(
+        yield* this.#runProviderStream(
           thread,
           runtime,
           batchTurnId,
@@ -341,7 +340,6 @@ export class ThreadTurnRunner {
 
   readonly #drainProviderStream = (
     thread: ThreadRecord,
-    runtime: ProviderSessionRuntime,
     turnId: string,
     stream: Stream.Stream<
       ProviderEvent,
@@ -356,9 +354,8 @@ export class ThreadTurnRunner {
       function* (this: ThreadTurnRunner) {
         const pendingToolCalls: PendingToolCallEvent[] = [];
 
-        const streamOutcome = yield* Stream.runForEach(
-          stream,
-          (providerEvent) =>
+        const drainResult = yield* Effect.either(
+          Stream.runForEach(stream, (providerEvent) =>
             providerEvent.type === "tool.call.requested"
               ? this.#recordToolCallRequest(thread, providerEvent).pipe(
                   Effect.tap(() =>
@@ -368,38 +365,36 @@ export class ThreadTurnRunner {
                   ),
                 )
               : this.#applyNonToolProviderEvent(thread, providerEvent),
-        ).pipe(
-          Effect.catchAll((error) => {
-            if (error instanceof ProviderStreamAbortError) {
-              return Effect.succeed({
-                kind: "suppressed",
-              } satisfies ProviderStreamDrainOutcome);
-            }
-
-            return this.#eventPersistence
-              .persistAndProject(thread.id, [
-                {
-                  eventId: this.#idGenerator.next("event"),
-                  threadId: thread.id,
-                  providerSessionId: thread.providerSessionId,
-                  occurredAt: this.#clock.now(),
-                  type: "turn.failed",
-                  payload: {
-                    turnId,
-                    error: backendErrorMessage(error),
-                  },
-                },
-              ])
-              .pipe(
-                Effect.as({
-                  kind: "suppressed",
-                } satisfies ProviderStreamDrainOutcome),
-              );
-          }),
+          ),
         );
 
-        if (streamOutcome) {
-          return streamOutcome;
+        if (Either.isLeft(drainResult)) {
+          const error = drainResult.left;
+          if (error instanceof ProviderStreamAbortError) {
+            return {
+              kind: "suppressed",
+            } satisfies ProviderStreamDrainOutcome;
+          }
+
+          yield* this.#eventPersistence
+            .persistAndProject(thread.id, [
+              {
+                eventId: this.#idGenerator.next("event"),
+                threadId: thread.id,
+                providerSessionId: thread.providerSessionId,
+                occurredAt: this.#clock.now(),
+                type: "turn.failed",
+                payload: {
+                  turnId,
+                  error: backendErrorMessage(error),
+                },
+              },
+            ])
+            .pipe(Effect.asVoid);
+
+          return {
+            kind: "suppressed",
+          } satisfies ProviderStreamDrainOutcome;
         }
 
         return {
@@ -412,7 +407,6 @@ export class ThreadTurnRunner {
   readonly #continueAfterStream = (
     thread: ThreadRecord,
     runtime: ProviderSessionRuntime,
-    turnId: string,
     outcome: ProviderStreamDrainOutcome,
     readFilesForTurn = new Set<string>(),
   ): Effect.Effect<void, import("../../runtime/errors").BackendError> =>
@@ -428,10 +422,65 @@ export class ThreadTurnRunner {
         yield* this.#executeToolBatch(
           thread,
           runtime,
-          turnId,
           outcome.pendingToolCalls,
           readFilesForTurn,
         );
+      }.bind(this),
+    );
+
+  readonly #failStaleActiveTurn = (
+    thread: ThreadRecord,
+    turnId: string,
+  ): Effect.Effect<
+    ThreadViewModel,
+    import("../../runtime/errors").BackendError
+  > =>
+    this.#eventPersistence
+      .persistAndProject(thread.id, [
+        {
+          eventId: this.#idGenerator.next("event"),
+          threadId: thread.id,
+          providerSessionId: thread.providerSessionId,
+          occurredAt: this.#clock.now(),
+          type: "turn.failed",
+          payload: {
+            turnId,
+            error:
+              "Turn runtime was lost before completion. Start a new turn to continue.",
+          },
+        },
+      ])
+      .pipe(Effect.map((result) => result.thread));
+
+  readonly #reconcileActiveTurnState = (
+    thread: ThreadRecord,
+    snapshot: ThreadViewModel,
+  ): Effect.Effect<
+    {
+      readonly snapshot: ThreadViewModel;
+      readonly activeTurn:
+        | {
+            readonly turnId: string;
+            readonly sessionId: string;
+          }
+        | undefined;
+    },
+    import("../../runtime/errors").BackendError
+  > =>
+    Effect.gen(
+      function* (this: ThreadTurnRunner) {
+        const activeTurn = this.#runtimeState.getActiveTurn(thread.id);
+        if (!snapshot.activeTurnId || activeTurn) {
+          return { snapshot, activeTurn };
+        }
+
+        return {
+          snapshot: yield* this.#failStaleActiveTurn(
+            thread,
+            snapshot.activeTurnId,
+          ),
+          activeTurn: undefined,
+        };
       }.bind(this),
     );
 
@@ -449,7 +498,6 @@ export class ThreadTurnRunner {
       function* (this: ThreadTurnRunner) {
         const drainOutcome = yield* this.#drainProviderStream(
           thread,
-          runtime,
           turnId,
           stream,
           readFilesForTurn,
@@ -458,7 +506,6 @@ export class ThreadTurnRunner {
         yield* this.#continueAfterStream(
           thread,
           runtime,
-          turnId,
           drainOutcome,
           readFilesForTurn,
         );
@@ -470,9 +517,14 @@ export class ThreadTurnRunner {
       function* (this: ThreadTurnRunner) {
         const thread = yield* this.#crudService.requireThread(threadId);
         const snapshot = yield* this.#crudService.openThreadEffect(threadId);
+        const reconciled = yield* this.#reconcileActiveTurnState(
+          thread,
+          snapshot,
+        );
 
-        const activeTurn = this.#runtimeState.getActiveTurn(threadId);
-        if (snapshot.activeTurnId || activeTurn) {
+        const activeTurn = reconciled.activeTurn;
+        const currentSnapshot = reconciled.snapshot;
+        if (currentSnapshot.activeTurnId || activeTurn) {
           return yield* Effect.fail(
             new InvalidStateError({
               code: "turn_already_running",
@@ -490,7 +542,7 @@ export class ThreadTurnRunner {
           this.#historyBuilder.buildConversationHistory(threadId);
         const shouldAutoName = this.#autoTitleService.shouldAutoNameThread({
           thread,
-          snapshot,
+          snapshot: currentSnapshot,
         });
 
         yield* this.#eventPersistence.persistAndProject(threadId, [
@@ -513,7 +565,7 @@ export class ThreadTurnRunner {
             type: "turn.started",
             payload: {
               turnId,
-              parentTurnId: snapshot.activeTurnId,
+              parentTurnId: currentSnapshot.activeTurnId,
             },
           },
         ]);
@@ -523,25 +575,30 @@ export class ThreadTurnRunner {
           sessionId: runtime.recordId,
         });
 
-        if (shouldAutoName) {
-          yield* this.#autoTitleService.autoNameThreadFromFirstMessage({
-            thread,
-            content,
-          });
-        }
+        yield* Effect.gen(
+          function* (this: ThreadTurnRunner) {
+            if (shouldAutoName) {
+              yield* this.#autoTitleService.autoNameThreadFromFirstMessage({
+                thread,
+                content,
+              });
+            }
 
-        const stream = yield* runtime.session.startTurn({
-          threadId,
-          turnId,
-          messageId: assistantMessageId,
-          userMessage: content,
-          instructions: DEFAULT_ASSISTANT_INSTRUCTIONS,
-          contextMessages: this.#historyBuilder.buildContextMessages(snapshot),
-          historyItems,
-          tools: this.#listProviderTools(),
-        });
+            const stream = yield* runtime.session.startTurn({
+              threadId,
+              turnId,
+              messageId: assistantMessageId,
+              userMessage: content,
+              instructions: DEFAULT_ASSISTANT_INSTRUCTIONS,
+              contextMessages:
+                this.#historyBuilder.buildContextMessages(currentSnapshot),
+              historyItems,
+              tools: this.#listProviderTools(),
+            });
 
-        yield* this.#runProviderStream(thread, runtime, turnId, stream).pipe(
+            yield* this.#runProviderStream(thread, runtime, turnId, stream);
+          }.bind(this),
+        ).pipe(
           Effect.catchAll((error) =>
             error instanceof ProviderStreamAbortError
               ? Effect.void
@@ -573,9 +630,18 @@ export class ThreadTurnRunner {
   readonly stopTurn = (threadId: string) =>
     Effect.gen(
       function* (this: ThreadTurnRunner) {
+        const thread = yield* this.#crudService.requireThread(threadId);
         const activeTurn = this.#runtimeState.getActiveTurn(threadId);
         if (!activeTurn) {
-          return yield* this.#crudService.openThreadEffect(threadId);
+          const snapshot = yield* this.#crudService.openThreadEffect(threadId);
+          if (!snapshot.activeTurnId) {
+            return snapshot;
+          }
+
+          return yield* this.#failStaleActiveTurn(
+            thread,
+            snapshot.activeTurnId,
+          );
         }
 
         const runtime = this.#runtimeState.getSessionRuntime(

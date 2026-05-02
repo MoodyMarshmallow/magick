@@ -663,4 +663,70 @@ describe("WebSocketCommandServer", () => {
 
     await closeServer(server);
   });
+
+  it("subscribes retryTurn callers so they can receive follow-up thread events", async () => {
+    const services = makeServices();
+    const server = createServer();
+    await listen(server);
+    const connections = new ConnectionRegistry();
+    const received: unknown[] = [];
+    connections.register({
+      id: "conn_retry_subscribed",
+      send: async (message) => {
+        received.push(message);
+      },
+    });
+    const wsServer = new WebSocketCommandServer({
+      httpServer: server,
+      providerAuth: services.providerAuth,
+      providerRegistry: services.providerRegistry,
+      replayService: services.replayService,
+      threadOrchestrator: services.threadOrchestrator,
+      connections,
+    });
+
+    const thread = await services.threadOrchestrator.createThread({
+      workspaceId: "workspace_1",
+      providerKey: services.adapter.key,
+    });
+    await Effect.runPromise(
+      services.threadOrchestrator.sendMessage(thread.threadId, "Hello"),
+    );
+
+    const response = await wsServer.handleCommand(
+      {
+        requestId: "req_retry_subscribed",
+        command: {
+          type: "thread.retryTurn",
+          payload: { threadId: thread.threadId },
+        },
+      },
+      "conn_retry_subscribed",
+    );
+
+    expect(response).toMatchObject({
+      requestId: "req_retry_subscribed",
+      result: {
+        ok: true,
+        data: {
+          kind: "accepted",
+          threadId: thread.threadId,
+        },
+      },
+    });
+
+    await connections.publishToThread(thread.threadId, {
+      channel: "transport.connectionState",
+      state: "connected",
+      detail: "after retry",
+    });
+
+    expect(received).toContainEqual({
+      channel: "transport.connectionState",
+      state: "connected",
+      detail: "after retry",
+    });
+
+    await closeServer(server);
+  });
 });

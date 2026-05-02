@@ -25,6 +25,6 @@ export class WebContentService {
           .trim()
       : body.trim();
 
-    return { url, content };
+    return { url: response.url || url, content };
   }
 }

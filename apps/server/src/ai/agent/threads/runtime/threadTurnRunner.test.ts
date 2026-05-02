@@ -419,6 +419,68 @@ describe("ThreadTurnRunner", () => {
       failingContext.runtimeState.getActiveTurn(failingThread.threadId),
     ).toBeUndefined();
   });
+
+  it("clears the active turn and marks the thread failed when startTurn fails before streaming begins", async () => {
+    const failingProvider = {
+      key: "start-turn-failure",
+      listCapabilities: () => ({
+        supportsNativeResume: false,
+        supportsInterrupt: true,
+        supportsAttachments: false,
+        supportsToolCalls: false,
+        supportsApprovals: false,
+        supportsServerSideSessions: false,
+      }),
+      getResumeStrategy: () => "rebuild" as const,
+      generateThreadTitle: () => Effect.succeed(null),
+      createSession: ({ sessionId }: { readonly sessionId: string }) =>
+        Effect.succeed({
+          sessionId,
+          providerSessionRef: null,
+          providerThreadRef: null,
+          startTurn: () =>
+            Effect.fail(
+              new ProviderFailureError({
+                providerKey: "start-turn-failure",
+                code: "start_failed",
+                detail: "provider refused to start turn",
+                retryable: false,
+              }),
+            ),
+          interruptTurn: () => Effect.void,
+          submitToolResults: () => Effect.succeed(Stream.empty),
+          dispose: () => Effect.void,
+        }),
+      resumeSession: ({ sessionId }: { readonly sessionId: string }) =>
+        Effect.succeed({
+          sessionId,
+          providerSessionRef: null,
+          providerThreadRef: null,
+          startTurn: () => Effect.succeed(Stream.empty),
+          interruptTurn: () => Effect.void,
+          submitToolResults: () => Effect.succeed(Stream.empty),
+          dispose: () => Effect.void,
+        }),
+    };
+
+    const context = createThreadServicesContext({
+      adapters: [failingProvider],
+    });
+    const thread = await run(
+      context.crudService.createThreadEffect({
+        workspaceId: "workspace_1",
+        providerKey: failingProvider.key,
+      }),
+    );
+
+    const failed = await run(
+      context.turnRunner.sendMessage(thread.threadId, "Start the turn"),
+    );
+
+    expect(failed.runtimeState).toBe("failed");
+    expect(failed.lastError).toBe("provider refused to start turn");
+    expect(context.runtimeState.getActiveTurn(thread.threadId)).toBeUndefined();
+  });
   it("does not execute pending tool calls after the provider stream fails", async () => {
     const submitToolResults = vi.fn(() => Effect.succeed(Stream.empty));
     const provider = {
@@ -528,6 +590,49 @@ describe("ThreadTurnRunner", () => {
         id: "missing_runtime",
       });
     }
+  });
+
+  it("fails stale persisted active turns so the thread can recover after runtime state is lost", async () => {
+    const adapter = new FakeProviderAdapter({ mode: "stateful" });
+    const context = createThreadServicesContext({ adapters: [adapter] });
+    const thread = await run(
+      context.crudService.createThreadEffect({
+        workspaceId: "workspace_1",
+        providerKey: adapter.key,
+      }),
+    );
+
+    await run(
+      context.eventPersistence.persistAndProject(thread.threadId, [
+        {
+          eventId: context.idGenerator.next("event"),
+          threadId: thread.threadId,
+          providerSessionId: thread.providerSessionId,
+          occurredAt: context.clock.now(),
+          type: "turn.started",
+          payload: {
+            turnId: "turn_stale",
+            parentTurnId: null,
+          },
+        },
+      ]),
+    );
+
+    const stopped = await run(context.turnRunner.stopTurn(thread.threadId));
+    expect(stopped.runtimeState).toBe("failed");
+    expect(stopped.activeTurnId).toBeNull();
+    expect(stopped.lastError).toBe(
+      "Turn runtime was lost before completion. Start a new turn to continue.",
+    );
+
+    const recovered = await run(
+      context.turnRunner.sendMessage(thread.threadId, "Recover after restart"),
+    );
+    expect(recovered.runtimeState).toBe("idle");
+    expect(recovered.messages.at(-1)).toMatchObject({
+      role: "assistant",
+      status: "complete",
+    });
   });
 
   it("fails the turn instead of continuing when a provider requests a tool after assistant completion reason stop", async () => {

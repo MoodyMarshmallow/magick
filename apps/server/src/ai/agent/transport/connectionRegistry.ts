@@ -28,12 +28,19 @@ export class ConnectionRegistry {
 
   unregister(connectionId: string): void {
     this.#connections.delete(connectionId);
-    for (const subscribers of this.#threadSubscriptions.values()) {
+    for (const [threadId, subscribers] of this.#threadSubscriptions.entries()) {
       subscribers.delete(connectionId);
+      if (subscribers.size === 0) {
+        this.#threadSubscriptions.delete(threadId);
+      }
     }
   }
 
   subscribeThread(connectionId: string, threadId: string): void {
+    if (!this.#connections.has(connectionId)) {
+      return;
+    }
+
     const subscribers =
       this.#threadSubscriptions.get(threadId) ?? new Set<string>();
     subscribers.add(connectionId);

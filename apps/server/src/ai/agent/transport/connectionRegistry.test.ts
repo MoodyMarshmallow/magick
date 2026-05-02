@@ -57,6 +57,28 @@ describe("ConnectionRegistry", () => {
     expect(received).toHaveLength(0);
   });
 
+  it("ignores subscriptions for unknown connections", async () => {
+    const registry = new ConnectionRegistry();
+    const received: unknown[] = [];
+
+    registry.register({
+      id: "conn_a",
+      send: async (message) => {
+        received.push(message);
+      },
+    });
+
+    registry.subscribeThread("missing_conn", "thread_1");
+
+    await registry.publishToThread("thread_1", {
+      channel: "transport.connectionState",
+      state: "connected",
+      detail: "ok",
+    });
+
+    expect(received).toHaveLength(0);
+  });
+
   it("broadcasts connection messages to all registered connections", async () => {
     const registry = new ConnectionRegistry();
     const receivedA: unknown[] = [];

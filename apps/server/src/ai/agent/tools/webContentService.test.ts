@@ -36,4 +36,28 @@ describe("WebContentService", () => {
       "Fetch failed with status 503.",
     );
   });
+
+  it("returns the final response URL after redirects", async () => {
+    const fetchMock = vi.fn(async () => {
+      const response = new Response("redirected", {
+        status: 200,
+        headers: { "content-type": "text/plain" },
+      });
+      Object.defineProperty(response, "url", {
+        value: "https://example.com/final",
+      });
+      return response;
+    });
+    const redirectingService = new WebContentService(
+      fetchMock as unknown as typeof fetch,
+    );
+
+    await expect(
+      redirectingService.fetchUrl("https://example.com/start"),
+    ).resolves.toEqual({
+      url: "https://example.com/final",
+      content: "redirected",
+    });
+    expect(fetchMock).toHaveBeenCalledWith("https://example.com/start");
+  });
 });

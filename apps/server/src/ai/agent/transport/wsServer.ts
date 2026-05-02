@@ -405,6 +405,10 @@ export class WebSocketCommandServer {
           } satisfies CommandResponseEnvelope;
         }
         case "thread.retryTurn":
+          connections.subscribeThread(
+            connectionId,
+            envelope.command.payload.threadId,
+          );
           await runBackendEffect(
             this.#threadOrchestrator.retryTurn(
               envelope.command.payload.threadId,

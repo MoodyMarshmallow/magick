@@ -1,3 +1,5 @@
+import { Effect } from "effect";
+
 import type { ThreadRecord } from "@magick/contracts/chat";
 
 import type {
@@ -30,16 +32,6 @@ export class ProviderSessionRuntimeService {
   readonly getOrCreateSessionRuntime = (thread: ThreadRecord) =>
     Effect.gen(
       function* (this: ProviderSessionRuntimeService) {
-        const cached = this.#runtimeState.getSessionRuntime(
-          thread.providerSessionId,
-        );
-        if (cached) {
-          return cached;
-        }
-
-        const adapter = yield* fromSync(() =>
-          this.#providerRegistry.get(thread.providerKey),
-        );
         const sessionRecord = yield* fromSync(() =>
           this.#providerSessionRepository.get(thread.providerSessionId),
         );
@@ -51,6 +43,19 @@ export class ProviderSessionRuntimeService {
             }),
           );
         }
+
+        const cached = this.#runtimeState.getSessionRuntime(sessionRecord.id);
+        if (cached && sessionRecord.status === "active") {
+          return cached;
+        }
+
+        if (cached) {
+          this.#runtimeState.clearSessionRuntime(sessionRecord.id);
+        }
+
+        const adapter = yield* fromSync(() =>
+          this.#providerRegistry.get(thread.providerKey),
+        );
 
         const session = sessionRecord.providerSessionRef
           ? yield* adapter.resumeSession({
@@ -88,5 +93,3 @@ export class ProviderSessionRuntimeService {
       }.bind(this),
     );
 }
-
-import { Effect } from "effect";
