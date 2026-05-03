@@ -58,10 +58,13 @@ export const EditorSurface = forwardRef<
     }
 
     let isDisposed = false;
+    const editorMount = root.ownerDocument.createElement("div");
+    editorMount.className = "editor-surface__mount";
+    root.replaceChildren(editorMount);
 
     void createMilkdownEditor({
       markdown: initialMarkdownRef.current,
-      root,
+      root: editorMount,
       onFormatStateChange: (state) => {
         onFormatStateChangeRef.current(state);
       },
@@ -74,7 +77,9 @@ export const EditorSurface = forwardRef<
       },
     }).then((controller) => {
       if (isDisposed) {
-        void controller.destroy();
+        void controller.destroy().finally(() => {
+          editorMount.remove();
+        });
         return;
       }
 
@@ -91,8 +96,13 @@ export const EditorSurface = forwardRef<
       const controller = editorRef.current;
       editorRef.current = null;
       if (controller) {
-        void controller.destroy();
+        void controller.destroy().finally(() => {
+          editorMount.remove();
+        });
+        return;
       }
+
+      editorMount.remove();
     };
   }, []);
 
@@ -118,7 +128,11 @@ export const EditorSurface = forwardRef<
 
     if (
       event.target !== event.currentTarget &&
-      event.target !== rootRef.current
+      event.target !== rootRef.current &&
+      !(
+        event.target instanceof HTMLElement &&
+        event.target.classList.contains("editor-surface__mount")
+      )
     ) {
       return;
     }

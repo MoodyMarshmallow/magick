@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { act, fireEvent, render, waitFor } from "@testing-library/react";
-import { createRef } from "react";
+import { StrictMode, createRef } from "react";
 import { EditorSurface, type EditorSurfaceHandle } from "./EditorSurface";
 
 const { createMilkdownEditorMock, controller } = vi.hoisted(() => ({
@@ -11,7 +11,9 @@ const { createMilkdownEditorMock, controller } = vi.hoisted(() => ({
     replaceMarkdown: vi.fn(),
     runCommand: vi.fn(),
   },
-  createMilkdownEditorMock: vi.fn(async () => controller),
+  createMilkdownEditorMock: vi.fn(
+    async (_options: { readonly root: HTMLElement }) => controller,
+  ),
 }));
 
 vi.mock("../editor/milkdownEditor", () => ({
@@ -20,7 +22,8 @@ vi.mock("../editor/milkdownEditor", () => ({
 
 describe("EditorSurface", () => {
   beforeEach(() => {
-    createMilkdownEditorMock.mockClear();
+    createMilkdownEditorMock.mockReset();
+    createMilkdownEditorMock.mockImplementation(async (_options) => controller);
     controller.destroy.mockClear();
     controller.focusAtEnd.mockClear();
     controller.replaceMarkdown.mockClear();
@@ -160,6 +163,35 @@ describe("EditorSurface", () => {
 
     await waitFor(() => {
       expect(controller.replaceMarkdown).toHaveBeenCalledWith("second");
+    });
+  });
+
+  it("keeps only one visible editor mount across strict mode remounts", async () => {
+    createMilkdownEditorMock.mockImplementation(async ({ root }) => {
+      const proseMirror = root.ownerDocument.createElement("div");
+      proseMirror.className = "mock-prosemirror";
+      root.append(proseMirror);
+
+      return controller;
+    });
+
+    const { container } = render(
+      <StrictMode>
+        <EditorSurface
+          markdown="hello"
+          onFormatStateChange={() => undefined}
+          onMarkdownChange={() => undefined}
+          onSelectionChange={() => undefined}
+        />
+      </StrictMode>,
+    );
+
+    await waitFor(() => {
+      expect(createMilkdownEditorMock).toHaveBeenCalledTimes(2);
+    });
+
+    await waitFor(() => {
+      expect(container.querySelectorAll(".mock-prosemirror")).toHaveLength(1);
     });
   });
 });

@@ -192,4 +192,46 @@ describe("milkdownFormatState", () => {
       paragraph: false,
     });
   });
+
+  it("returns inactive formatting for transient editor views without a schema", () => {
+    const view = {
+      state: {
+        selection: {
+          $from: createResolvedPos([
+            { type: { name: "doc" } },
+            { isTextblock: true, type: { name: "paragraph" } },
+          ]),
+          empty: true,
+          from: 1,
+          to: 1,
+        },
+      },
+    } as unknown as Parameters<typeof getEditorFormatState>[0];
+
+    expect(getEditorFormatState(view)).toEqual({
+      blockquote: false,
+      bold: false,
+      bulletList: false,
+      code: false,
+      headingLevel: null,
+      italic: false,
+      orderedList: false,
+      paragraph: false,
+      strike: false,
+    });
+  });
+
+  it("returns no selection for transient editor views without a document", () => {
+    const view = {
+      state: {
+        selection: {
+          empty: false,
+          from: 1,
+          to: 2,
+        },
+      },
+    } as unknown as Parameters<typeof getEditorSelectionState>[0];
+
+    expect(getEditorSelectionState(view)).toBeNull();
+  });
 });

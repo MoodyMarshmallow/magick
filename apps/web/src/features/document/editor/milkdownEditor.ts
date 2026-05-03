@@ -52,7 +52,7 @@ export interface MilkdownEditorController {
 const syncViewState = (
   view: EditorView,
   callbacks: MilkdownEditorCallbacks,
-  selection: Selection = view.state.selection,
+  selection?: Selection,
 ) => {
   callbacks.onFormatStateChange(getEditorFormatState(view, selection));
   callbacks.onSelectionChange(getEditorSelectionState(view, selection));

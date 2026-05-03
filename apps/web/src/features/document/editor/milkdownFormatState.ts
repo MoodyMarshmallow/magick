@@ -9,6 +9,18 @@ import type {
 
 const headingLevels = [1, 2, 3, 4, 5, 6] as const;
 
+const inactiveEditorFormatState: EditorFormatState = {
+  blockquote: false,
+  bold: false,
+  bulletList: false,
+  code: false,
+  headingLevel: null,
+  italic: false,
+  orderedList: false,
+  paragraph: false,
+  strike: false,
+};
+
 const getAncestorNode = ($from: ResolvedPos, typeName: string) => {
   for (let depth = $from.depth; depth >= 0; depth -= 1) {
     const node = $from.node(depth);
@@ -38,15 +50,17 @@ const getTextBlock = ($from: ResolvedPos) => {
 const isMarkActive = (
   view: EditorView,
   markName: string,
-  selection: Selection = view.state.selection,
+  selection?: Selection,
 ): boolean => {
-  const markType = view.state.schema.marks[markName];
+  const state = view.state as EditorView["state"] | undefined;
+  const markType = state?.schema.marks[markName];
   if (!markType) {
     return false;
   }
 
-  const { storedMarks, doc } = view.state;
-  const { empty, from, to, $from } = selection;
+  const { storedMarks, doc } = state;
+  const activeSelection = selection ?? state.selection;
+  const { empty, from, to, $from } = activeSelection;
 
   if (empty) {
     const marks = storedMarks ?? $from.marks();
@@ -58,9 +72,15 @@ const isMarkActive = (
 
 export const getEditorFormatState = (
   view: EditorView,
-  selection: Selection = view.state.selection,
+  selection?: Selection,
 ): EditorFormatState => {
-  const { $from } = selection;
+  const state = view.state as EditorView["state"] | undefined;
+  const activeSelection = selection ?? state?.selection;
+  if (!state?.schema || !activeSelection?.$from) {
+    return inactiveEditorFormatState;
+  }
+
+  const { $from } = activeSelection;
   const textBlock = getTextBlock($from);
   const headingNode = getAncestorNode($from, "heading");
   const headingLevel = headingNode?.attrs.level;
@@ -73,22 +93,28 @@ export const getEditorFormatState = (
     bulletList: hasAncestorNode($from, "bullet_list"),
     orderedList: hasAncestorNode($from, "ordered_list"),
     blockquote: hasAncestorNode($from, "blockquote"),
-    bold: isMarkActive(view, "strong", selection),
-    italic: isMarkActive(view, "emphasis", selection),
-    strike: isMarkActive(view, "strike_through", selection),
-    code: isMarkActive(view, "inlineCode", selection),
+    bold: isMarkActive(view, "strong", activeSelection),
+    italic: isMarkActive(view, "emphasis", activeSelection),
+    strike: isMarkActive(view, "strike_through", activeSelection),
+    code: isMarkActive(view, "inlineCode", activeSelection),
   };
 };
 
 export const getEditorSelectionState = (
   view: EditorView,
-  selection: Selection = view.state.selection,
+  selection?: Selection,
 ): EditorSelectionState | null => {
-  const { empty, from, to } = selection;
+  const state = view.state as EditorView["state"] | undefined;
+  const activeSelection = selection ?? state?.selection;
+  if (!state?.doc || !activeSelection) {
+    return null;
+  }
+
+  const { empty, from, to } = activeSelection;
   if (empty) {
     return null;
   }
 
-  const text = view.state.doc.textBetween(from, to, " ").trim();
+  const text = state.doc.textBetween(from, to, " ").trim();
   return text ? { text } : null;
 };

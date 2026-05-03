@@ -1476,8 +1476,14 @@ button:disabled {
   height: 100%;
 }
 
+.editor-surface__mount {
+  min-height: 100%;
+  height: 100%;
+}
+
 .is-workspace-dragging .editor-surface,
 .is-workspace-dragging .editor-surface__root,
+.is-workspace-dragging .editor-surface__mount,
 .is-workspace-dragging .editor-surface__prose {
   pointer-events: none;
 }
