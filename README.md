@@ -5,9 +5,9 @@
 Claude Code but for deep learning and thinking. Still a VERY EARLY WIP. Currently only runs via Codex.
 
 ## Todo
-1. Clean up and harden the backend — Backend code still contains a lot of shallow modules. Need to refactor it into a more maintainable state.
+1. Clean up and harden the backend — Backend code still contains a lot of shallow modules. Need to refactor it into a more maintainable state. (DONE)
 
-2. Rework chat history handling to tree model — We should move from the current raw session-based session handling to a tree format: All chats should be stored as a single giant tree. When chats need to be sent to the api, we should walk up from the current node to the root to fetch the full history. (We may need to implement a node-merging function here to reduce traversals). This is also in preparation for step 4.
+2. Rework chat history handling to tree model — We should move from the current raw session-based session handling to a tree format: All chats should be stored as a single giant tree. When chats need to be sent to the api, we should walk up from the current node to the root to fetch the full history. (We may need to implement a node-merging function here to reduce traversals). This is also in preparation for step 4. (DONE)
 
 3. Move away from the thread model and instead adopt an infinite chat + bookmakrs format — We should have a single, unified chat with a bookmarking system so users can go back to sections they saved. This should allow for much better continuous context flow.
 
